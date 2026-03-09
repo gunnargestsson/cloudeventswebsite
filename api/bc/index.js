@@ -47,12 +47,38 @@ module.exports = async function (context, req) {
     return;
   }
 
+  // Cloud Events mode: POST with ?companyId=... — proxy handles both steps (POST task + GET result)
+  const companyId = req.query.companyId;
+  if (companyId) {
+    if (req.method !== "POST") {
+      context.res = { status: 405, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Cloud Events requires POST." }) };
+      return;
+    }
+    try {
+      const accessToken = await getToken(tenantId, clientId, clientSecret);
+      const authHeader = `Bearer ${accessToken}`;
+      const tasksUrl = `https://api.businesscentral.dynamics.com/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/tasks/`;
+      const task = await bcRequest("POST", tasksUrl, authHeader, req.body);
+      if (!task || !task.data) {
+        // No follow-up URL (inbound-only event) — return task response directly
+        context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(task) };
+        return;
+      }
+      const result = await bcRequest("GET", task.data, authHeader, null);
+      context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) };
+    } catch (e) {
+      context.res = { status: 502, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: e.message }) };
+    }
+    return;
+  }
+
+  // Legacy mode: path-based, used for company list (pre-company-selection, v2.0 API)
   const bcPath = req.query.path;
   if (!bcPath) {
     context.res = {
       status: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Missing 'path' query parameter." }),
+      body: JSON.stringify({ error: "Missing 'path' or 'companyId' query parameter." }),
     };
     return;
   }

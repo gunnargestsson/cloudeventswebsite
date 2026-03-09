@@ -303,6 +303,13 @@
   .config-secret-set { color: var(--green); }
   .config-secret-missing { color: var(--red); }
   .config-divider { width: 1px; height: 14px; background: var(--border); }
+
+  /* PAGINATION */
+  .pagination { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 0.76rem; color: var(--text-dim); justify-content: flex-end; flex-wrap: wrap; }
+  .page-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text-mid); padding: 5px 14px; border-radius: var(--radius-sm); cursor: pointer; font-family: 'DM Mono', monospace; font-size: 0.74rem; transition: all 0.15s; }
+  .page-btn:hover:not([disabled]) { border-color: var(--accent); color: var(--accent); }
+  .page-btn[disabled] { opacity: 0.3; cursor: not-allowed; }
+  .page-info { font-family: 'DM Mono', monospace; }
 </style>
 </head>
 <body>
@@ -360,6 +367,7 @@
       <div id="customer-grid" class="customer-grid">
         <div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading customers...</span></div>
       </div>
+      <div id="customer-pagination"></div>
     </div>
 
     <!-- CUSTOMER DETAIL -->
@@ -447,6 +455,7 @@ let selectedCustomer = null;
 let orderQty = {};
 
 // ---- API ----
+// bcGet: used only for company list (standard v2.0 API, pre-company-selection)
 async function bcGet(path) {
   const r = await fetch('/api/bc?path=' + encodeURIComponent(path));
   if (!r.ok) {
@@ -456,11 +465,12 @@ async function bcGet(path) {
   return r.json();
 }
 
-async function bcPost(path, data) {
-  const r = await fetch('/api/bc?path=' + encodeURIComponent(path), {
+// cePost: Cloud Events two-step — proxy POSTs to /tasks and follows the data URL
+async function cePost(companyId, event) {
+  const r = await fetch('/api/bc?companyId=' + encodeURIComponent(companyId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
+    body: JSON.stringify(event)
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
@@ -470,9 +480,50 @@ async function bcPost(path, data) {
 }
 
 // ---- UTILS ----
+function pageSize() { return window.innerWidth < 640 ? 25 : window.innerWidth < 1024 ? 50 : 100; }
 function fmt(n) { return (parseFloat(n)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-function fmtDate(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
+function fmtDate(d) { if (!d || d === '0001-01-01') return '—'; return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
 function initials(s) { if (!s) return '?'; return s.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase(); }
+
+// ---- MAPPERS ---- (normalize Cloud Events { id, primaryKey, fields } records to flat objects)
+function mapCustomer(rec) {
+  const f = rec.fields || {};
+  return {
+    id: rec.id,
+    number: (rec.primaryKey || {}).No_ || '',
+    displayName: f.Name || '',
+    city: f.City || '',
+    country: f.Country_RegionCode || '',
+    email: f.EMail || '',
+    blocked: (f.Blocked === ' ' || !f.Blocked) ? '' : f.Blocked,
+    balance: parseFloat(f.BalanceLCY) || 0
+  };
+}
+
+function mapItem(rec) {
+  const f = rec.fields || {};
+  return {
+    id: rec.id,
+    number: (rec.primaryKey || {}).No_ || '',
+    displayName: f.Description || (rec.primaryKey || {}).No_ || '',
+    unitPrice: parseFloat(f.UnitPrice) || 0,
+    type: f.Type || 'Inventory'
+  };
+}
+
+// ---- PAGINATION ----
+function paginate(containerId, total, skip, take, fnName) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (total <= take) { el.innerHTML = ''; return; }
+  const page = Math.floor(skip / take);
+  const totalPages = Math.ceil(total / take);
+  el.innerHTML = `<div class="pagination">
+    <span class="page-info">${total.toLocaleString()} records — Page ${page + 1} of ${totalPages}</span>
+    <button class="page-btn" onclick="${fnName}(${Math.max(0, skip - take)})" ${page === 0 ? 'disabled' : ''}>← Prev</button>
+    <button class="page-btn" onclick="${fnName}(${skip + take})" ${page >= totalPages - 1 ? 'disabled' : ''}>Next →</button>
+  </div>`;
+}
 
 function setStatus(state) {
   const dot = document.getElementById('status-dot');
@@ -541,13 +592,22 @@ async function selectCompany(id) {
 }
 
 // ---- CUSTOMERS ----
-async function loadCustomers() {
+async function loadCustomers(skip = 0) {
+  const take = pageSize();
   document.getElementById('customer-grid').innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading customers...</span></div>';
+  document.getElementById('customer-pagination').innerHTML = '';
   try {
-    const d = await bcGet(`companies(${selectedCompany.id})/customers?$top=200&$orderby=displayName`);
-    customers = d.value || [];
-    document.getElementById('customer-count').textContent = customers.length + ' records';
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Data.Records.Get',
+      source: 'BC Portal',
+      data: JSON.stringify({ tableName: 'Customer', skip, take })
+    });
+    customers = (res.result || []).map(mapCustomer);
+    const total = res.noOfRecords || 0;
+    document.getElementById('customer-count').textContent = total.toLocaleString() + ' customers';
     renderCustomers(customers);
+    paginate('customer-pagination', total, skip, take, 'loadCustomers');
     toast('Loaded ' + customers.length + ' customers', 'success');
   } catch(e) {
     document.getElementById('customer-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
@@ -567,8 +627,8 @@ function renderCustomers(list) {
       <div class="cust-no"># ${c.number||'—'}</div>
       <div class="cust-meta">
         ${c.city?`<span class="cust-tag">📍 ${c.city}</span>`:''}
-        ${(c.blocked===''||c.blocked===null||c.blocked===undefined)?'<span class="cust-tag green">● Active</span>':'<span class="cust-tag amber">● Blocked</span>'}
-        ${c.balance!==undefined?`<span class="cust-tag">${fmt(c.balance)}</span>`:''}
+        ${c.blocked===''?'<span class="cust-tag green">● Active</span>':'<span class="cust-tag amber">● Blocked</span>'}
+        ${c.balance?`<span class="cust-tag">${fmt(c.balance)}</span>`:''}
       </div>
     </div>`).join('');
 }
@@ -608,42 +668,74 @@ function switchTab(tab) {
 }
 
 // ---- LEDGER ----
-async function loadLedger() {
+async function loadLedger(skip = 0) {
+  const take = pageSize();
   const el = document.getElementById('ledger-content');
   el.innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading ledger entries...</span></div>';
   try {
-    const d = await bcGet(`companies(${selectedCompany.id})/customers(${selectedCustomer.id})/customerLedgerEntries?$top=50&$orderby=postingDate desc`);
-    const rows = d.value||[];
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Data.Records.Get',
+      source: 'BC Portal',
+      data: JSON.stringify({
+        tableName: 'Customer Ledger Entry',
+        tableView: `WHERE(Customer No.=CONST(${selectedCustomer.number}))`,
+        skip,
+        take
+      })
+    });
+    const rows = res.result || [];
+    const total = res.noOfRecords || 0;
     if (!rows.length) { el.innerHTML='<div class="empty-state"><div class="empty-icon">📒</div><p>No ledger entries</p></div>'; return; }
+    rows.sort((a,b) => parseInt((b.primaryKey||{}).EntryNo_||0) - parseInt((a.primaryKey||{}).EntryNo_||0));
     el.innerHTML = `<div class="table-wrap"><table>
       <thead><tr><th>Entry No.</th><th>Date</th><th>Doc Type</th><th>Doc No.</th><th>Description</th><th>Amount</th><th>Remaining</th><th>Status</th></tr></thead>
-      <tbody>${rows.map(e=>`<tr>
-        <td>${e.entryNumber||'—'}</td>
-        <td>${fmtDate(e.postingDate)}</td>
-        <td>${e.documentType||'—'}</td>
-        <td><strong>${e.documentNumber||'—'}</strong></td>
-        <td>${e.description||'—'}</td>
-        <td class="${e.amount>=0?'amount-pos':'amount-neg'}">${fmt(e.amount)}</td>
-        <td style="font-family:'DM Mono',monospace">${fmt(e.remainingAmount)}</td>
-        <td>${e.open?'<span class="chip open">● Open</span>':'<span class="chip closed">✓ Closed</span>'}</td>
-      </tr>`).join('')}</tbody>
-    </table></div>`;
+      <tbody>${rows.map(rec => {
+        const f = rec.fields || {}; const pk = rec.primaryKey || {};
+        return `<tr>
+          <td>${pk.EntryNo_||'—'}</td>
+          <td>${fmtDate(f.PostingDate)}</td>
+          <td>${f.DocumentType||'—'}</td>
+          <td><strong>${f.DocumentNo_||'—'}</strong></td>
+          <td>${f.Description||'—'}</td>
+          <td class="${parseFloat(f.Amount||0)>=0?'amount-pos':'amount-neg'}">${fmt(f.Amount)}</td>
+          <td style="font-family:'DM Mono',monospace">${fmt(f.RemainingAmount)}</td>
+          <td>${f.Open?'<span class="chip open">● Open</span>':'<span class="chip closed">✓ Closed</span>'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+    <div id="ledger-pagination"></div>`;
+    paginate('ledger-pagination', total, skip, take, 'loadLedger');
   } catch(e) { el.innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`; toast(e.message,'error'); }
 }
 
 // ---- DOCUMENTS ----
 async function loadDocuments() {
+  const take = pageSize();
   const el = document.getElementById('documents-content');
   el.innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading documents...</span></div>';
   try {
-    const [inv, ord] = await Promise.all([
-      bcGet(`companies(${selectedCompany.id})/salesInvoices?$filter=customerNumber eq '${selectedCustomer.number}'&$top=30&$orderby=invoiceDate desc`).catch(()=>({value:[]})),
-      bcGet(`companies(${selectedCompany.id})/salesOrders?$filter=customerNumber eq '${selectedCustomer.number}'&$top=30&$orderby=orderDate desc`).catch(()=>({value:[]})),
+    const [ordRes, invRes] = await Promise.all([
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+        data: JSON.stringify({ tableName: 'Sales Header', tableView: `WHERE(Document Type=CONST(Order),Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
+      }).catch(() => ({ result: [] })),
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+        data: JSON.stringify({ tableName: 'Sales Invoice Header', tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
+      }).catch(() => ({ result: [] }))
     ]);
-    const docs = [
-      ...(inv.value||[]).map(d=>({...d,_t:'Invoice',_date:d.invoiceDate,_total:d.totalAmountIncludingTax,_status:d.status})),
-      ...(ord.value||[]).map(d=>({...d,_t:'Order',_date:d.orderDate,_total:d.totalAmountIncludingTax,_status:d.status})),
-    ].sort((a,b)=>new Date(b._date)-new Date(a._date));
+    const orders = (ordRes.result || []).map(rec => ({
+      _t: 'Order', number: (rec.primaryKey||{}).No_,
+      _date: (rec.fields||{}).OrderDate, _total: (rec.fields||{}).AmountIncludingVAT,
+      _status: (rec.fields||{}).Status || 'Open', dueDate: (rec.fields||{}).RequestedDeliveryDate
+    }));
+    const invoices = (invRes.result || []).map(rec => ({
+      _t: 'Invoice', number: (rec.primaryKey||{}).No_,
+      _date: (rec.fields||{}).PostingDate, _total: (rec.fields||{}).AmountIncludingVAT,
+      _status: 'Paid', dueDate: (rec.fields||{}).DueDate
+    }));
+    const docs = [...orders, ...invoices].sort((a,b) => new Date(b._date||0) - new Date(a._date||0));
     if (!docs.length) { el.innerHTML='<div class="empty-state"><div class="empty-icon">📄</div><p>No documents found</p></div>'; return; }
     el.innerHTML = `<div class="table-wrap"><table>
       <thead><tr><th>Type</th><th>Number</th><th>Date</th><th>Due Date</th><th>Total incl. VAT</th><th>Status</th></tr></thead>
@@ -651,7 +743,7 @@ async function loadDocuments() {
         <td>${d._t==='Invoice'?'🧾':'📦'} ${d._t}</td>
         <td><strong>${d.number||'—'}</strong></td>
         <td>${fmtDate(d._date)}</td>
-        <td>${fmtDate(d.dueDate||d.requestedDeliveryDate)}</td>
+        <td>${fmtDate(d.dueDate)}</td>
         <td class="amount-pos">${fmt(d._total)}</td>
         <td>${chipStatus(d._status)}</td>
       </tr>`).join('')}</tbody>
@@ -670,8 +762,13 @@ async function loadItems() {
   document.getElementById('items-list').innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading items...</span></div>';
   orderQty = {};
   try {
-    const d = await bcGet(`companies(${selectedCompany.id})/items?$top=200`);
-    items = d.value||[];
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Data.Records.Get',
+      source: 'BC Portal',
+      data: JSON.stringify({ tableName: 'Item', take: pageSize() * 2 })
+    });
+    items = (res.result || []).map(mapItem);
     renderItems(items);
   } catch(e) { document.getElementById('items-list').innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`; }
 }
@@ -731,20 +828,37 @@ async function submitOrder() {
   const btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.textContent = 'Creating...';
   try {
-    const header = {
-      customerNumber: selectedCustomer.number,
-      requestedDeliveryDate: document.getElementById('order-date').value || undefined,
-      externalDocumentNumber: document.getElementById('order-ext-doc').value || undefined,
-    };
-    const order = await bcPost(`companies(${selectedCompany.id})/salesOrders`, header);
+    // Generate a unique order number (BC will store it; number series must allow manual nos.)
+    const orderNo = 'WEB' + Date.now().toString().slice(-7);
+    const deliveryDate = document.getElementById('order-date').value;
+    const extDoc = document.getElementById('order-ext-doc').value;
+
+    // Step 1: Create Sales Header via Data.Records.Set
+    const headerFields = { SelltoCustomerNo_: selectedCustomer.number };
+    if (deliveryDate) headerFields.RequestedDeliveryDate = deliveryDate;
+    if (extDoc) headerFields.ExternalDocumentNo_ = extDoc;
+    const headerRes = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Data.Records.Set', source: 'BC Portal', subject: 'Sales Header',
+      data: JSON.stringify({ data: [{ primaryKey: { DocumentType: 'Order', No_: orderNo }, fields: headerFields }] })
+    });
+    if (headerRes.status !== 'Success') throw new Error(headerRes.error || 'Failed to create sales order');
+    const createdNo = (headerRes.result?.[0]?.primaryKey?.No_) || orderNo;
+
+    // Step 2: Create Sales Lines
+    let lineNo = 10000;
     for (const [itemId, qty] of lines) {
       const it = items.find(i=>i.id===itemId);
-      await bcPost(`companies(${selectedCompany.id})/salesOrders(${order.id})/salesOrderLines`, {
-        itemId, quantity: qty, unitPrice: it.unitPrice
+      if (!it) continue;
+      const lineRes = await cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Set', source: 'BC Portal', subject: 'Sales Line',
+        data: JSON.stringify({ data: [{ primaryKey: { DocumentType: 'Order', DocumentNo_: createdNo, LineNo_: lineNo }, fields: { Type: 'Item', No_: it.number, Quantity: String(qty), UnitPrice: String(it.unitPrice) } }] })
       });
+      if (lineRes.status !== 'Success') throw new Error(lineRes.error || `Failed to add line for ${it.displayName}`);
+      lineNo += 10000;
     }
+
     document.getElementById('order-form-content').style.display='none';
-    document.getElementById('order-success-msg').textContent=`Order #${order.number} created for ${selectedCustomer.displayName}.`;
+    document.getElementById('order-success-msg').textContent=`Order ${createdNo} created for ${selectedCustomer.displayName}.`;
     document.getElementById('order-success').classList.add('visible');
     toast('Sales order created!', 'success');
   } catch(e) {
