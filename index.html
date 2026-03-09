@@ -288,6 +288,21 @@
   #toast.show { transform: translateY(0); opacity: 1; }
 
   @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* ENV CONFIG PANEL */
+  .config-panel {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 18px;
+    margin-bottom: 22px; font-size: 0.72rem;
+  }
+  .config-row { display: flex; align-items: center; gap: 8px; }
+  .config-key { color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+  .config-val { font-family: 'DM Mono', monospace; color: var(--text-mid); }
+  .config-val.missing { color: var(--red); }
+  .config-secret-set { color: var(--green); }
+  .config-secret-missing { color: var(--red); }
+  .config-divider { width: 1px; height: 14px; background: var(--border); }
 </style>
 </head>
 <body>
@@ -312,6 +327,15 @@
       <div class="section-header">
         <div class="section-title"><small>Business Central / UAT</small>Select Company</div>
         <span class="badge" id="company-count">—</span>
+      </div>
+      <div id="config-panel" class="config-panel" style="display:none">
+        <div class="config-row"><span class="config-key">Tenant</span><span class="config-val" id="cfg-tenant">—</span></div>
+        <div class="config-divider"></div>
+        <div class="config-row"><span class="config-key">Client ID</span><span class="config-val" id="cfg-client-id">—</span></div>
+        <div class="config-divider"></div>
+        <div class="config-row"><span class="config-key">Client Secret</span><span id="cfg-secret">—</span></div>
+        <div class="config-divider"></div>
+        <div class="config-row"><span class="config-key">Environment</span><span class="config-val" id="cfg-env">—</span></div>
       </div>
       <div id="company-grid" class="company-grid">
         <div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Authenticating...</span></div>
@@ -756,8 +780,29 @@ function resetOrder() {
   renderItems(items); updateSummary();
 }
 
+// ---- CONFIG PANEL ----
+async function loadConfig() {
+  try {
+    const r = await fetch('/api/config');
+    if (!r.ok) return;
+    const c = await r.json();
+    const set = (id, val) => {
+      const el = document.getElementById(id);
+      el.textContent = val || 'not set';
+      if (!val) el.className = 'config-val missing';
+    };
+    set('cfg-tenant', c.BC_TENANT_ID);
+    set('cfg-client-id', c.BC_CLIENT_ID);
+    set('cfg-env', c.BC_ENVIRONMENT);
+    document.getElementById('cfg-secret').innerHTML = c.BC_CLIENT_SECRET
+      ? '<span class="config-secret-set">● set</span>'
+      : '<span class="config-secret-missing">✕ not set</span>';
+    document.getElementById('config-panel').style.display = 'flex';
+  } catch(e) { /* silently skip if function not yet deployed */ }
+}
+
 // ---- BOOT ----
-window.onload = () => { show('view-companies'); loadCompanies(); };
+window.onload = () => { show('view-companies'); loadConfig(); loadCompanies(); };
 </script>
 </body>
 </html>
