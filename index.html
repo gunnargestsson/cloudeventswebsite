@@ -439,8 +439,6 @@
 
 <script>
 // ---- STATE ----
-let token = null;
-let tokenExpiry = 0;
 let companies = [];
 let customers = [];
 let items = [];
@@ -449,22 +447,8 @@ let selectedCustomer = null;
 let orderQty = {};
 
 // ---- API ----
-async function getToken() {
-  if (token && Date.now() < tokenExpiry - 60000) return token;
-  const r = await fetch('/api/token');
-  if (!r.ok) throw new Error('Authentication failed (' + r.status + ')');
-  const d = await r.json();
-  if (d.error) throw new Error(d.error);
-  token = d.access_token;
-  tokenExpiry = Date.now() + (d.expires_in * 1000);
-  return token;
-}
-
 async function bcGet(path) {
-  const t = await getToken();
-  const r = await fetch('/api/bc?path=' + encodeURIComponent(path), {
-    headers: { Authorization: 'Bearer ' + t }
-  });
+  const r = await fetch('/api/bc?path=' + encodeURIComponent(path));
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
     throw new Error(e.error || 'API error ' + r.status);
@@ -473,10 +457,9 @@ async function bcGet(path) {
 }
 
 async function bcPost(path, data) {
-  const t = await getToken();
   const r = await fetch('/api/bc?path=' + encodeURIComponent(path), {
     method: 'POST',
-    headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
   if (!r.ok) {

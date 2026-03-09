@@ -27,6 +27,14 @@ module.exports = async function (context, req) {
       body,
       { "Content-Type": "application/x-www-form-urlencoded" }
     );
+    if (token.error) {
+      context.res = {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ error: `${token.error}: ${token.error_description || ""}` }),
+      };
+      return;
+    }
     context.res = {
       status: 200,
       headers: { "Content-Type": "application/json" },
