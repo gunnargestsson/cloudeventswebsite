@@ -601,7 +601,7 @@ async function loadCustomers(skip = 0) {
       specversion: '1.0',
       type: 'Data.Records.Get',
       source: 'BC Portal',
-      data: JSON.stringify({ tableName: 'Customer', skip, take })
+      data: JSON.stringify({ tableName: 'Customer', fieldNumbers: [2, 7, 35, 39, 59, 102], skip, take })
     });
     customers = (res.result || []).map(mapCustomer);
     const total = res.noOfRecords || 0;
@@ -678,7 +678,8 @@ async function loadLedger(skip = 0) {
       type: 'Data.Records.Get',
       source: 'BC Portal',
       data: JSON.stringify({
-        tableName: 'Customer Ledger Entry',
+        tableName: 'Cust. Ledger Entry',
+        fieldNumbers: [4, 5, 6, 7, 13, 14, 36],
         tableView: `WHERE(Customer No.=CONST(${selectedCustomer.number}))`,
         skip,
         take
@@ -718,11 +719,11 @@ async function loadDocuments() {
     const [ordRes, invRes] = await Promise.all([
       cePost(selectedCompany.id, {
         specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
-        data: JSON.stringify({ tableName: 'Sales Header', tableView: `WHERE(Document Type=CONST(Order),Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
+        data: JSON.stringify({ tableName: 'Sales Header', fieldNumbers: [19, 61, 120, 5790], tableView: `WHERE(Document Type=CONST(Order),Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
       }).catch(() => ({ result: [] })),
       cePost(selectedCompany.id, {
         specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
-        data: JSON.stringify({ tableName: 'Sales Invoice Header', tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
+        data: JSON.stringify({ tableName: 'Sales Invoice Header', fieldNumbers: [20, 24, 61], tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
       }).catch(() => ({ result: [] }))
     ]);
     const orders = (ordRes.result || []).map(rec => ({
@@ -766,7 +767,7 @@ async function loadItems() {
       specversion: '1.0',
       type: 'Data.Records.Get',
       source: 'BC Portal',
-      data: JSON.stringify({ tableName: 'Item', take: pageSize() * 2 })
+      data: JSON.stringify({ tableName: 'Item', fieldNumbers: [3, 10, 18], take: pageSize() * 2 })
     });
     items = (res.result || []).map(mapItem);
     renderItems(items);
