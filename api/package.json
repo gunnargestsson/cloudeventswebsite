@@ -1,0 +1,8 @@
+{
+  "name": "bc-portal-api",
+  "version": "1.0.0",
+  "description": "Business Central Portal – Azure Functions API",
+  "engines": {
+    "node": ">=18"
+  }
+}
