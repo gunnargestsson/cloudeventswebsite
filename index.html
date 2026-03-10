@@ -613,7 +613,7 @@ async function loadLanguages() {
     const lcidToName = {};
     for (const rec of (langRes.result || [])) {
       const lcid = parseInt(rec.fields.WindowsLanguageID, 10);
-      if (lcid && rec.fields.Name) lcidToName[lcid] = rec.fields.Name;
+      if (lcid && rec.fields.Name) lcidToName[lcid] = rec.fields.Name.charAt(0).toUpperCase() + rec.fields.Name.slice(1).toLowerCase();
     }
 
     const sel = document.getElementById('lang-select');
