@@ -266,6 +266,10 @@
   .qty-btn { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); cursor: pointer; font-size: 1rem; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
   .qty-btn:hover { border-color: var(--accent); color: var(--accent); }
   .qty-display { width: 28px; text-align: center; font-family: 'DM Mono', monospace; font-size: 0.82rem; }
+  .avail-badge { display: inline-block; font-size: 0.62rem; font-family:'DM Mono',monospace; padding: 1px 5px; border-radius: 4px; background: rgba(39,192,138,0.12); color: var(--green); border: 1px solid rgba(39,192,138,0.25); margin-left: 5px; vertical-align: middle; }
+  .avail-badge.avail-low  { background: rgba(245,166,35,0.12);  color: var(--amber); border-color: rgba(245,166,35,0.25); }
+  .avail-badge.avail-none { background: rgba(242,95,92,0.12);   color: var(--red);   border-color: rgba(242,95,92,0.25); }
+  .avail-badge.avail-loading { background: var(--surface2); color: var(--text-dim); border-color: var(--border); }
   .order-summary { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; position: sticky; top: 90px; }
   .summary-line { display: flex; justify-content: space-between; padding: 11px 20px; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
   .summary-line .label { color: var(--text-dim); }
@@ -357,6 +361,20 @@
   .vat-table td { padding: 7px 8px; color: var(--text-mid); border-bottom: 1px solid var(--border); font-family: 'DM Mono', monospace; text-align: right; }
   .vat-table td:first-child { text-align: left; color: var(--text); }
   .vat-table tr:last-child td { border-bottom: none; }
+  /* Credit limit section in order summary */
+  .credit-section { padding: 10px 20px 12px; border-bottom: 1px solid var(--border); }
+  .credit-info-row { display: flex; justify-content: space-between; align-items: baseline; }
+  .credit-info-label { font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
+  .credit-info-val { font-family: 'DM Mono', monospace; font-size: 0.76rem; color: var(--text); }
+  .credit-info-val.ok   { color: var(--green); }
+  .credit-info-val.warn { color: var(--amber); }
+  .credit-info-val.over { color: var(--red); }
+  .credit-bar-wrap { margin-top: 5px; background: var(--surface2); border-radius: 4px; height: 5px; overflow: hidden; }
+  .credit-bar { height: 5px; border-radius: 4px; transition: width 0.3s, background 0.3s; background: var(--green); }
+  .credit-bar.warn { background: var(--amber); }
+  .credit-bar.over { background: var(--red); }
+  /* Credit info button on customer banner */
+  #credit-info-btn { font-size: 1.05rem; padding: 4px 9px; margin-right: 6px; }
 </style>
 </head>
 <body>
@@ -395,7 +413,7 @@
         <div class="config-row"><span class="config-key">Environment</span><span class="config-val" id="cfg-env">—</span></div>
       </div>
       <div id="company-grid" class="company-grid">
-        <div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Authenticating...</span></div>
+        <div class="loader-wrap"><div class="spinner"></div><span class="loader-label" data-t="Authenticating...">Authenticating...</span></div>
       </div>
     </div>
 
@@ -440,6 +458,7 @@
             <span>📧 <span id="banner-email">—</span></span>
           </div>
         </div>
+        <button id="credit-info-btn" class="doc-action-btn info" style="display:none" onclick="showCreditInfo()" title="Credit information">ⓘ</button>
         <button class="back-btn" onclick="showCustomers()" data-t="← Customers">← Customers</button>
       </div>
       <div class="tabs">
@@ -448,10 +467,10 @@
         <button class="tab" onclick="switchTab('create-order')" data-t="Create Order">Create Order</button>
       </div>
       <div id="tab-ledger" class="tab-panel active">
-        <div id="ledger-content"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading...</span></div></div>
+        <div id="ledger-content"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label" data-t="Loading...">Loading...</span></div></div>
       </div>
       <div id="tab-documents" class="tab-panel">
-        <div id="documents-content"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading...</span></div></div>
+        <div id="documents-content"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label" data-t="Loading...">Loading...</span></div></div>
       </div>
       <div id="tab-create-order" class="tab-panel">
         <div id="order-success" class="order-success">
@@ -472,6 +491,19 @@
             </div>
             <div class="order-summary panel">
               <div class="panel-header" data-t="Order Summary">Order Summary</div>
+              <div id="order-credit-section" class="credit-section" style="display:none">
+                <div class="credit-info-row">
+                  <span class="credit-info-label" data-t="Credit Limit">Credit Limit</span>
+                  <span class="credit-info-val" id="credit-limit-val">—</span>
+                </div>
+                <div class="credit-info-row" style="margin-top:4px">
+                  <span class="credit-info-label" data-t="Remaining Credit">Remaining Credit</span>
+                  <span class="credit-info-val" id="credit-remaining-val">—</span>
+                </div>
+                <div class="credit-bar-wrap">
+                  <div class="credit-bar" id="credit-bar" style="width:100%"></div>
+                </div>
+              </div>
               <div class="field-group">
                 <div class="field-label" data-t="Requested Delivery Date">Requested Delivery Date</div>
                 <input type="date" class="field-input" id="order-date" />
@@ -482,7 +514,10 @@
               </div>
               <div id="order-lines"></div>
               <div class="summary-total">
-                <span data-t="Total">Total</span>
+                <div>
+                  <span data-t="Total">Total</span>
+                  <div id="total-vat-tag" style="font-size:0.65rem;color:var(--text-dim);font-weight:400;margin-top:1px"></div>
+                </div>
                 <span class="total-val" id="order-total">0.00</span>
               </div>
               <button class="btn-primary" id="submit-btn" onclick="submitOrder()" data-t="Post Sales Order →">Post Sales Order →</button>
@@ -520,6 +555,9 @@ let items = [];
 let selectedCompany = null;
 let selectedCustomer = null;
 let orderQty = {};
+let customerCredit = null;
+let itemAvailability = {}; // keyed by item.id; value = {response, avail} once loaded, undefined = not yet loaded
+let itemPrices = {};       // keyed by item.id; value = best priceListLine or null once loaded, undefined = not yet loaded
 let selectedLcid = 1033;
 
 // Field metadata cache — keyed by "companyId:lcid:tableName"
@@ -545,6 +583,20 @@ const UI_STRINGS = [
   'Line Discount', 'Invoice Discount', 'Total Weight', 'Total Volume',
   'VAT Breakdown', 'VAT Identifier', 'Base', 'VAT', 'Downloading PDF...',
   'Loading customers...', 'Loading ledger entries...', 'Loading documents...', 'Loading items...',
+  'Credit Limit', 'Remaining Credit', 'Balance', 'Outstanding',
+  'Item Availability', 'Available Quantity', 'Inventory', 'Reserved',
+  'Gross Requirement', 'Scheduled Receipt', 'Planned Receipt',
+  'No availability', 'Exceeds available quantity', 'Availability', 'Unit of measure',
+  'Price excl. VAT', 'Price incl. VAT', 'VAT %', 'Prices excl. VAT', 'Prices incl. VAT',
+  'Allow line discount', 'Allow invoice discount', 'Min. Quantity', 'Line Discount %', 'Price List',
+  'Customer price', 'Pricing',
+  'Overdue balance', 'Credit limit exceeded', 'Credit limit reached',
+  'Credit information', 'Remaining with tolerance', 'Details', 'Tolerance', 'Due this period',
+  'Authenticating...', 'Loading...',
+  'No ledger entries', 'No items added yet',
+  'Statistics', 'Download PDF',
+  'Add at least one item', 'Creating...', 'Sales order created!',
+  'Failed to create sales order', 'Failed to add line for',
 ];
 
 // Fallback names used only when the Language table lookup fails
@@ -683,14 +735,14 @@ async function onLangChange(value) {
   selectedLcid = parseInt(value, 10);
   await loadUiTranslations();
   applyUiTranslations();
-  // Reload whichever data view is currently active (use panel ID — tab text changes after translation)
   const detail = document.getElementById('view-detail');
   if (detail.style.display !== 'none') {
-    const activePanel = document.querySelector('.tab-panel.active');
-    const panelId = activePanel ? activePanel.id : '';
-    if (panelId === 'tab-ledger') loadLedger();
-    else if (panelId === 'tab-documents') loadDocuments();
-    else if (panelId === 'tab-create-order') loadItems();
+    // Reload both data tabs (captions are LCID-keyed in fieldMetaCache)
+    loadLedger();
+    loadDocuments();
+    // Re-render items in place — no API needed, and avoids clearing the cart
+    filterItems();
+    updateSummary();
   } else {
     loadCustomers();
   }
@@ -709,6 +761,7 @@ function mapCustomer(rec) {
     blocked: (f.Blocked === ' ' || !f.Blocked) ? '' : f.Blocked,
     balance: parseFloat(f.BalanceLCY) || 0,
     locationCode: f.LocationCode || '',
+    priceIncludingVAT: f.PriceIncludingVAT === true || f.PriceIncludingVAT === 'true',
     image: (f.Image && f.Image.Value) ? f.Image.Value : null
   };
 }
@@ -821,7 +874,7 @@ async function loadCustomers(skip = 0) {
         specversion: '1.0',
         type: 'Data.Records.Get',
         source: 'BC Portal',
-        data: JSON.stringify({ tableName: 'Customer', fieldNumbers: [2, 7, 35, 39, 59, 83, 102, 140], skip, take })
+        data: JSON.stringify({ tableName: 'Customer', fieldNumbers: [2, 7, 35, 39, 59, 82, 83, 102, 140], skip, take })
       }),
       getFieldMeta('Customer', [39])
     ]);
@@ -897,6 +950,12 @@ async function selectCustomer(id) {
   loadLedger();
   loadDocuments();
   loadItems();
+  customerCredit = null;
+  itemAvailability = {};
+  itemPrices = {};
+  document.getElementById('credit-info-btn').style.display = 'none';
+  document.getElementById('order-credit-section').style.display = 'none';
+  loadCreditLimit();
 }
 
 // ---- TABS ----
@@ -933,7 +992,7 @@ async function loadLedger(skip = 0) {
     meta.forEach(f => { cap[f.id] = f.caption; });
     const rows = res.result || [];
     const total = res.noOfRecords || 0;
-    if (!rows.length) { el.innerHTML='<div class="empty-state"><div class="empty-icon">📒</div><p>No ledger entries</p></div>'; return; }
+    if (!rows.length) { el.innerHTML='<div class="empty-state"><div class="empty-icon">📒</div><p>' + t('No ledger entries') + '</p></div>'; return; }
     rows.sort((a,b) => parseInt((b.primaryKey||{}).EntryNo_||0) - parseInt((a.primaryKey||{}).EntryNo_||0));
     el.innerHTML = `<div class="table-wrap"><table>
       <thead><tr><th>${cap[1]||'Entry No.'}</th><th>${cap[4]||'Date'}</th><th>${cap[5]||'Doc Type'}</th><th>${cap[6]||'Doc No.'}</th><th>${cap[7]||'Description'}</th><th>${cap[13]||'Amount'}</th><th>${cap[14]||'Remaining'}</th><th>${cap[36]||'Status'}</th></tr></thead>
@@ -1013,11 +1072,11 @@ async function loadDocuments() {
       <tbody>${docs.map(d=>{
         let actionBtn = '';
         if (d._t === 'Order') {
-          actionBtn = `<button class="doc-action-btn info" title="Statistics" onclick="showOrderStats('${d.number}')">ⓘ</button>`;
+          actionBtn = `<button class="doc-action-btn info" title="${t('Statistics')}" onclick="showOrderStats('${d.number}')">ⓘ</button>`;
         } else if (d._t === 'Invoice') {
-          actionBtn = `<button class="doc-action-btn pdf" title="Download PDF" onclick="downloadPdf('invoice','${d.number}')">⬇ PDF</button>`;
+          actionBtn = `<button class="doc-action-btn pdf" title="${t('Download PDF')}" onclick="downloadPdf('invoice','${d.number}')">⬇ PDF</button>`;
         } else if (d._t === 'Credit Memo') {
-          actionBtn = `<button class="doc-action-btn pdf" title="Download PDF" onclick="downloadPdf('creditmemo','${d.number}')">⬇ PDF</button>`;
+          actionBtn = `<button class="doc-action-btn pdf" title="${t('Download PDF')}" onclick="downloadPdf('creditmemo','${d.number}')">⬇ PDF</button>`;
         }
         return `<tr>
         <td>${typeIcon[d._t]||'📄'} ${t(d._t)}</td>
@@ -1090,6 +1149,98 @@ function closeStatsModal() {
   document.getElementById('stats-modal').classList.add('hidden');
 }
 
+// ---- CREDIT LIMIT ----
+async function loadCreditLimit() {
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Customer.CreditLimit.Get',
+      source: 'BC Portal', subject: selectedCustomer.number
+    });
+    customerCredit = res;
+    document.getElementById('credit-info-btn').style.display = '';
+    renderCreditDisplay();
+  } catch(e) { /* credit info is optional */ }
+}
+
+function computeOrderTotal() {
+  return Object.entries(orderQty)
+    .filter(([,q]) => q > 0)
+    .reduce((sum, [id, qty]) => sum + qty * getEffectivePrice(id), 0);
+}
+
+function renderCreditDisplay() {
+  const section = document.getElementById('order-credit-section');
+  if (!customerCredit || !(customerCredit.creditLimitLCY > 0)) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+  const total   = computeOrderTotal();
+  const remaining = customerCredit.remainingCredit - total;
+  const limit     = customerCredit.creditLimitLCY;
+  const pct = Math.max(0, Math.min(100, (remaining / limit) * 100));
+  const bar    = document.getElementById('credit-bar');
+  const remVal = document.getElementById('credit-remaining-val');
+  document.getElementById('credit-limit-val').textContent = fmt(limit);
+  remVal.textContent = fmt(remaining);
+  bar.style.width = pct + '%';
+  bar.className    = 'credit-bar';
+  remVal.className = 'credit-info-val';
+  if (remaining < 0) {
+    bar.classList.add('over');  remVal.classList.add('over');
+  } else if (total > customerCredit.remainingCredit || remaining < limit * 0.1) {
+    bar.classList.add('warn');  remVal.classList.add('warn');
+  } else {
+    remVal.classList.add('ok');
+  }
+}
+
+async function showCreditInfo() {
+  const modal    = document.getElementById('stats-modal');
+  const body     = document.getElementById('stats-modal-body');
+  const title    = document.getElementById('stats-modal-title');
+  const subtitle = document.getElementById('stats-modal-subtitle');
+  title.textContent    = t('Credit information');
+  subtitle.textContent = selectedCustomer ? selectedCustomer.displayName : '';
+  modal.classList.remove('hidden');
+  if (!customerCredit) {
+    body.innerHTML = '<div class="loader-wrap"><div class="spinner"></div></div>';
+    try {
+      const res = await cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Customer.CreditLimit.Get',
+        source: 'BC Portal', subject: selectedCustomer.number
+      });
+      customerCredit = res;
+    } catch(e) {
+      body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
+      return;
+    }
+  }
+  const c = customerCredit;
+  const limitSet  = c.creditLimitLCY > 0;
+  const exceeded  = c.isCreditLimitExceeded;
+  const overdue   = c.hasOverdueBalance;
+  const remColor  = c.remainingCredit < 0 ? 'var(--red)' : (c.remainingCredit < c.creditLimitLCY * 0.1 ? 'var(--amber)' : 'var(--green)');
+  body.innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-row"><span class="stat-label">${t('Credit Limit')}</span><span class="stat-value hl">${limitSet ? fmt(c.creditLimitLCY) : '—'}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Remaining Credit')}</span><span class="stat-value" style="color:${remColor}">${limitSet ? fmt(c.remainingCredit) : '—'}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Balance')}</span><span class="stat-value">${fmt(c.balanceLCY)}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Outstanding')}</span><span class="stat-value">${fmt(c.outstandingAmountLCY)}</span></div>
+    </div>
+    ${exceeded ? `<div style="padding:8px 12px;background:rgba(242,95,92,0.12);border:1px solid var(--red);border-radius:var(--radius-sm);color:var(--red);font-size:0.78rem;margin-bottom:10px">⚠ ${t('Credit limit exceeded')}</div>` : ''}
+    ${overdue  ? `<div style="padding:8px 12px;background:rgba(245,166,35,0.12);border:1px solid var(--amber);border-radius:var(--radius-sm);color:var(--amber);font-size:0.78rem;margin-bottom:10px">⚠ ${t('Overdue balance')}</div>` : ''}
+    ${limitSet ? `
+      <div class="modal-section-title">${t('Details')}</div>
+      <div class="stats-grid">
+        <div class="stat-row"><span class="stat-label">${t('Remaining Credit')}</span><span class="stat-value">${fmt(c.remainingCredit)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Remaining with tolerance')}</span><span class="stat-value">${fmt(c.remainingCreditWithTolerance)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Tolerance')} %</span><span class="stat-value">${(c.tolerancePercent || 0).toFixed(1)}%</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Due this period')}</span><span class="stat-value">${fmt(c.outstandingBalanceDueLCY)}</span></div>
+      </div>` : ''}
+  `;
+}
+
 // ---- PDF DOWNLOAD ----
 async function downloadPdf(docType, docNo) {
   const eventType = docType === 'invoice' ? 'Sales.SalesInvoice.Pdf' : 'Sales.SalesCreditMemo.Pdf';
@@ -1126,11 +1277,156 @@ async function loadItems() {
       specversion: '1.0',
       type: 'Data.Records.Get',
       source: 'BC Portal',
-      data: JSON.stringify({ tableName: 'Item', fieldNumbers: [3, 10, 18], take: pageSize() * 2 })
+      data: JSON.stringify({ tableName: 'Item', fieldNumbers: [3, 10, 18], tableView: 'WHERE(Type=CONST(Inventory),Sales Blocked=CONST(false))', take: pageSize() * 2 })
     });
     items = (res.result || []).map(mapItem);
+    itemAvailability = {};
+    itemPrices = {};
     renderItems(items);
+    loadItemAvailability();
+    loadItemPrices();
   } catch(e) { document.getElementById('items-list').innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`; }
+}
+
+async function loadItemAvailability() {
+  if (!selectedCustomer?.locationCode || !items.length) return;
+  await Promise.allSettled(items.map(async it => {
+    try {
+      const res = await cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Item.Availability.Get',
+        source: 'BC Portal', subject: it.number,
+        data: JSON.stringify({ locationFilter: selectedCustomer.locationCode })
+      });
+      const avail = (res.availability || []).find(a => a.locationCode === selectedCustomer.locationCode) || null;
+      itemAvailability[it.id] = { response: res, avail };
+    } catch(e) {
+      itemAvailability[it.id] = { response: null, avail: null };
+    }
+  }));
+  filterItems(); // re-render badges now that availability is known
+}
+
+async function loadItemPrices() {
+  if (!selectedCustomer?.number || !items.length) return;
+  await Promise.allSettled(items.map(async it => {
+    try {
+      const res = await cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Item.Price.Get',
+        source: 'BC Portal', subject: it.number,
+        data: JSON.stringify({ customerNo: selectedCustomer.number })
+      });
+      itemPrices[it.id] = (res.priceListLines || [])[0] || null;
+    } catch(e) {
+      itemPrices[it.id] = null;
+    }
+  }));
+  filterItems();
+}
+
+function getEffectivePrice(id) {
+  const it = items.find(i => i.id === id);
+  const pl = itemPrices[id];
+  if (!pl) return it ? it.unitPrice : 0;
+  return selectedCustomer?.priceIncludingVAT ? (pl.unitPriceInclVAT ?? pl.unitPrice) : (pl.unitPriceExclVAT ?? pl.unitPrice);
+}
+
+function getLinePriceExclVAT(id) {
+  const it = items.find(i => i.id === id);
+  const pl = itemPrices[id];
+  if (!pl) return it ? it.unitPrice : 0;
+  return pl.unitPriceExclVAT ?? pl.unitPrice;
+}
+
+async function showItemAvailability(id) {
+  const it = items.find(i => i.id === id);
+  if (!it) return;
+  const modal    = document.getElementById('stats-modal');
+  const body     = document.getElementById('stats-modal-body');
+  const title    = document.getElementById('stats-modal-title');
+  const subtitle = document.getElementById('stats-modal-subtitle');
+  title.textContent    = it.number;
+  subtitle.textContent = it.displayName;
+  modal.classList.remove('hidden');
+
+  let cached = itemAvailability[id];
+  if (cached === undefined) {
+    body.innerHTML = '<div class="loader-wrap"><div class="spinner"></div></div>';
+    try {
+      const data = selectedCustomer?.locationCode ? { locationFilter: selectedCustomer.locationCode } : {};
+      const res = await cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Item.Availability.Get',
+        source: 'BC Portal', subject: it.number,
+        data: JSON.stringify(data)
+      });
+      const avail = selectedCustomer?.locationCode
+        ? (res.availability || []).find(a => a.locationCode === selectedCustomer.locationCode) || null
+        : (res.availability || [])[0] || null;
+      cached = { response: res, avail };
+      itemAvailability[id] = cached;
+    } catch(e) {
+      body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
+      return;
+    }
+  }
+  // fetch price if not yet loaded
+  let priceLine = itemPrices[id];
+  if (priceLine === undefined) {
+    try {
+      const pr = await cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Item.Price.Get',
+        source: 'BC Portal', subject: it.number,
+        data: JSON.stringify({ customerNo: selectedCustomer?.number || '' })
+      });
+      priceLine = (pr.priceListLines || [])[0] || null;
+      itemPrices[id] = priceLine;
+    } catch(e) {
+      priceLine = null;
+      itemPrices[id] = null;
+    }
+  }
+
+  const res   = cached?.response;
+  const avail = cached?.avail;
+  const loc   = avail?.locationCode || selectedCustomer?.locationCode || '—';
+
+  const priceSection = priceLine ? `
+    <div class="modal-section-title">${t('Pricing')}${priceLine.priceListCode ? ' — ' + priceLine.priceListCode : ''}</div>
+    <div class="stats-grid">
+      <div class="stat-row"><span class="stat-label">${t('Price excl. VAT')}</span><span class="stat-value hl">${fmt(priceLine.unitPriceExclVAT)}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Price incl. VAT')}</span><span class="stat-value hl">${fmt(priceLine.unitPriceInclVAT)}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('VAT %')}</span><span class="stat-value">${(priceLine.vatPct||0).toFixed(1)}%</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Line Discount %')}</span><span class="stat-value">${(priceLine.lineDiscountPct||0).toFixed(1)}%</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Allow line discount')}</span><span class="stat-value">${priceLine.allowLineDisc ? '✓' : '✕'}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Allow invoice discount')}</span><span class="stat-value">${priceLine.allowInvoiceDisc ? '✓' : '✕'}</span></div>
+    </div>` : '';
+
+  body.innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-row"><span class="stat-label">${t('Unit of measure')}</span><span class="stat-value">${res?.baseUnitOfMeasure||'—'}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Requested Delivery Date')}</span><span class="stat-value">${fmtDate(res?.requestedDeliveryDate)||'—'}</span></div>
+    </div>
+    ${priceSection}
+    ${avail ? `
+      <div class="modal-section-title">${t('Availability')} — ${loc}</div>
+      <div class="stats-grid">
+        <div class="stat-row"><span class="stat-label">${t('Available Quantity')}</span><span class="stat-value hl">${(avail.availableQuantity||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Inventory')}</span><span class="stat-value">${(avail.inventory||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Reserved')}</span><span class="stat-value">${(avail.qtyReserved||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Gross Requirement')}</span><span class="stat-value">${(avail.grossRequirement||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Scheduled Receipt')}</span><span class="stat-value">${(avail.scheduledReceipt||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Planned Receipt')}</span><span class="stat-value">${(avail.plannedOrderReceipt||0).toLocaleString()}</span></div>
+      </div>` :
+      `<div class="empty-state" style="padding:24px 0"><div class="empty-icon">📦</div><p>${t('No availability')}</p></div>`}
+  `;
+}
+
+function availBadge(id) {
+  const a = itemAvailability[id];
+  if (a === undefined) return selectedCustomer?.locationCode ? '<span class="avail-badge avail-loading">…</span>' : '';
+  if (!a || !a.avail) return '<span class="avail-badge avail-none">0</span>';
+  const qty = a.avail.availableQuantity || 0;
+  const cls = qty <= 0 ? 'avail-none' : qty < 10 ? 'avail-low' : '';
+  return `<span class="avail-badge ${cls}">${qty.toLocaleString()}</span>`;
 }
 
 function renderItems(list) {
@@ -1141,9 +1437,10 @@ function renderItems(list) {
       <div class="item-icon">${icons[it.type]||'📦'}</div>
       <div class="item-info">
         <div class="item-name">${it.displayName}</div>
-        <div class="item-no">${it.number}</div>
+        <div class="item-no">${it.number} ${availBadge(it.id)}</div>
       </div>
-      <div class="item-price">${fmt(it.unitPrice)}</div>
+      <div class="item-price">${fmt(getEffectivePrice(it.id))}</div>
+      <button class="doc-action-btn info" onclick="showItemAvailability('${it.id}')" title="${t('Item Availability')}">ⓘ</button>
       <div class="qty-ctrl">
         <button class="qty-btn" onclick="changeQty('${it.id}',-1)">−</button>
         <div class="qty-display" id="qty-${it.id}">${orderQty[it.id]||0}</div>
@@ -1159,6 +1456,24 @@ function filterItems() {
 }
 
 function changeQty(id, delta) {
+  if (delta > 0) {
+    const avEntry = itemAvailability[id];
+    if (avEntry !== undefined) { // loaded
+      const maxQty = avEntry?.avail ? (avEntry.avail.availableQuantity || 0) : 0;
+      if ((orderQty[id] || 0) + delta > maxQty) {
+        toast(t('Exceeds available quantity'), 'error');
+        return;
+      }
+    }
+    if (customerCredit && customerCredit.creditLimitLCY > 0) {
+      const linePrice = getEffectivePrice(id) * delta;
+      const newTotal = computeOrderTotal() + linePrice;
+      if (newTotal > customerCredit.remainingCreditWithTolerance) {
+        toast(t('Credit limit reached'), 'error');
+        return;
+      }
+    }
+  }
   const next = Math.max(0, (orderQty[id]||0) + delta);
   if (next===0) delete orderQty[id]; else orderQty[id]=next;
   const el = document.getElementById('qty-'+id);
@@ -1169,24 +1484,27 @@ function changeQty(id, delta) {
 function updateSummary() {
   const lines = Object.entries(orderQty).filter(([,q])=>q>0);
   const el = document.getElementById('order-lines');
-  if (!lines.length) { el.innerHTML='<div style="padding:16px 20px;font-size:0.77rem;color:var(--text-dim);text-align:center">No items added yet</div>'; document.getElementById('order-total').textContent='0.00'; return; }
+  if (!lines.length) { el.innerHTML='<div style="padding:16px 20px;font-size:0.77rem;color:var(--text-dim);text-align:center">' + t('No items added yet') + '</div>'; document.getElementById('order-total').textContent='0.00'; return; }
   let total = 0;
   el.innerHTML = lines.map(([id,qty])=>{
     const it = items.find(i=>i.id===id);
     if (!it) return '';
-    const line = qty*(it.unitPrice||0);
+    const line = qty * getEffectivePrice(id);
     total += line;
     return `<div class="summary-line"><span class="label">${it.displayName} × ${qty}</span><span class="val">${fmt(line)}</span></div>`;
   }).join('');
   document.getElementById('order-total').textContent = fmt(total);
+  const vatTag = document.getElementById('total-vat-tag');
+  if (vatTag) vatTag.textContent = selectedCustomer?.priceIncludingVAT ? t('Prices incl. VAT') : t('Prices excl. VAT');
+  renderCreditDisplay();
 }
 
 // ---- SUBMIT ORDER ----
 async function submitOrder() {
   const lines = Object.entries(orderQty).filter(([,q])=>q>0);
-  if (!lines.length) { toast('Add at least one item', 'error'); return; }
+  if (!lines.length) { toast(t('Add at least one item'), 'error'); return; }
   const btn = document.getElementById('submit-btn');
-  btn.disabled = true; btn.textContent = 'Creating...';
+  btn.disabled = true; btn.textContent = t('Creating...');
   try {
     // Generate a unique order number (BC will store it; number series must allow manual nos.)
     const orderNo = 'WEB' + Date.now().toString().slice(-7);
@@ -1201,7 +1519,7 @@ async function submitOrder() {
       specversion: '1.0', type: 'Data.Records.Set', source: 'BC Portal', subject: 'Sales Header',
       data: JSON.stringify({ data: [{ primaryKey: { DocumentType: 'Order', No_: orderNo }, fields: headerFields }] })
     });
-    if (headerRes.status !== 'Success') throw new Error(headerRes.error || 'Failed to create sales order');
+    if (headerRes.status !== 'Success') throw new Error(headerRes.error || t('Failed to create sales order'));
     const createdNo = (headerRes.result?.[0]?.primaryKey?.No_) || orderNo;
 
     // Step 2: Create Sales Lines
@@ -1211,16 +1529,16 @@ async function submitOrder() {
       if (!it) continue;
       const lineRes = await cePost(selectedCompany.id, {
         specversion: '1.0', type: 'Data.Records.Set', source: 'BC Portal', subject: 'Sales Line',
-        data: JSON.stringify({ data: [{ primaryKey: { DocumentType: 'Order', DocumentNo_: createdNo, LineNo_: lineNo }, fields: { Type: 'Item', No_: it.number, Quantity: String(qty), UnitPrice: String(it.unitPrice) } }] })
+        data: JSON.stringify({ data: [{ primaryKey: { DocumentType: 'Order', DocumentNo_: createdNo, LineNo_: lineNo }, fields: { Type: 'Item', No_: it.number, Quantity: String(qty), UnitPrice: String(getLinePriceExclVAT(it.id)) } }] })
       });
-      if (lineRes.status !== 'Success') throw new Error(lineRes.error || `Failed to add line for ${it.displayName}`);
+      if (lineRes.status !== 'Success') throw new Error(lineRes.error || `${t('Failed to add line for')} ${it.displayName}`);
       lineNo += 10000;
     }
 
     document.getElementById('order-form-content').style.display='none';
     document.getElementById('order-success-msg').textContent=`Order ${createdNo} created for ${selectedCustomer.displayName}.`;
     document.getElementById('order-success').classList.add('visible');
-    toast('Sales order created!', 'success');
+    toast(t('Sales order created!'), 'success');
     loadDocuments();
   } catch(e) {
     toast('Failed: ' + e.message, 'error');
