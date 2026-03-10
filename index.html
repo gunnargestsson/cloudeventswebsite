@@ -58,10 +58,12 @@
   }
   .logo-icon {
     width: 34px; height: 34px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
     border-radius: 9px;
-    display: flex; align-items: center; justify-content: center; font-size: 1rem;
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
   }
+  .logo-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .logo span { color: var(--text-dim); font-weight: 400; font-size: 0.78rem; }
   .header-right { display: flex; align-items: center; gap: 14px; }
   .status-pill {
@@ -375,15 +377,21 @@
   .credit-bar.over { background: var(--red); }
   /* Credit info button on customer banner */
   #credit-info-btn { font-size: 1.05rem; padding: 4px 9px; margin-right: 6px; }
+  /* Item picture in info modal */
+  .item-picture { width: 100%; max-height: 220px; object-fit: contain; border-radius: var(--radius); background: var(--surface2); display: block; }
+  .item-picture-all-btn { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 0.72rem; padding: 4px 0 0; text-decoration: underline; display: block; }
+  .item-picture-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+  .item-picture-gallery img { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: var(--radius-sm); background: var(--surface2); cursor: pointer; }
+  .item-picture-back-btn { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 0.75rem; padding: 0 0 14px; display: block; }
 </style>
 </head>
 <body>
 <div id="app">
   <header>
-    <div class="logo">
-      <div class="logo-icon">⬡</div>
+    <a class="logo" href="https://origo.is" target="_blank" rel="noopener noreferrer" style="text-decoration:none;color:inherit">
+      <div class="logo-icon"><img src="origo.jpeg" alt="Origo"></div>
       BC Portal <span>/ Business Central</span>
-    </div>
+    </a>
     <div class="header-right">
       <div id="lang-wrap" style="display:none">
         <select id="lang-select" class="lang-select" onchange="onLangChange(this.value)" title="Language"></select>
@@ -558,6 +566,7 @@ let orderQty = {};
 let customerCredit = null;
 let itemAvailability = {}; // keyed by item.id; value = {response, avail} once loaded, undefined = not yet loaded
 let itemPrices = {};       // keyed by item.id; value = best priceListLine or null once loaded, undefined = not yet loaded
+let itemPictures = {};     // keyed by item.id; value = Media array or null once loaded, undefined = not yet fetched
 let selectedLcid = 1033;
 
 // Field metadata cache — keyed by "companyId:lcid:tableName"
@@ -596,7 +605,9 @@ const UI_STRINGS = [
   'No ledger entries', 'No items added yet',
   'Statistics', 'Download PDF',
   'Add at least one item', 'Creating...', 'Sales order created!',
-  'Failed to create sales order', 'Failed to add line for',
+  'Failed to create sales order', 'Failed to add line for', 'Failed: ',
+  'Order {no} created for {name}.',
+  'Pictures', 'View all', 'Back', 'No picture',
 ];
 
 // Fallback names used only when the Language table lookup fails
@@ -953,6 +964,7 @@ async function selectCustomer(id) {
   customerCredit = null;
   itemAvailability = {};
   itemPrices = {};
+  itemPictures = {};
   document.getElementById('credit-info-btn').style.display = 'none';
   document.getElementById('order-credit-section').style.display = 'none';
   loadCreditLimit();
@@ -1282,6 +1294,7 @@ async function loadItems() {
     items = (res.result || []).map(mapItem);
     itemAvailability = {};
     itemPrices = {};
+    itemPictures = {};
     renderItems(items);
     loadItemAvailability();
     loadItemPrices();
@@ -1368,26 +1381,46 @@ async function showItemAvailability(id) {
       return;
     }
   }
-  // fetch price if not yet loaded
+  // fetch price and picture in parallel if not yet loaded
   let priceLine = itemPrices[id];
+  let pictures  = itemPictures[id];
+  const fetches = [];
   if (priceLine === undefined) {
-    try {
-      const pr = await cePost(selectedCompany.id, {
+    fetches.push(
+      cePost(selectedCompany.id, {
         specversion: '1.0', type: 'Item.Price.Get',
         source: 'BC Portal', subject: it.number,
         data: JSON.stringify({ customerNo: selectedCustomer?.number || '' })
-      });
-      priceLine = (pr.priceListLines || [])[0] || null;
-      itemPrices[id] = priceLine;
-    } catch(e) {
-      priceLine = null;
-      itemPrices[id] = null;
-    }
+      }).then(pr => {
+        priceLine = (pr.priceListLines || [])[0] || null;
+        itemPrices[id] = priceLine;
+      }).catch(() => { priceLine = null; itemPrices[id] = null; })
+    );
   }
+  if (pictures === undefined) {
+    fetches.push(
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Get',
+        source: 'BC Portal',
+        data: JSON.stringify({ tableName: 'Item', fieldNumbers: [92], tableView: `WHERE(No.=CONST(${it.number}))` })
+      }).then(pr => {
+        const rec = (pr.result || [])[0];
+        pictures = rec?.fields?.Picture?.Media || null;
+        itemPictures[id] = pictures;
+      }).catch(() => { pictures = null; itemPictures[id] = null; })
+    );
+  }
+  if (fetches.length) await Promise.all(fetches);
 
   const res   = cached?.response;
   const avail = cached?.avail;
   const loc   = avail?.locationCode || selectedCustomer?.locationCode || '—';
+
+  const pictureSection = pictures && pictures.length ? `
+    <div style="margin-bottom:14px">
+      <img class="item-picture" src="data:image/jpeg;base64,${pictures[0].Value}" alt="${it.displayName}">
+      ${pictures.length > 1 ? `<button class="item-picture-all-btn" onclick="showItemPictureGallery('${id}')">${t('View all')} (${pictures.length})</button>` : ''}
+    </div>` : '';
 
   const priceSection = priceLine ? `
     <div class="modal-section-title">${t('Pricing')}${priceLine.priceListCode ? ' — ' + priceLine.priceListCode : ''}</div>
@@ -1401,6 +1434,7 @@ async function showItemAvailability(id) {
     </div>` : '';
 
   body.innerHTML = `
+    ${pictureSection}
     <div class="stats-grid">
       <div class="stat-row"><span class="stat-label">${t('Unit of measure')}</span><span class="stat-value">${res?.baseUnitOfMeasure||'—'}</span></div>
       <div class="stat-row"><span class="stat-label">${t('Requested Delivery Date')}</span><span class="stat-value">${fmtDate(res?.requestedDeliveryDate)||'—'}</span></div>
@@ -1417,6 +1451,20 @@ async function showItemAvailability(id) {
         <div class="stat-row"><span class="stat-label">${t('Planned Receipt')}</span><span class="stat-value">${(avail.plannedOrderReceipt||0).toLocaleString()}</span></div>
       </div>` :
       `<div class="empty-state" style="padding:24px 0"><div class="empty-icon">📦</div><p>${t('No availability')}</p></div>`}
+  `;
+}
+
+function showItemPictureGallery(id) {
+  const it = items.find(i => i.id === id);
+  const pictures = itemPictures[id];
+  if (!pictures || !pictures.length) return;
+  const body = document.getElementById('stats-modal-body');
+  body.innerHTML = `
+    <button class="item-picture-back-btn" onclick="showItemAvailability('${id}')">← ${t('Back')}</button>
+    <div class="modal-section-title" style="margin-top:0;border-top:none;padding-top:0">${t('Pictures')} (${pictures.length})</div>
+    <div class="item-picture-gallery">
+      ${pictures.map((m, i) => `<img src="data:image/jpeg;base64,${m.Value}" alt="${it.displayName} ${i + 1}">`).join('')}
+    </div>
   `;
 }
 
@@ -1536,12 +1584,12 @@ async function submitOrder() {
     }
 
     document.getElementById('order-form-content').style.display='none';
-    document.getElementById('order-success-msg').textContent=`Order ${createdNo} created for ${selectedCustomer.displayName}.`;
+    document.getElementById('order-success-msg').textContent=t('Order {no} created for {name}.').replace('{no}', createdNo).replace('{name}', selectedCustomer.displayName);
     document.getElementById('order-success').classList.add('visible');
     toast(t('Sales order created!'), 'success');
     loadDocuments();
   } catch(e) {
-    toast('Failed: ' + e.message, 'error');
+    toast(t('Failed: ') + e.message, 'error');
   } finally {
     btn.disabled=false; btn.textContent=t('Post Sales Order →');
   }
