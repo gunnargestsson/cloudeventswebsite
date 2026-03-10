@@ -79,6 +79,16 @@
   .status-dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
 
+  .lang-select {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 99px; color: var(--text-mid);
+    font-family: 'DM Mono', monospace; font-size: 0.72rem;
+    padding: 5px 12px; outline: none; cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+    appearance: none; -webkit-appearance: none;
+  }
+  .lang-select:hover, .lang-select:focus { border-color: var(--accent); color: var(--text); }
+
   main { flex: 1; padding: 32px; max-width: 1300px; margin: 0 auto; width: 100%; }
 
   /* BREADCRUMB */
@@ -163,6 +173,10 @@
     background: linear-gradient(135deg, var(--accent), var(--accent2));
     display: flex; align-items: center; justify-content: center;
     font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem; margin-bottom: 14px;
+    overflow: hidden;
+  }
+  .cust-avatar img, .banner-avatar img {
+    width: 100%; height: 100%; object-fit: cover; border-radius: inherit;
   }
   .cust-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.93rem; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cust-no { font-size: 0.7rem; color: var(--text-dim); margin-bottom: 14px; }
@@ -190,6 +204,7 @@
     background: linear-gradient(135deg, var(--accent), var(--accent2));
     display: flex; align-items: center; justify-content: center;
     font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.4rem; flex-shrink: 0;
+    overflow: hidden;
   }
   .banner-info { flex: 1; }
   .banner-name { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.25rem; letter-spacing: -0.02em; margin-bottom: 5px; }
@@ -320,6 +335,9 @@
       BC Portal <span>/ Business Central</span>
     </div>
     <div class="header-right">
+      <div id="lang-wrap" style="display:none">
+        <select id="lang-select" class="lang-select" onchange="onLangChange(this.value)" title="Language"></select>
+      </div>
       <div class="status-pill">
         <div class="status-dot" id="status-dot"></div>
         <span id="status-label">Initialising...</span>
@@ -453,6 +471,21 @@ let items = [];
 let selectedCompany = null;
 let selectedCustomer = null;
 let orderQty = {};
+let selectedLcid = 1033;
+
+// Field metadata cache — keyed by "companyId:lcid:tableName"
+// Cleared when a different company is selected; LCID is part of the key so
+// switching languages keeps each language's captions independently cached.
+let fieldMetaCache = {};
+// Localized enum captions for Customer.Blocked — value (e.g. 'Ship') → caption (e.g. 'Afhenda')
+let blockedEnumCaptions = {};
+
+// Fallback names used only when the Language table lookup fails
+const LCID_NAMES = {
+  1033: 'English', 1039: 'Icelandic', 1030: 'Danish',
+  1031: 'German',  1036: 'French',    1034: 'Spanish',
+  1043: 'Dutch',   1053: 'Swedish',   1044: 'Norwegian'
+};
 
 // ---- API ----
 // bcGet: used only for company list (standard v2.0 API, pre-company-selection)
@@ -470,7 +503,7 @@ async function cePost(companyId, event) {
   const r = await fetch('/api/bc?companyId=' + encodeURIComponent(companyId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(event)
+    body: JSON.stringify({ ...event, lcid: selectedLcid })
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
@@ -479,11 +512,75 @@ async function cePost(companyId, event) {
   return r.json();
 }
 
+// getFieldMeta: returns Help.Fields.Get result array for a table, cached by company+lcid+table.
+// Subsequent calls for the same combination are instant (no network round-trip).
+async function getFieldMeta(tableName, fieldNumbers) {
+  const key = `${selectedCompany.id}:${selectedLcid}:${tableName}`;
+  if (fieldMetaCache[key]) return fieldMetaCache[key];
+  const res = await cePost(selectedCompany.id, {
+    specversion: '1.0', type: 'Help.Fields.Get', source: 'BC Portal',
+    data: JSON.stringify({ tableName, fieldNumbers })
+  });
+  const meta = res.result || [];
+  fieldMetaCache[key] = meta;
+  return meta;
+}
+
 // ---- UTILS ----
 function pageSize() { return 20; }
 function fmt(n) { return (parseFloat(n)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtDate(d) { if (!d || d === '0001-01-01') return '—'; return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
 function initials(s) { if (!s) return '?'; return s.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase(); }
+
+// ---- LANGUAGE ----
+async function loadLanguages() {
+  try {
+    // Step 1: get allowed LCIDs
+    const allowedRes = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+      subject: 'Allowed Language'
+    });
+    const lcids = (allowedRes.result || []).map(r => parseInt(r.primaryKey.LanguageId, 10)).filter(Boolean);
+    const ids = lcids.length ? lcids : [1033];
+
+    // Step 2: fetch only those Language rows using FILTER with | as OR
+    const tableView = `WHERE(Windows Language ID=FILTER(${ids.join('|')}))`;
+    const langRes = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+      data: JSON.stringify({ tableName: 'Language', tableView })
+    });
+
+    // Build LCID → display name map from the Language table
+    const lcidToName = {};
+    for (const rec of (langRes.result || [])) {
+      const lcid = parseInt(rec.fields.WindowsLanguageID, 10);
+      if (lcid && rec.fields.Name) lcidToName[lcid] = rec.fields.Name;
+    }
+
+    const sel = document.getElementById('lang-select');
+    sel.innerHTML = ids.map(id =>
+      `<option value="${id}" ${id === selectedLcid ? 'selected' : ''}>${lcidToName[id] || LCID_NAMES[id] || 'Language ' + id}</option>`
+    ).join('');
+    document.getElementById('lang-wrap').style.display = '';
+  } catch(e) {
+    // fall back silently — English is already the default
+  }
+}
+
+function onLangChange(value) {
+  selectedLcid = parseInt(value, 10);
+  // Reload whichever data view is currently active
+  const detail = document.getElementById('view-detail');
+  if (detail.style.display !== 'none') {
+    const activeTab = document.querySelector('.tab.active');
+    const tab = activeTab ? activeTab.textContent.trim() : '';
+    if (tab.includes('Ledger')) loadLedger();
+    else if (tab.includes('Document')) loadDocuments();
+    else if (tab.includes('Order')) loadItems();
+  } else {
+    loadCustomers();
+  }
+}
 
 // ---- MAPPERS ---- (normalize Cloud Events { id, primaryKey, fields } records to flat objects)
 function mapCustomer(rec) {
@@ -496,7 +593,8 @@ function mapCustomer(rec) {
     country: f.Country_RegionCode || '',
     email: f.EMail || '',
     blocked: (f.Blocked === ' ' || !f.Blocked) ? '' : f.Blocked,
-    balance: parseFloat(f.BalanceLCY) || 0
+    balance: parseFloat(f.BalanceLCY) || 0,
+    image: (f.Image && f.Image.Value) ? f.Image.Value : null
   };
 }
 
@@ -583,11 +681,14 @@ function showCompanies() { show('view-companies'); }
 async function selectCompany(id) {
   selectedCompany = companies.find(c=>c.id===id);
   if (!selectedCompany) return;
+  fieldMetaCache = {};        // new company — discard all cached field metadata
+  blockedEnumCaptions = {};
   const name = selectedCompany.displayName || selectedCompany.name;
   document.getElementById('crumb-company').textContent = name;
   document.getElementById('crumb-company2').textContent = name;
   document.getElementById('customers-company-label').textContent = name;
   show('view-customers');
+  await loadLanguages();
   await loadCustomers();
 }
 
@@ -597,12 +698,17 @@ async function loadCustomers(skip = 0) {
   document.getElementById('customer-grid').innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading customers...</span></div>';
   document.getElementById('customer-pagination').innerHTML = '';
   try {
-    const res = await cePost(selectedCompany.id, {
-      specversion: '1.0',
-      type: 'Data.Records.Get',
-      source: 'BC Portal',
-      data: JSON.stringify({ tableName: 'Customer', fieldNumbers: [2, 7, 35, 39, 59, 102], skip, take })
-    });
+    const [res, metaCust] = await Promise.all([
+      cePost(selectedCompany.id, {
+        specversion: '1.0',
+        type: 'Data.Records.Get',
+        source: 'BC Portal',
+        data: JSON.stringify({ tableName: 'Customer', fieldNumbers: [2, 7, 35, 39, 59, 102, 140], skip, take })
+      }),
+      getFieldMeta('Customer', [39])
+    ]);
+    const field39 = metaCust.find(f => f.id === 39);
+    if (field39 && field39.enum) field39.enum.forEach(e => { if (e.value.trim()) blockedEnumCaptions[e.value] = e.caption; });
     customers = (res.result || []).map(mapCustomer);
     const total = res.noOfRecords || 0;
     document.getElementById('customer-count').textContent = total.toLocaleString() + ' customers';
@@ -622,12 +728,12 @@ function renderCustomers(list) {
   }
   document.getElementById('customer-grid').innerHTML = list.map(c => `
     <div class="customer-card" onclick="selectCustomer('${c.id}')">
-      <div class="cust-avatar">${initials(c.displayName)}</div>
+      <div class="cust-avatar">${c.image ? `<img src="data:image/jpeg;base64,${c.image}" alt="">` : initials(c.displayName)}</div>
       <div class="cust-name">${c.displayName||'—'}</div>
       <div class="cust-no"># ${c.number||'—'}</div>
       <div class="cust-meta">
         ${c.city?`<span class="cust-tag">📍 ${c.city}</span>`:''}
-        ${c.blocked===''?'<span class="cust-tag green">● Active</span>':'<span class="cust-tag amber">● Blocked</span>'}
+        ${c.blocked===''?'<span class="cust-tag green">● Active</span>':`<span class="cust-tag amber">● ${blockedEnumCaptions[c.blocked]||c.blocked}</span>`}
         ${c.balance?`<span class="cust-tag">${fmt(c.balance)}</span>`:''}
       </div>
     </div>`).join('');
@@ -646,7 +752,12 @@ async function selectCustomer(id) {
   selectedCustomer = customers.find(c=>c.id===id);
   if (!selectedCustomer) return;
   document.getElementById('crumb-customer').textContent = selectedCustomer.displayName;
-  document.getElementById('banner-avatar').textContent = initials(selectedCustomer.displayName);
+  const bannerAv = document.getElementById('banner-avatar');
+  if (selectedCustomer.image) {
+    bannerAv.innerHTML = `<img src="data:image/jpeg;base64,${selectedCustomer.image}" alt="">`;
+  } else {
+    bannerAv.textContent = initials(selectedCustomer.displayName);
+  }
   document.getElementById('banner-name').textContent = selectedCustomer.displayName;
   document.getElementById('banner-no').textContent = selectedCustomer.number||'—';
   document.getElementById('banner-city').textContent = [selectedCustomer.city, selectedCustomer.country].filter(Boolean).join(', ')||'—';
@@ -673,24 +784,29 @@ async function loadLedger(skip = 0) {
   const el = document.getElementById('ledger-content');
   el.innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading ledger entries...</span></div>';
   try {
-    const res = await cePost(selectedCompany.id, {
-      specversion: '1.0',
-      type: 'Data.Records.Get',
-      source: 'BC Portal',
-      data: JSON.stringify({
-        tableName: 'Cust. Ledger Entry',
-        fieldNumbers: [4, 5, 6, 7, 13, 14, 36],
-        tableView: `WHERE(Customer No.=CONST(${selectedCustomer.number}))`,
-        skip,
-        take
-      })
-    });
+    const [res, meta] = await Promise.all([
+      cePost(selectedCompany.id, {
+        specversion: '1.0',
+        type: 'Data.Records.Get',
+        source: 'BC Portal',
+        data: JSON.stringify({
+          tableName: 'Cust. Ledger Entry',
+          fieldNumbers: [4, 5, 6, 7, 13, 14, 36],
+          tableView: `WHERE(Customer No.=CONST(${selectedCustomer.number}))`,
+          skip,
+          take
+        })
+      }),
+      getFieldMeta('Cust. Ledger Entry', [1, 4, 5, 6, 7, 13, 14, 36])
+    ]);
+    const cap = {};
+    meta.forEach(f => { cap[f.id] = f.caption; });
     const rows = res.result || [];
     const total = res.noOfRecords || 0;
     if (!rows.length) { el.innerHTML='<div class="empty-state"><div class="empty-icon">📒</div><p>No ledger entries</p></div>'; return; }
     rows.sort((a,b) => parseInt((b.primaryKey||{}).EntryNo_||0) - parseInt((a.primaryKey||{}).EntryNo_||0));
     el.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>Entry No.</th><th>Date</th><th>Doc Type</th><th>Doc No.</th><th>Description</th><th>Amount</th><th>Remaining</th><th>Status</th></tr></thead>
+      <thead><tr><th>${cap[1]||'Entry No.'}</th><th>${cap[4]||'Date'}</th><th>${cap[5]||'Doc Type'}</th><th>${cap[6]||'Doc No.'}</th><th>${cap[7]||'Description'}</th><th>${cap[13]||'Amount'}</th><th>${cap[14]||'Remaining'}</th><th>${cap[36]||'Status'}</th></tr></thead>
       <tbody>${rows.map(rec => {
         const f = rec.fields || {}; const pk = rec.primaryKey || {};
         return `<tr>
@@ -716,7 +832,7 @@ async function loadDocuments() {
   const el = document.getElementById('documents-content');
   el.innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading documents...</span></div>';
   try {
-    const [ordRes, invRes] = await Promise.all([
+    const [ordRes, invRes, metaOrd, metaInv] = await Promise.all([
       cePost(selectedCompany.id, {
         specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
         data: JSON.stringify({ tableName: 'Sales Header', fieldNumbers: [19, 61, 120, 5790], tableView: `WHERE(Document Type=CONST(Order),Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
@@ -724,38 +840,48 @@ async function loadDocuments() {
       cePost(selectedCompany.id, {
         specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
         data: JSON.stringify({ tableName: 'Sales Invoice Header', fieldNumbers: [20, 24, 61], tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
-      }).catch(() => ({ result: [] }))
+      }).catch(() => ({ result: [] })),
+      getFieldMeta('Sales Header', [61, 120, 5790]),
+      getFieldMeta('Sales Invoice Header', [20, 24, 61])
     ]);
-    const orders = (ordRes.result || []).map(rec => ({
-      _t: 'Order', number: (rec.primaryKey||{}).No_,
-      _date: (rec.fields||{}).OrderDate, _total: (rec.fields||{}).AmountIncludingVAT,
-      _status: (rec.fields||{}).Status || 'Open', dueDate: (rec.fields||{}).RequestedDeliveryDate
-    }));
+    // Build caption maps: prefer Sales Header for order-specific fields, Sales Invoice Header for shared ones
+    const capOrd = {}; metaOrd.forEach(f => { capOrd[f.id] = f.caption; });
+    const capInv = {}; metaInv.forEach(f => { capInv[f.id] = f.caption; });
+    const statusEnumCaptions = {};
+    const field120 = metaOrd.find(f => f.id === 120);
+    if (field120 && field120.enum) field120.enum.forEach(e => { statusEnumCaptions[e.value] = e.caption; });
+    const orders = (ordRes.result || []).map(rec => {
+      const status = (rec.fields||{}).Status || 'Open';
+      return { _t: 'Order', number: (rec.primaryKey||{}).No_,
+        _date: (rec.fields||{}).OrderDate, _total: (rec.fields||{}).AmountIncludingVAT,
+        _status: status, _statusLabel: statusEnumCaptions[status] || status,
+        dueDate: (rec.fields||{}).RequestedDeliveryDate };
+    });
     const invoices = (invRes.result || []).map(rec => ({
       _t: 'Invoice', number: (rec.primaryKey||{}).No_,
       _date: (rec.fields||{}).PostingDate, _total: (rec.fields||{}).AmountIncludingVAT,
-      _status: 'Paid', dueDate: (rec.fields||{}).DueDate
+      _status: 'Paid', _statusLabel: 'Paid', dueDate: (rec.fields||{}).DueDate
     }));
     const docs = [...orders, ...invoices].sort((a,b) => new Date(b._date||0) - new Date(a._date||0));
     if (!docs.length) { el.innerHTML='<div class="empty-state"><div class="empty-icon">📄</div><p>No documents found</p></div>'; return; }
     el.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>Type</th><th>Number</th><th>Date</th><th>Due Date</th><th>Total incl. VAT</th><th>Status</th></tr></thead>
+      <thead><tr><th>Type</th><th>No.</th><th>${capOrd[61]||'Date'}</th><th>${capInv[24]||'Due Date'}</th><th>${capInv[61]||'Total incl. VAT'}</th><th>${capOrd[120]||'Status'}</th></tr></thead>
       <tbody>${docs.map(d=>`<tr>
         <td>${d._t==='Invoice'?'🧾':'📦'} ${d._t}</td>
         <td><strong>${d.number||'—'}</strong></td>
         <td>${fmtDate(d._date)}</td>
         <td>${fmtDate(d.dueDate)}</td>
         <td class="amount-pos">${fmt(d._total)}</td>
-        <td>${chipStatus(d._status)}</td>
+        <td>${chipStatus(d._status, d._statusLabel)}</td>
       </tr>`).join('')}</tbody>
     </table></div>`;
   } catch(e) { el.innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`; }
 }
 
-function chipStatus(s) {
+function chipStatus(s, label) {
   if (!s) return '—';
-  const m = {Open:'open','In Review':'pending',Released:'closed',Paid:'closed',Draft:'pending'};
-  return `<span class="chip ${m[s]||'open'}">${s}</span>`;
+  const m = {Open:'open','In Review':'pending',Released:'closed',Paid:'closed',Draft:'pending','Pending Prepayment':'pending'};
+  return `<span class="chip ${m[s]||'open'}">${label || s}</span>`;
 }
 
 // ---- ITEMS ----
