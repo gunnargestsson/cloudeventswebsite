@@ -564,8 +564,7 @@ let selectedCompany = null;
 let selectedCustomer = null;
 let orderQty = {};
 let customerCredit = null;
-let itemAvailability = {}; // keyed by item.id; value = {response, avail} once loaded, undefined = not yet loaded
-let itemPrices = {};       // keyed by item.id; value = best priceListLine or null once loaded, undefined = not yet loaded
+let itemPrices = {};       // keyed by item.id; value = best priceListLine — always fetched fresh on interaction
 let itemPictures = {};     // keyed by item.id; value = Media array or null once loaded, undefined = not yet fetched
 let selectedLcid = 1033;
 
@@ -962,7 +961,6 @@ async function selectCustomer(id) {
   loadDocuments();
   loadItems();
   customerCredit = null;
-  itemAvailability = {};
   itemPrices = {};
   itemPictures = {};
   document.getElementById('credit-info-btn').style.display = 'none';
@@ -1292,49 +1290,13 @@ async function loadItems() {
       data: JSON.stringify({ tableName: 'Item', fieldNumbers: [3, 10, 18], tableView: 'WHERE(Type=CONST(Inventory),Sales Blocked=CONST(false))', take: pageSize() * 2 })
     });
     items = (res.result || []).map(mapItem);
-    itemAvailability = {};
     itemPrices = {};
     itemPictures = {};
     renderItems(items);
-    loadItemAvailability();
-    loadItemPrices();
   } catch(e) { document.getElementById('items-list').innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`; }
 }
 
-async function loadItemAvailability() {
-  if (!selectedCustomer?.locationCode || !items.length) return;
-  await Promise.allSettled(items.map(async it => {
-    try {
-      const res = await cePost(selectedCompany.id, {
-        specversion: '1.0', type: 'Item.Availability.Get',
-        source: 'BC Portal', subject: it.number,
-        data: JSON.stringify({ locationFilter: selectedCustomer.locationCode })
-      });
-      const avail = (res.availability || []).find(a => a.locationCode === selectedCustomer.locationCode) || null;
-      itemAvailability[it.id] = { response: res, avail };
-    } catch(e) {
-      itemAvailability[it.id] = { response: null, avail: null };
-    }
-  }));
-  filterItems(); // re-render badges now that availability is known
-}
 
-async function loadItemPrices() {
-  if (!selectedCustomer?.number || !items.length) return;
-  await Promise.allSettled(items.map(async it => {
-    try {
-      const res = await cePost(selectedCompany.id, {
-        specversion: '1.0', type: 'Item.Price.Get',
-        source: 'BC Portal', subject: it.number,
-        data: JSON.stringify({ customerNo: selectedCustomer.number })
-      });
-      itemPrices[it.id] = (res.priceListLines || [])[0] || null;
-    } catch(e) {
-      itemPrices[it.id] = null;
-    }
-  }));
-  filterItems();
-}
 
 function getEffectivePrice(id) {
   const it = items.find(i => i.id === id);
@@ -1360,43 +1322,37 @@ async function showItemAvailability(id) {
   title.textContent    = it.number;
   subtitle.textContent = it.displayName;
   modal.classList.remove('hidden');
+  body.innerHTML = '<div class="loader-wrap"><div class="spinner"></div></div>';
 
-  let cached = itemAvailability[id];
-  if (cached === undefined) {
-    body.innerHTML = '<div class="loader-wrap"><div class="spinner"></div></div>';
-    try {
-      const data = selectedCustomer?.locationCode ? { locationFilter: selectedCustomer.locationCode } : {};
-      const res = await cePost(selectedCompany.id, {
-        specversion: '1.0', type: 'Item.Availability.Get',
-        source: 'BC Portal', subject: it.number,
-        data: JSON.stringify(data)
-      });
-      const avail = selectedCustomer?.locationCode
-        ? (res.availability || []).find(a => a.locationCode === selectedCustomer.locationCode) || null
-        : (res.availability || [])[0] || null;
-      cached = { response: res, avail };
-      itemAvailability[id] = cached;
-    } catch(e) {
-      body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
-      return;
-    }
+  // Always fetch fresh — availability and price change frequently
+  let res, avail, priceLine;
+  let pictures = itemPictures[id]; // pictures are stable; only fetch once per session
+  try {
+    const data = selectedCustomer?.locationCode ? { locationFilter: selectedCustomer.locationCode } : {};
+    const availResult = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Item.Availability.Get',
+      source: 'BC Portal', subject: it.number,
+      data: JSON.stringify(data)
+    });
+    res = availResult;
+    avail = selectedCustomer?.locationCode
+      ? (res.availability || []).find(a => a.locationCode === selectedCustomer.locationCode) || null
+      : (res.availability || [])[0] || null;
+  } catch(e) {
+    body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
+    return;
   }
-  // fetch price and picture in parallel if not yet loaded
-  let priceLine = itemPrices[id];
-  let pictures  = itemPictures[id];
-  const fetches = [];
-  if (priceLine === undefined) {
-    fetches.push(
-      cePost(selectedCompany.id, {
-        specversion: '1.0', type: 'Item.Price.Get',
-        source: 'BC Portal', subject: it.number,
-        data: JSON.stringify({ customerNo: selectedCustomer?.number || '' })
-      }).then(pr => {
-        priceLine = (pr.priceListLines || [])[0] || null;
-        itemPrices[id] = priceLine;
-      }).catch(() => { priceLine = null; itemPrices[id] = null; })
-    );
-  }
+  // Fetch fresh price; fetch picture only if not yet loaded for this session
+  const fetches = [
+    cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Item.Price.Get',
+      source: 'BC Portal', subject: it.number,
+      data: JSON.stringify({ customerNo: selectedCustomer?.number || '' })
+    }).then(pr => {
+      priceLine = (pr.priceListLines || [])[0] || null;
+      itemPrices[id] = priceLine;
+    }).catch(() => { priceLine = null; itemPrices[id] = null; })
+  ];
   if (pictures === undefined) {
     fetches.push(
       cePost(selectedCompany.id, {
@@ -1410,10 +1366,7 @@ async function showItemAvailability(id) {
       }).catch(() => { pictures = null; itemPictures[id] = null; })
     );
   }
-  if (fetches.length) await Promise.all(fetches);
-
-  const res   = cached?.response;
-  const avail = cached?.avail;
+  await Promise.all(fetches);
   const loc   = avail?.locationCode || selectedCustomer?.locationCode || '—';
 
   const pictureSection = pictures && pictures.length ? `
@@ -1468,15 +1421,6 @@ function showItemPictureGallery(id) {
   `;
 }
 
-function availBadge(id) {
-  const a = itemAvailability[id];
-  if (a === undefined) return selectedCustomer?.locationCode ? '<span class="avail-badge avail-loading">…</span>' : '';
-  if (!a || !a.avail) return '<span class="avail-badge avail-none">0</span>';
-  const qty = a.avail.availableQuantity || 0;
-  const cls = qty <= 0 ? 'avail-none' : qty < 10 ? 'avail-low' : '';
-  return `<span class="avail-badge ${cls}">${qty.toLocaleString()}</span>`;
-}
-
 function renderItems(list) {
   if (!list.length) { document.getElementById('items-list').innerHTML=`<div class="empty-state"><div class="empty-icon">📦</div><p>${t('No items found')}</p></div>`; return; }
   const icons = {Inventory:'📦',Service:'⚙','Non-Inventory':'📋'};
@@ -1485,7 +1429,7 @@ function renderItems(list) {
       <div class="item-icon">${icons[it.type]||'📦'}</div>
       <div class="item-info">
         <div class="item-name">${it.displayName}</div>
-        <div class="item-no">${it.number} ${availBadge(it.id)}</div>
+        <div class="item-no">${it.number}</div>
       </div>
       <div class="item-price">${fmt(getEffectivePrice(it.id))}</div>
       <button class="doc-action-btn info" onclick="showItemAvailability('${it.id}')" title="${t('Item Availability')}">ⓘ</button>
@@ -1503,11 +1447,30 @@ function filterItems() {
   Object.keys(orderQty).forEach(id=>{ const el=document.getElementById('qty-'+id); if(el) el.textContent=orderQty[id]; });
 }
 
-function changeQty(id, delta) {
+async function changeQty(id, delta) {
   if (delta > 0) {
-    const avEntry = itemAvailability[id];
-    if (avEntry !== undefined) { // loaded
-      const maxQty = avEntry?.avail ? (avEntry.avail.availableQuantity || 0) : 0;
+    const it = items.find(i => i.id === id);
+    // Always fetch fresh price and availability for this item
+    const [priceRes, availRes] = await Promise.allSettled([
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Item.Price.Get',
+        source: 'BC Portal', subject: it.number,
+        data: JSON.stringify({ customerNo: selectedCustomer?.number || '' })
+      }),
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Item.Availability.Get',
+        source: 'BC Portal', subject: it.number,
+        data: JSON.stringify(selectedCustomer?.locationCode ? { locationFilter: selectedCustomer.locationCode } : {})
+      })
+    ]);
+    if (priceRes.status === 'fulfilled') {
+      itemPrices[id] = (priceRes.value.priceListLines || [])[0] || null;
+    }
+    if (availRes.status === 'fulfilled') {
+      const avail = selectedCustomer?.locationCode
+        ? (availRes.value.availability || []).find(a => a.locationCode === selectedCustomer.locationCode) || null
+        : (availRes.value.availability || [])[0] || null;
+      const maxQty = avail ? (avail.availableQuantity || 0) : 0;
       if ((orderQty[id] || 0) + delta > maxQty) {
         toast(t('Exceeds available quantity'), 'error');
         return;
