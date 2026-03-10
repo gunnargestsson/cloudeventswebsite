@@ -981,6 +981,121 @@ If `lcid` is omitted or `0`, the default language from Cloud Events Setup is use
 
 ---
 
+## UI String Translations (Cloud Event Translation table)
+
+The `Cloud Event Translation` table lets you store localized captions for arbitrary UI strings — tab labels, button text, form field names — that are not directly served by BC field metadata.
+
+### Table structure
+
+| Column | Type | Role |
+|---|---|---|
+| `Source` | Code | Identifies the calling app — use the same value as the `source` in your Cloud Events requests (e.g. `"BC Portal"`) |
+| `WindowsLanguageID` | Code | LCID as a string (e.g. `"1039"`) |
+| `SourceText` | Text | English source string — the key you look up at runtime |
+| `TargetText` | Text | Localized translation — filled in by the user directly in BC |
+
+Primary key: `Source` + `WindowsLanguageID` + `SourceText`.
+
+### Fetch all translations for a language
+
+One batch request loads every translation for the active language. The `source` filter must match the `source` field in your Cloud Events envelope:
+
+```json
+{
+  "specversion": "1.0",
+  "type": "Data.Records.Get",
+  "source": "BC Portal",
+  "subject": "Cloud Event Translation",
+  "data": "{\"tableView\": \"WHERE(Windows Language ID=CONST(1039),Source=CONST(BC Portal))\"}"
+}
+```
+
+Response — `primaryKey.SourceText` is the English key; `fields.TargetText` is the localized value:
+
+```json
+{
+  "status": "Success",
+  "noOfRecords": 1,
+  "result": [
+    {
+      "id": "CEC16092-811C-F111-8340-0022489B46A1",
+      "primaryKey": { "Source": "BC Portal", "WindowsLanguageID": "1039", "SourceText": "Type" },
+      "fields": { "TargetText": "Tegund" }
+    }
+  ]
+}
+```
+
+### Fetch a single string
+
+Append `, Source Text=CONST(<english text>)` to the `tableView` filter:
+
+```json
+{
+  "data": "{\"tableView\": \"WHERE(Windows Language ID=CONST(1039),Source=CONST(BC Portal),Source Text=CONST(Type))\"}"
+}
+```
+
+An empty `result` array means no translation record exists yet for that string.
+
+### Auto-create missing translation records
+
+When a string is missing, create a blank record via `Data.Records.Set` — the user can then fill in `TargetText` directly in Business Central:
+
+```json
+{
+  "specversion": "1.0",
+  "type": "Data.Records.Set",
+  "source": "BC Portal",
+  "subject": "Cloud Event Translation",
+  "data": "{\"data\": [{\"primaryKey\": {\"Source\": \"BC Portal\", \"WindowsLanguageID\": \"1039\", \"SourceText\": \"Type\"}, \"fields\": {\"TargetText\": \"\"}}]}"
+}
+```
+
+Batch-create multiple strings at once by sending an array with multiple records in `data.data`.
+
+### Portal implementation pattern
+
+```js
+// 1. Batch-fetch all translations for the active language
+const res = await cePost(companyId, {
+  specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+  subject: 'Cloud Event Translation',
+  data: JSON.stringify({ tableView: `WHERE(Windows Language ID=CONST(${lcid}),Source=CONST(BC Portal))` })
+});
+
+// 2. Build source → target map
+const uiTranslations = {};
+for (const rec of res.result || []) {
+  const src = (rec.primaryKey || {}).SourceText;
+  const tgt = (rec.fields || {}).TargetText;
+  if (src && tgt) uiTranslations[src] = tgt;
+}
+
+// 3. Create blank placeholder records for any strings not yet in the table
+const existing = new Set((res.result || []).map(r => r.primaryKey.SourceText));
+const missing = UI_STRINGS.filter(s => !existing.has(s));
+if (missing.length) {
+  await cePost(companyId, {
+    specversion: '1.0', type: 'Data.Records.Set', source: 'BC Portal',
+    subject: 'Cloud Event Translation',
+    data: JSON.stringify({
+      data: missing.map(s => ({
+        primaryKey: { Source: 'BC Portal', WindowsLanguageID: String(lcid), SourceText: s },
+        fields: { TargetText: '' }
+      }))
+    })
+  });
+}
+
+// 4. t() helper — falls back to the English text when no translation exists
+function t(s) { return uiTranslations[s] || s; }
+```
+
+> **Note:** Skip loading entirely for `lcid === 1033` (English) since no translation is needed.
+
+---
+
 ## Using Table Numbers and Field Numbers
 
 The recommended pattern for querying BC data without hard-coding field names:

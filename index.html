@@ -350,7 +350,7 @@
     <div id="view-companies">
       <div class="breadcrumb"><span style="color:var(--text)">Companies</span></div>
       <div class="section-header">
-        <div class="section-title"><small>Business Central / UAT</small>Select Company</div>
+        <div class="section-title"><small>Business Central / UAT</small><span data-t="Select Company">Select Company</span></div>
         <span class="badge" id="company-count">—</span>
       </div>
       <div id="config-panel" class="config-panel" style="display:none">
@@ -375,12 +375,12 @@
         <span id="crumb-company" style="color:var(--text)">—</span>
       </div>
       <div class="section-header">
-        <div class="section-title"><small id="customers-company-label">—</small>Customers</div>
+        <div class="section-title"><small id="customers-company-label">—</small><span data-t="Customers">Customers</span></div>
         <span class="badge" id="customer-count">—</span>
       </div>
       <div class="search-wrap">
         <span class="search-icon">⌕</span>
-        <input type="text" id="customer-search" placeholder="Search by name or number..." oninput="filterCustomers()" />
+        <input type="text" id="customer-search" data-tp="Search by name or number..." placeholder="Search by name or number..." oninput="filterCustomers()" />
       </div>
       <div id="customer-grid" class="customer-grid">
         <div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading customers...</span></div>
@@ -407,12 +407,12 @@
             <span>📧 <span id="banner-email">—</span></span>
           </div>
         </div>
-        <button class="back-btn" onclick="showCustomers()">← Customers</button>
+        <button class="back-btn" onclick="showCustomers()" data-t="← Customers">← Customers</button>
       </div>
       <div class="tabs">
-        <button class="tab active" onclick="switchTab('ledger')">Ledger Entries</button>
-        <button class="tab" onclick="switchTab('documents')">Documents</button>
-        <button class="tab" onclick="switchTab('create-order')">Create Order</button>
+        <button class="tab active" onclick="switchTab('ledger')" data-t="Ledger Entries">Ledger Entries</button>
+        <button class="tab" onclick="switchTab('documents')" data-t="Documents">Documents</button>
+        <button class="tab" onclick="switchTab('create-order')" data-t="Create Order">Create Order</button>
       </div>
       <div id="tab-ledger" class="tab-panel active">
         <div id="ledger-content"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading...</span></div></div>
@@ -423,36 +423,36 @@
       <div id="tab-create-order" class="tab-panel">
         <div id="order-success" class="order-success">
           <div class="success-ring">✓</div>
-          <div class="success-title">Order Created!</div>
+          <div class="success-title" data-t="Order Created!">Order Created!</div>
           <div class="success-sub" id="order-success-msg"></div>
-          <button class="btn-ghost" onclick="resetOrder()">Create Another</button>
+          <button class="btn-ghost" onclick="resetOrder()" data-t="Create Another">Create Another</button>
         </div>
         <div id="order-form-content">
           <div class="order-form-wrap">
             <div class="panel">
-              <div class="panel-header">Select Items</div>
+              <div class="panel-header" data-t="Select Items">Select Items</div>
               <div class="search-wrap" style="padding:12px 16px 0; margin-bottom:0;">
                 <span class="search-icon">⌕</span>
-                <input type="text" id="item-search" placeholder="Search items..." oninput="filterItems()" />
+                <input type="text" id="item-search" data-tp="Search items..." placeholder="Search items..." oninput="filterItems()" />
               </div>
               <div id="items-list"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading items...</span></div></div>
             </div>
             <div class="order-summary panel">
-              <div class="panel-header">Order Summary</div>
+              <div class="panel-header" data-t="Order Summary">Order Summary</div>
               <div class="field-group">
-                <div class="field-label">Requested Delivery Date</div>
+                <div class="field-label" data-t="Requested Delivery Date">Requested Delivery Date</div>
                 <input type="date" class="field-input" id="order-date" />
               </div>
               <div class="field-group">
-                <div class="field-label">External Document No.</div>
-                <input type="text" class="field-input" id="order-ext-doc" placeholder="Your PO / reference..." />
+                <div class="field-label" data-t="External Document No.">External Document No.</div>
+                <input type="text" class="field-input" id="order-ext-doc" data-tp="Your PO / reference..." placeholder="Your PO / reference..." />
               </div>
               <div id="order-lines"></div>
               <div class="summary-total">
-                <span>Total</span>
+                <span data-t="Total">Total</span>
                 <span class="total-val" id="order-total">0.00</span>
               </div>
-              <button class="btn-primary" id="submit-btn" onclick="submitOrder()">Post Sales Order →</button>
+              <button class="btn-primary" id="submit-btn" onclick="submitOrder()" data-t="Post Sales Order →">Post Sales Order →</button>
             </div>
           </div>
         </div>
@@ -479,6 +479,18 @@ let selectedLcid = 1033;
 let fieldMetaCache = {};
 // Localized enum captions for Customer.Blocked — value (e.g. 'Ship') → caption (e.g. 'Afhenda')
 let blockedEnumCaptions = {};
+// UI string translations keyed by English source text — loaded from Cloud Event Translation table
+let uiTranslations = {};
+const UI_STRINGS = [
+  'Customers', 'Select Company', '← Customers',
+  'Ledger Entries', 'Documents', 'Create Order',
+  'Search by name or number...',
+  'Active', 'Order', 'Invoice', 'Paid',
+  'Select Items', 'Search items...',
+  'Order Summary', 'Requested Delivery Date', 'External Document No.', 'Your PO / reference...',
+  'Total', 'Post Sales Order →', 'Create Another', 'Order Created!',
+  'No customers found', 'No documents found', 'No items found',
+];
 
 // Fallback names used only when the Language table lookup fails
 const LCID_NAMES = {
@@ -526,6 +538,51 @@ async function getFieldMeta(tableName, fieldNumbers) {
   return meta;
 }
 
+// t(): translate a UI constant; falls back to the English text when no translation is available
+function t(s) { return uiTranslations[s] || s; }
+
+// applyUiTranslations(): update all [data-t] / [data-tp] DOM elements with current translations
+function applyUiTranslations() {
+  document.querySelectorAll('[data-t]').forEach(el => { el.textContent = t(el.dataset.t); });
+  document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
+}
+
+// loadUiTranslations(): batch-fetch all translations for the active language from the
+// Cloud Event Translation table. Any UI_STRINGS not yet in the table are created as blank
+// records so users can fill in the TargetText directly in Business Central.
+async function loadUiTranslations() {
+  uiTranslations = {};
+  if (selectedLcid === 1033) return; // English — no translation needed
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+      subject: 'Cloud Event Translation',
+      data: JSON.stringify({ tableView: `WHERE(Windows Language ID=CONST(${selectedLcid}),Source=CONST(BC Portal))` })
+    });
+    const rows = res.result || [];
+    for (const rec of rows) {
+      const src = (rec.primaryKey || {}).SourceText;
+      const tgt = (rec.fields || {}).TargetText;
+      if (src && tgt) uiTranslations[src] = tgt;
+    }
+    // Create placeholder records for any strings not yet in the table
+    const existing = new Set(rows.map(r => (r.primaryKey || {}).SourceText));
+    const missing = UI_STRINGS.filter(s => !existing.has(s));
+    if (missing.length) {
+      await cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Set', source: 'BC Portal',
+        subject: 'Cloud Event Translation',
+        data: JSON.stringify({
+          data: missing.map(s => ({
+            primaryKey: { Source: 'BC Portal', WindowsLanguageID: String(selectedLcid), SourceText: s },
+            fields: { TargetText: '' }
+          }))
+        })
+      });
+    }
+  } catch(e) { /* silently fall back to English */ }
+}
+
 // ---- UTILS ----
 function pageSize() { return 20; }
 function fmt(n) { return (parseFloat(n)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -567,16 +624,18 @@ async function loadLanguages() {
   }
 }
 
-function onLangChange(value) {
+async function onLangChange(value) {
   selectedLcid = parseInt(value, 10);
-  // Reload whichever data view is currently active
+  await loadUiTranslations();
+  applyUiTranslations();
+  // Reload whichever data view is currently active (use panel ID — tab text changes after translation)
   const detail = document.getElementById('view-detail');
   if (detail.style.display !== 'none') {
-    const activeTab = document.querySelector('.tab.active');
-    const tab = activeTab ? activeTab.textContent.trim() : '';
-    if (tab.includes('Ledger')) loadLedger();
-    else if (tab.includes('Document')) loadDocuments();
-    else if (tab.includes('Order')) loadItems();
+    const activePanel = document.querySelector('.tab-panel.active');
+    const panelId = activePanel ? activePanel.id : '';
+    if (panelId === 'tab-ledger') loadLedger();
+    else if (panelId === 'tab-documents') loadDocuments();
+    else if (panelId === 'tab-create-order') loadItems();
   } else {
     loadCustomers();
   }
@@ -683,12 +742,15 @@ async function selectCompany(id) {
   if (!selectedCompany) return;
   fieldMetaCache = {};        // new company — discard all cached field metadata
   blockedEnumCaptions = {};
+  uiTranslations = {};
   const name = selectedCompany.displayName || selectedCompany.name;
   document.getElementById('crumb-company').textContent = name;
   document.getElementById('crumb-company2').textContent = name;
   document.getElementById('customers-company-label').textContent = name;
   show('view-customers');
   await loadLanguages();
+  await loadUiTranslations();
+  applyUiTranslations();
   await loadCustomers();
 }
 
@@ -723,7 +785,7 @@ async function loadCustomers(skip = 0) {
 
 function renderCustomers(list) {
   if (!list.length) {
-    document.getElementById('customer-grid').innerHTML = '<div class="empty-state"><div class="empty-icon">👥</div><p>No customers found</p></div>';
+    document.getElementById('customer-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">👥</div><p>${t('No customers found')}</p></div>`;
     return;
   }
   document.getElementById('customer-grid').innerHTML = list.map(c => `
@@ -733,7 +795,7 @@ function renderCustomers(list) {
       <div class="cust-no"># ${c.number||'—'}</div>
       <div class="cust-meta">
         ${c.city?`<span class="cust-tag">📍 ${c.city}</span>`:''}
-        ${c.blocked===''?'<span class="cust-tag green">● Active</span>':`<span class="cust-tag amber">● ${blockedEnumCaptions[c.blocked]||c.blocked}</span>`}
+        ${c.blocked===''?`<span class="cust-tag green">● ${t('Active')}</span>`:`<span class="cust-tag amber">● ${blockedEnumCaptions[c.blocked]||c.blocked}</span>`}
         ${c.balance?`<span class="cust-tag">${fmt(c.balance)}</span>`:''}
       </div>
     </div>`).join('');
@@ -860,14 +922,14 @@ async function loadDocuments() {
     const invoices = (invRes.result || []).map(rec => ({
       _t: 'Invoice', number: (rec.primaryKey||{}).No_,
       _date: (rec.fields||{}).PostingDate, _total: (rec.fields||{}).AmountIncludingVAT,
-      _status: 'Paid', _statusLabel: 'Paid', dueDate: (rec.fields||{}).DueDate
+      _status: 'Paid', _statusLabel: t('Paid'), dueDate: (rec.fields||{}).DueDate
     }));
     const docs = [...orders, ...invoices].sort((a,b) => new Date(b._date||0) - new Date(a._date||0));
-    if (!docs.length) { el.innerHTML='<div class="empty-state"><div class="empty-icon">📄</div><p>No documents found</p></div>'; return; }
+    if (!docs.length) { el.innerHTML=`<div class="empty-state"><div class="empty-icon">📄</div><p>${t('No documents found')}</p></div>`; return; }
     el.innerHTML = `<div class="table-wrap"><table>
       <thead><tr><th>Type</th><th>No.</th><th>${capOrd[61]||'Date'}</th><th>${capInv[24]||'Due Date'}</th><th>${capInv[61]||'Total incl. VAT'}</th><th>${capOrd[120]||'Status'}</th></tr></thead>
       <tbody>${docs.map(d=>`<tr>
-        <td>${d._t==='Invoice'?'🧾':'📦'} ${d._t}</td>
+        <td>${d._t==='Invoice'?'🧾':'📦'} ${t(d._t)}</td>
         <td><strong>${d.number||'—'}</strong></td>
         <td>${fmtDate(d._date)}</td>
         <td>${fmtDate(d.dueDate)}</td>
@@ -901,7 +963,7 @@ async function loadItems() {
 }
 
 function renderItems(list) {
-  if (!list.length) { document.getElementById('items-list').innerHTML='<div class="empty-state"><div class="empty-icon">📦</div><p>No items found</p></div>'; return; }
+  if (!list.length) { document.getElementById('items-list').innerHTML=`<div class="empty-state"><div class="empty-icon">📦</div><p>${t('No items found')}</p></div>`; return; }
   const icons = {Inventory:'📦',Service:'⚙','Non-Inventory':'📋'};
   document.getElementById('items-list').innerHTML = list.map(it=>`
     <div class="item-row">
@@ -991,7 +1053,7 @@ async function submitOrder() {
   } catch(e) {
     toast('Failed: ' + e.message, 'error');
   } finally {
-    btn.disabled=false; btn.textContent='Post Sales Order →';
+    btn.disabled=false; btn.textContent=t('Post Sales Order →');
   }
 }
 
