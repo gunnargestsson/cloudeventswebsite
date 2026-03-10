@@ -64,6 +64,12 @@ module.exports = async function (context, req) {
         context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(task) };
         return;
       }
+      // Binary content (e.g. PDF) — stream back directly instead of JSON-parsing
+      if (task.datacontenttype && task.datacontenttype.includes("pdf")) {
+        const { buffer, contentType } = await binaryGet(task.data, authHeader);
+        context.res = { status: 200, headers: { "Content-Type": contentType || "application/pdf" }, body: buffer, isRaw: true };
+        return;
+      }
       const result = await bcRequest("GET", task.data, authHeader, null);
       context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) };
     } catch (e) {
@@ -112,6 +118,26 @@ module.exports = async function (context, req) {
     };
   }
 };
+
+function binaryGet(url, authHeader) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request(
+      { hostname: u.hostname, path: u.pathname + u.search, method: "GET",
+        headers: { Authorization: authHeader } },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          if (res.statusCode >= 400) { reject(new Error(`BC API ${res.statusCode}`)); return; }
+          resolve({ buffer: Buffer.concat(chunks), contentType: res.headers["content-type"] });
+        });
+      }
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 function bcRequest(method, url, authHeader, bodyData) {
   return new Promise((resolve, reject) => {

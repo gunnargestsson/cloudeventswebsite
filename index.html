@@ -327,7 +327,7 @@
   .page-info { font-family: 'DM Mono', monospace; }
 
   /* DOCUMENT ACTION BUTTONS */
-  .doc-action-btn { background: none; border: none; cursor: pointer; font-size: 0.9rem; padding: 3px 7px; border-radius: var(--radius-sm); transition: all 0.15s; opacity: 0.5; line-height: 1; }
+  .doc-action-btn { background: none; border: none; cursor: pointer; font-size: 0.9rem; padding: 3px 7px; border-radius: var(--radius-sm); transition: all 0.15s; opacity: 0.85; line-height: 1; }
   .doc-action-btn:hover { background: var(--surface-alt); opacity: 1; }
   .doc-action-btn.info:hover { color: var(--accent); }
   .doc-action-btn.pdf:hover { color: #e07070; }
@@ -539,6 +539,9 @@ const UI_STRINGS = [
   'No customers found', 'No documents found', 'No items found', 'No companies found',
   'customers', 'records', 'Page', 'of', 'Prev', 'Next',
   'Open', 'Closed', 'companies',
+  'Total excl. VAT', 'Total incl. VAT', 'VAT Amount', 'Quantity',
+  'Line Discount', 'Invoice Discount', 'Total Weight', 'Total Volume',
+  'VAT Breakdown', 'VAT Identifier', 'Base', 'VAT', 'Downloading PDF...',
 ];
 
 // Fallback names used only when the Language table lookup fails
@@ -970,7 +973,7 @@ async function loadDocuments() {
         specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
         data: JSON.stringify({ tableName: 'Sales Cr.Memo Header', fieldNumbers: [20, 24, 61], tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
       }).catch(() => ({ result: [] })),
-      getFieldMeta('Sales Header', [20, 61, 120, 5790]),
+      getFieldMeta('Sales Header', [19, 20, 61, 120, 5790]),
       getFieldMeta('Sales Invoice Header', [20, 24, 61])
     ]);
     // Build caption maps
@@ -1004,7 +1007,7 @@ async function loadDocuments() {
     if (!docs.length) { el.innerHTML=`<div class="empty-state"><div class="empty-icon">📄</div><p>${t('No documents found')}</p></div>`; return; }
     const typeIcon = { Order: '📦', Invoice: '🧾', 'Credit Memo': '📝' };
     el.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>${t('Type')}</th><th>${t('No.')}</th><th>${capOrd[61]||'Order Date'}</th><th>${capInv[20]||'Posting Date'}</th><th>${capInv[24]||'Due Date'}</th><th>${capInv[61]||'Total incl. VAT'}</th><th>${capOrd[120]||'Status'}</th><th class="action-col"></th></tr></thead>
+      <thead><tr><th>${t('Type')}</th><th>${t('No.')}</th><th>${capOrd[19]||'Order Date'}</th><th>${capInv[20]||'Posting Date'}</th><th>${capInv[24]||'Due Date'}</th><th>${capInv[61]||'Total incl. VAT'}</th><th>${capOrd[120]||'Status'}</th><th class="action-col"></th></tr></thead>
       <tbody>${docs.map(d=>{
         let actionBtn = '';
         if (d._t === 'Order') {
@@ -1054,19 +1057,19 @@ async function showOrderStats(orderNo) {
     const o = res.order || {};
     body.innerHTML = `
       <div class="stats-grid">
-        <div class="stat-row"><span class="stat-label">Total excl. VAT</span><span class="stat-value hl">${fmt(o.totalExclVAT)}</span></div>
-        <div class="stat-row"><span class="stat-label">Total incl. VAT</span><span class="stat-value hl">${fmt(o.totalInclVAT)}</span></div>
-        <div class="stat-row"><span class="stat-label">VAT Amount</span><span class="stat-value">${fmt(o.vatAmount)}</span></div>
-        <div class="stat-row"><span class="stat-label">Quantity</span><span class="stat-value">${(o.quantity||0).toLocaleString()}</span></div>
-        <div class="stat-row"><span class="stat-label">Line Discount</span><span class="stat-value">${fmt(o.lineDiscountAmount)}</span></div>
-        <div class="stat-row"><span class="stat-label">Invoice Discount</span><span class="stat-value">${fmt(o.invoiceDiscountAmount)}</span></div>
-        <div class="stat-row"><span class="stat-label">Total Weight</span><span class="stat-value">${(o.totalWeight||0).toLocaleString()}</span></div>
-        <div class="stat-row"><span class="stat-label">Total Volume</span><span class="stat-value">${(o.totalVolume||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Total excl. VAT')}</span><span class="stat-value hl">${fmt(o.totalExclVAT)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Total incl. VAT')}</span><span class="stat-value hl">${fmt(o.totalInclVAT)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('VAT Amount')}</span><span class="stat-value">${fmt(o.vatAmount)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Quantity')}</span><span class="stat-value">${(o.quantity||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Line Discount')}</span><span class="stat-value">${fmt(o.lineDiscountAmount)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Invoice Discount')}</span><span class="stat-value">${fmt(o.invoiceDiscountAmount)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Total Weight')}</span><span class="stat-value">${(o.totalWeight||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Total Volume')}</span><span class="stat-value">${(o.totalVolume||0).toLocaleString()}</span></div>
       </div>
       ${(res.vat_totals||[]).length ? `
-        <div class="modal-section-title">VAT Breakdown</div>
+        <div class="modal-section-title">${t('VAT Breakdown')}</div>
         <table class="vat-table">
-          <thead><tr><th>VAT Identifier</th><th>%</th><th>Base</th><th>VAT</th><th>Total</th></tr></thead>
+          <thead><tr><th>${t('VAT Identifier')}</th><th>%</th><th>${t('Base')}</th><th>${t('VAT')}</th><th>${t('Total incl. VAT')}</th></tr></thead>
           <tbody>${(res.vat_totals||[]).map(v=>`<tr>
             <td>${v.vatIdentifier||'—'}</td>
             <td>${v.vatPct||0}%</td>
@@ -1089,18 +1092,25 @@ function closeStatsModal() {
 async function downloadPdf(docType, docNo) {
   const eventType = docType === 'invoice' ? 'Sales.SalesInvoice.Pdf' : 'Sales.SalesCreditMemo.Pdf';
   try {
-    toast('Downloading PDF...', 'info');
-    const res = await cePost(selectedCompany.id, {
-      specversion: '1.0', type: eventType, source: 'BC Portal', subject: docNo
+    toast(t('Downloading PDF...'), 'info');
+    // Use raw fetch so we can detect binary (application/pdf) vs JSON error responses
+    const r = await fetch('/api/bc?companyId=' + encodeURIComponent(selectedCompany.id), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ specversion: '1.0', type: eventType, source: 'BC Portal', subject: docNo, lcid: selectedLcid })
     });
-    const b64 = res.pdf || res.result || res.data;
-    if (!b64) throw new Error('No PDF data in response');
-    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    const blob  = new Blob([bytes], { type: 'application/pdf' });
-    const url   = URL.createObjectURL(blob);
-    const a     = document.createElement('a');
-    a.href = url; a.download = `${docNo}.pdf`; a.click();
-    URL.revokeObjectURL(url);
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e.error || 'PDF download failed (' + r.status + ')');
+    }
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('pdf')) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e.error || 'Unexpected response type: ' + ct);
+    }
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `${docNo}.pdf`; a.click();
   } catch(e) { toast(e.message, 'error'); }
 }
 
