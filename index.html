@@ -485,11 +485,13 @@ const UI_STRINGS = [
   'Customers', 'Select Company', '← Customers',
   'Ledger Entries', 'Documents', 'Create Order',
   'Search by name or number...',
-  'Active', 'Order', 'Invoice', 'Paid',
+  'Active', 'Order', 'Invoice', 'Paid', 'Type', 'No.',
   'Select Items', 'Search items...',
   'Order Summary', 'Requested Delivery Date', 'External Document No.', 'Your PO / reference...',
   'Total', 'Post Sales Order →', 'Create Another', 'Order Created!',
   'No customers found', 'No documents found', 'No items found',
+  'customers', 'records', 'Page', 'of', 'Prev', 'Next',
+  'Open', 'Closed',
 ];
 
 // Fallback names used only when the Language table lookup fails
@@ -676,9 +678,9 @@ function paginate(containerId, total, skip, take, fnName) {
   const page = Math.floor(skip / take);
   const totalPages = Math.ceil(total / take);
   el.innerHTML = `<div class="pagination">
-    <span class="page-info">${total.toLocaleString()} records — Page ${page + 1} of ${totalPages}</span>
-    <button class="page-btn" onclick="${fnName}(${Math.max(0, skip - take)})" ${page === 0 ? 'disabled' : ''}>← Prev</button>
-    <button class="page-btn" onclick="${fnName}(${skip + take})" ${page >= totalPages - 1 ? 'disabled' : ''}>Next →</button>
+    <span class="page-info">${total.toLocaleString()} ${t('records')} — ${t('Page')} ${page + 1} ${t('of')} ${totalPages}</span>
+    <button class="page-btn" onclick="${fnName}(${Math.max(0, skip - take)})" ${page === 0 ? 'disabled' : ''}>← ${t('Prev')}</button>
+    <button class="page-btn" onclick="${fnName}(${skip + take})" ${page >= totalPages - 1 ? 'disabled' : ''}>${t('Next')} →</button>
   </div>`;
 }
 
@@ -773,7 +775,7 @@ async function loadCustomers(skip = 0) {
     if (field39 && field39.enum) field39.enum.forEach(e => { if (e.value.trim()) blockedEnumCaptions[e.value] = e.caption; });
     customers = (res.result || []).map(mapCustomer);
     const total = res.noOfRecords || 0;
-    document.getElementById('customer-count').textContent = total.toLocaleString() + ' customers';
+    document.getElementById('customer-count').textContent = total.toLocaleString() + ' ' + t('customers');
     renderCustomers(customers);
     paginate('customer-pagination', total, skip, take, 'loadCustomers');
     toast('Loaded ' + customers.length + ' customers', 'success');
@@ -879,7 +881,7 @@ async function loadLedger(skip = 0) {
           <td>${f.Description||'—'}</td>
           <td class="${parseFloat(f.Amount||0)>=0?'amount-pos':'amount-neg'}">${fmt(f.Amount)}</td>
           <td style="font-family:'DM Mono',monospace">${fmt(f.RemainingAmount)}</td>
-          <td>${f.Open?'<span class="chip open">● Open</span>':'<span class="chip closed">✓ Closed</span>'}</td>
+          <td>${f.Open?`<span class="chip open">● ${t('Open')}</span>`:`<span class="chip closed">✓ ${t('Closed')}</span>`}</td>
         </tr>`;
       }).join('')}</tbody>
     </table></div>
@@ -927,7 +929,7 @@ async function loadDocuments() {
     const docs = [...orders, ...invoices].sort((a,b) => new Date(b._date||0) - new Date(a._date||0));
     if (!docs.length) { el.innerHTML=`<div class="empty-state"><div class="empty-icon">📄</div><p>${t('No documents found')}</p></div>`; return; }
     el.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>Type</th><th>No.</th><th>${capOrd[61]||'Date'}</th><th>${capInv[24]||'Due Date'}</th><th>${capInv[61]||'Total incl. VAT'}</th><th>${capOrd[120]||'Status'}</th></tr></thead>
+      <thead><tr><th>${t('Type')}</th><th>${t('No.')}</th><th>${capOrd[61]||'Date'}</th><th>${capInv[24]||'Due Date'}</th><th>${capInv[61]||'Total incl. VAT'}</th><th>${capOrd[120]||'Status'}</th></tr></thead>
       <tbody>${docs.map(d=>`<tr>
         <td>${d._t==='Invoice'?'🧾':'📦'} ${t(d._t)}</td>
         <td><strong>${d.number||'—'}</strong></td>
