@@ -327,9 +327,11 @@
   .page-info { font-family: 'DM Mono', monospace; }
 
   /* DOCUMENT ACTION BUTTONS */
-  .doc-action-btn { background: none; border: none; cursor: pointer; font-size: 0.9rem; padding: 3px 7px; border-radius: var(--radius-sm); transition: all 0.15s; opacity: 0.85; line-height: 1; }
-  .doc-action-btn:hover { background: var(--surface-alt); opacity: 1; }
+  .doc-action-btn { background: none; border: none; cursor: pointer; font-size: 0.9rem; padding: 3px 7px; border-radius: var(--radius-sm); transition: all 0.15s; color: var(--text-mid); line-height: 1; }
+  .doc-action-btn:hover { background: var(--surface-alt); color: var(--text); }
+  .doc-action-btn.info { color: #6a9fff; }
   .doc-action-btn.info:hover { color: var(--accent); }
+  .doc-action-btn.pdf { color: #c08080; }
   .doc-action-btn.pdf:hover { color: #e07070; }
   th.action-col, td.action-col { width: 38px; text-align: center; padding: 0 4px; }
 
@@ -542,6 +544,7 @@ const UI_STRINGS = [
   'Total excl. VAT', 'Total incl. VAT', 'VAT Amount', 'Quantity',
   'Line Discount', 'Invoice Discount', 'Total Weight', 'Total Volume',
   'VAT Breakdown', 'VAT Identifier', 'Base', 'VAT', 'Downloading PDF...',
+  'Loading customers...', 'Loading ledger entries...', 'Loading documents...', 'Loading items...',
 ];
 
 // Fallback names used only when the Language table lookup fails
@@ -810,7 +813,7 @@ async function selectCompany(id) {
 // ---- CUSTOMERS ----
 async function loadCustomers(skip = 0) {
   const take = pageSize();
-  document.getElementById('customer-grid').innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading customers...</span></div>';
+  document.getElementById('customer-grid').innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading customers...')}</span></div>`;
   document.getElementById('customer-pagination').innerHTML = '';
   try {
     const [res, metaCust] = await Promise.all([
@@ -829,7 +832,6 @@ async function loadCustomers(skip = 0) {
     document.getElementById('customer-count').textContent = total.toLocaleString() + ' ' + t('customers');
     renderCustomers(customers);
     paginate('customer-pagination', total, skip, take, 'loadCustomers');
-    toast('Loaded ' + customers.length + ' customers', 'success');
   } catch(e) {
     document.getElementById('customer-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
     toast(e.message, 'error');
@@ -910,7 +912,7 @@ function switchTab(tab) {
 async function loadLedger(skip = 0) {
   const take = pageSize();
   const el = document.getElementById('ledger-content');
-  el.innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading ledger entries...</span></div>';
+  el.innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading ledger entries...')}</span></div>`;
   try {
     const [res, meta] = await Promise.all([
       cePost(selectedCompany.id, {
@@ -958,7 +960,7 @@ async function loadLedger(skip = 0) {
 async function loadDocuments() {
   const take = pageSize();
   const el = document.getElementById('documents-content');
-  el.innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading documents...</span></div>';
+  el.innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading documents...')}</span></div>`;
   try {
     const [ordRes, invRes, crmRes, metaOrd, metaInv] = await Promise.all([
       cePost(selectedCompany.id, {
@@ -1104,11 +1106,12 @@ async function downloadPdf(docType, docNo) {
       throw new Error(e.error || 'PDF download failed (' + r.status + ')');
     }
     const ct = r.headers.get('content-type') || '';
-    if (!ct.includes('pdf')) {
+    const isBinary = ct.includes('pdf') || ct.includes('octet-stream');
+    if (!isBinary) {
       const e = await r.json().catch(() => ({}));
       throw new Error(e.error || 'Unexpected response type: ' + ct);
     }
-    const blob = await r.blob();
+    const blob = new Blob([await r.arrayBuffer()], { type: 'application/pdf' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = `${docNo}.pdf`; a.click();
   } catch(e) { toast(e.message, 'error'); }
@@ -1116,7 +1119,7 @@ async function downloadPdf(docType, docNo) {
 
 // ---- ITEMS ----
 async function loadItems() {
-  document.getElementById('items-list').innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading items...</span></div>';
+  document.getElementById('items-list').innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading items...')}</span></div>`;
   orderQty = {};
   try {
     const res = await cePost(selectedCompany.id, {

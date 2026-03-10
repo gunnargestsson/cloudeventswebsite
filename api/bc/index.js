@@ -65,7 +65,7 @@ module.exports = async function (context, req) {
         return;
       }
       // Binary content (e.g. PDF) — stream back directly instead of JSON-parsing
-      if (task.datacontenttype && task.datacontenttype.includes("pdf")) {
+      if (task.datacontenttype && (task.datacontenttype.includes("pdf") || task.datacontenttype.includes("octet-stream"))) {
         const { buffer, contentType } = await binaryGet(task.data, authHeader);
         context.res = { status: 200, headers: { "Content-Type": contentType || "application/pdf" }, body: buffer, isRaw: true };
         return;
