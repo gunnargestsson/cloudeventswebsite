@@ -325,6 +325,36 @@
   .page-btn:hover:not([disabled]) { border-color: var(--accent); color: var(--accent); }
   .page-btn[disabled] { opacity: 0.3; cursor: not-allowed; }
   .page-info { font-family: 'DM Mono', monospace; }
+
+  /* DOCUMENT ACTION BUTTONS */
+  .doc-action-btn { background: none; border: none; cursor: pointer; font-size: 0.9rem; padding: 3px 7px; border-radius: var(--radius-sm); transition: all 0.15s; opacity: 0.5; line-height: 1; }
+  .doc-action-btn:hover { background: var(--surface-alt); opacity: 1; }
+  .doc-action-btn.info:hover { color: var(--accent); }
+  .doc-action-btn.pdf:hover { color: #e07070; }
+  th.action-col, td.action-col { width: 38px; text-align: center; padding: 0 4px; }
+
+  /* STATS MODAL */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .modal-overlay.hidden { display: none; }
+  .modal-box { background: var(--surface); border: 1px solid var(--border-bright); border-radius: var(--radius); width: 100%; max-width: 540px; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .modal-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 18px 22px 14px; border-bottom: 1px solid var(--border); gap: 12px; }
+  .modal-title { font-size: 0.94rem; font-weight: 700; color: var(--text); font-family: 'DM Mono', monospace; }
+  .modal-subtitle { font-size: 0.72rem; color: var(--text-dim); margin-top: 3px; }
+  .modal-close { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 1rem; padding: 4px 8px; border-radius: var(--radius-sm); transition: all 0.15s; flex-shrink: 0; margin-top: -2px; }
+  .modal-close:hover { background: var(--surface-alt); color: var(--text); }
+  .modal-body { padding: 18px 22px 22px; }
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-bottom: 18px; }
+  .stat-row { display: flex; flex-direction: column; gap: 2px; }
+  .stat-label { font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
+  .stat-value { font-size: 0.84rem; color: var(--text); font-family: 'DM Mono', monospace; }
+  .stat-value.hl { color: var(--green); font-weight: 600; }
+  .modal-section-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin: 16px 0 8px; font-weight: 600; border-top: 1px solid var(--border); padding-top: 14px; }
+  .vat-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+  .vat-table th { text-align: right; color: var(--text-dim); font-weight: 600; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  .vat-table th:first-child { text-align: left; }
+  .vat-table td { padding: 7px 8px; color: var(--text-mid); border-bottom: 1px solid var(--border); font-family: 'DM Mono', monospace; text-align: right; }
+  .vat-table td:first-child { text-align: left; color: var(--text); }
+  .vat-table tr:last-child td { border-bottom: none; }
 </style>
 </head>
 <body>
@@ -348,7 +378,7 @@
   <main>
     <!-- COMPANY SELECTION -->
     <div id="view-companies">
-      <div class="breadcrumb"><span style="color:var(--text)">Companies</span></div>
+      <div class="breadcrumb"><span style="color:var(--text)" data-t="Companies">Companies</span></div>
       <div class="section-header">
         <div class="section-title"><small>Business Central / UAT</small><span data-t="Select Company">Select Company</span></div>
         <span class="badge" id="company-count">—</span>
@@ -370,7 +400,7 @@
     <!-- CUSTOMER LIST -->
     <div id="view-customers">
       <div class="breadcrumb">
-        <span class="crumb" onclick="showCompanies()">Companies</span>
+        <span class="crumb" onclick="showCompanies()" data-t="Companies">Companies</span>
         <span class="sep">/</span>
         <span id="crumb-company" style="color:var(--text)">—</span>
       </div>
@@ -391,7 +421,7 @@
     <!-- CUSTOMER DETAIL -->
     <div id="view-detail">
       <div class="breadcrumb">
-        <span class="crumb" onclick="showCompanies()">Companies</span>
+        <span class="crumb" onclick="showCompanies()" data-t="Companies">Companies</span>
         <span class="sep">/</span>
         <span class="crumb" onclick="showCustomers()" id="crumb-company2">—</span>
         <span class="sep">/</span>
@@ -404,6 +434,7 @@
           <div class="banner-sub">
             <span>🏢 <span id="banner-no">—</span></span>
             <span>📍 <span id="banner-city">—</span></span>
+            <span id="banner-location-wrap" style="display:none">🏭 <span id="banner-location">—</span></span>
             <span>📧 <span id="banner-email">—</span></span>
           </div>
         </div>
@@ -463,6 +494,22 @@
 
 <div id="toast"><span id="toast-icon"></span><span id="toast-msg"></span></div>
 
+<!-- ORDER STATISTICS MODAL -->
+<div id="stats-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeStatsModal()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="stats-modal-title"></div>
+        <div class="modal-subtitle" id="stats-modal-subtitle"></div>
+      </div>
+      <button class="modal-close" onclick="closeStatsModal()">✕</button>
+    </div>
+    <div class="modal-body" id="stats-modal-body">
+      <div class="loader-wrap"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ---- STATE ----
 let companies = [];
@@ -482,16 +529,16 @@ let blockedEnumCaptions = {};
 // UI string translations keyed by English source text — loaded from Cloud Event Translation table
 let uiTranslations = {};
 const UI_STRINGS = [
-  'Customers', 'Select Company', '← Customers',
+  'Customers', 'Select Company', '← Customers', 'Companies',
   'Ledger Entries', 'Documents', 'Create Order',
   'Search by name or number...',
-  'Active', 'Order', 'Invoice', 'Paid', 'Type', 'No.',
+  'Active', 'Order', 'Invoice', 'Paid', 'Type', 'No.', 'Credit Memo',
   'Select Items', 'Search items...',
   'Order Summary', 'Requested Delivery Date', 'External Document No.', 'Your PO / reference...',
   'Total', 'Post Sales Order →', 'Create Another', 'Order Created!',
-  'No customers found', 'No documents found', 'No items found',
+  'No customers found', 'No documents found', 'No items found', 'No companies found',
   'customers', 'records', 'Page', 'of', 'Prev', 'Next',
-  'Open', 'Closed',
+  'Open', 'Closed', 'companies',
 ];
 
 // Fallback names used only when the Language table lookup fails
@@ -655,6 +702,7 @@ function mapCustomer(rec) {
     email: f.EMail || '',
     blocked: (f.Blocked === ' ' || !f.Blocked) ? '' : f.Blocked,
     balance: parseFloat(f.BalanceLCY) || 0,
+    locationCode: f.LocationCode || '',
     image: (f.Image && f.Image.Value) ? f.Image.Value : null
   };
 }
@@ -712,10 +760,10 @@ async function loadCompanies() {
     const d = await bcGet('companies');
     companies = d.value || [];
     setStatus('connected');
-    document.getElementById('company-count').textContent = companies.length + ' companies';
+    document.getElementById('company-count').textContent = companies.length + ' ' + t('companies');
 
     if (!companies.length) {
-      document.getElementById('company-grid').innerHTML = '<div class="empty-state"><div class="empty-icon">🏢</div><p>No companies found</p></div>';
+      document.getElementById('company-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">🏢</div><p>${t('No companies found')}</p></div>`;
       return;
     }
 
@@ -767,7 +815,7 @@ async function loadCustomers(skip = 0) {
         specversion: '1.0',
         type: 'Data.Records.Get',
         source: 'BC Portal',
-        data: JSON.stringify({ tableName: 'Customer', fieldNumbers: [2, 7, 35, 39, 59, 102, 140], skip, take })
+        data: JSON.stringify({ tableName: 'Customer', fieldNumbers: [2, 7, 35, 39, 59, 83, 102, 140], skip, take })
       }),
       getFieldMeta('Customer', [39])
     ]);
@@ -826,6 +874,19 @@ async function selectCustomer(id) {
   document.getElementById('banner-no').textContent = selectedCustomer.number||'—';
   document.getElementById('banner-city').textContent = [selectedCustomer.city, selectedCustomer.country].filter(Boolean).join(', ')||'—';
   document.getElementById('banner-email').textContent = selectedCustomer.email||'—';
+  const locWrap = document.getElementById('banner-location-wrap');
+  const locEl   = document.getElementById('banner-location');
+  locWrap.style.display = 'none';
+  if (selectedCustomer.locationCode) {
+    cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+      data: JSON.stringify({ tableName: 'Location', fieldNumbers: [2], tableView: `WHERE(Code=CONST(${selectedCustomer.locationCode}))`, take: 1 })
+    }).then(r => {
+      const name = ((r.result||[])[0]||{}).fields?.Name;
+      if (name) { locEl.textContent = name; locWrap.style.display = ''; }
+      else if (selectedCustomer.locationCode) { locEl.textContent = selectedCustomer.locationCode; locWrap.style.display = ''; }
+    }).catch(() => { locEl.textContent = selectedCustomer.locationCode; locWrap.style.display = ''; });
+  }
   show('view-detail');
   switchTab('ledger');
   loadLedger();
@@ -896,19 +957,23 @@ async function loadDocuments() {
   const el = document.getElementById('documents-content');
   el.innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading documents...</span></div>';
   try {
-    const [ordRes, invRes, metaOrd, metaInv] = await Promise.all([
+    const [ordRes, invRes, crmRes, metaOrd, metaInv] = await Promise.all([
       cePost(selectedCompany.id, {
         specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
-        data: JSON.stringify({ tableName: 'Sales Header', fieldNumbers: [19, 61, 120, 5790], tableView: `WHERE(Document Type=CONST(Order),Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
+        data: JSON.stringify({ tableName: 'Sales Header', fieldNumbers: [19, 20, 61, 120, 5790], tableView: `WHERE(Document Type=CONST(Order),Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
       }).catch(() => ({ result: [] })),
       cePost(selectedCompany.id, {
         specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
         data: JSON.stringify({ tableName: 'Sales Invoice Header', fieldNumbers: [20, 24, 61], tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
       }).catch(() => ({ result: [] })),
-      getFieldMeta('Sales Header', [61, 120, 5790]),
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+        data: JSON.stringify({ tableName: 'Sales Cr.Memo Header', fieldNumbers: [20, 24, 61], tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
+      }).catch(() => ({ result: [] })),
+      getFieldMeta('Sales Header', [20, 61, 120, 5790]),
       getFieldMeta('Sales Invoice Header', [20, 24, 61])
     ]);
-    // Build caption maps: prefer Sales Header for order-specific fields, Sales Invoice Header for shared ones
+    // Build caption maps
     const capOrd = {}; metaOrd.forEach(f => { capOrd[f.id] = f.caption; });
     const capInv = {}; metaInv.forEach(f => { capInv[f.id] = f.caption; });
     const statusEnumCaptions = {};
@@ -917,27 +982,49 @@ async function loadDocuments() {
     const orders = (ordRes.result || []).map(rec => {
       const status = (rec.fields||{}).Status || 'Open';
       return { _t: 'Order', number: (rec.primaryKey||{}).No_,
-        _date: (rec.fields||{}).OrderDate, _total: (rec.fields||{}).AmountIncludingVAT,
+        _orderDate: (rec.fields||{}).OrderDate, _postingDate: (rec.fields||{}).PostingDate,
+        _total: (rec.fields||{}).AmountIncludingVAT,
         _status: status, _statusLabel: statusEnumCaptions[status] || status,
         dueDate: (rec.fields||{}).RequestedDeliveryDate };
     });
     const invoices = (invRes.result || []).map(rec => ({
       _t: 'Invoice', number: (rec.primaryKey||{}).No_,
-      _date: (rec.fields||{}).PostingDate, _total: (rec.fields||{}).AmountIncludingVAT,
+      _orderDate: null, _postingDate: (rec.fields||{}).PostingDate,
+      _total: (rec.fields||{}).AmountIncludingVAT,
       _status: 'Paid', _statusLabel: t('Paid'), dueDate: (rec.fields||{}).DueDate
     }));
-    const docs = [...orders, ...invoices].sort((a,b) => new Date(b._date||0) - new Date(a._date||0));
+    const creditMemos = (crmRes.result || []).map(rec => ({
+      _t: 'Credit Memo', number: (rec.primaryKey||{}).No_,
+      _orderDate: null, _postingDate: (rec.fields||{}).PostingDate,
+      _total: (rec.fields||{}).AmountIncludingVAT,
+      _status: 'Paid', _statusLabel: t('Paid'), dueDate: null
+    }));
+    const docs = [...orders, ...invoices, ...creditMemos]
+      .sort((a,b) => new Date(b._postingDate||b._orderDate||0) - new Date(a._postingDate||a._orderDate||0));
     if (!docs.length) { el.innerHTML=`<div class="empty-state"><div class="empty-icon">📄</div><p>${t('No documents found')}</p></div>`; return; }
+    const typeIcon = { Order: '📦', Invoice: '🧾', 'Credit Memo': '📝' };
     el.innerHTML = `<div class="table-wrap"><table>
-      <thead><tr><th>${t('Type')}</th><th>${t('No.')}</th><th>${capOrd[61]||'Date'}</th><th>${capInv[24]||'Due Date'}</th><th>${capInv[61]||'Total incl. VAT'}</th><th>${capOrd[120]||'Status'}</th></tr></thead>
-      <tbody>${docs.map(d=>`<tr>
-        <td>${d._t==='Invoice'?'🧾':'📦'} ${t(d._t)}</td>
+      <thead><tr><th>${t('Type')}</th><th>${t('No.')}</th><th>${capOrd[61]||'Order Date'}</th><th>${capInv[20]||'Posting Date'}</th><th>${capInv[24]||'Due Date'}</th><th>${capInv[61]||'Total incl. VAT'}</th><th>${capOrd[120]||'Status'}</th><th class="action-col"></th></tr></thead>
+      <tbody>${docs.map(d=>{
+        let actionBtn = '';
+        if (d._t === 'Order') {
+          actionBtn = `<button class="doc-action-btn info" title="Statistics" onclick="showOrderStats('${d.number}')">ⓘ</button>`;
+        } else if (d._t === 'Invoice') {
+          actionBtn = `<button class="doc-action-btn pdf" title="Download PDF" onclick="downloadPdf('invoice','${d.number}')">⬇ PDF</button>`;
+        } else if (d._t === 'Credit Memo') {
+          actionBtn = `<button class="doc-action-btn pdf" title="Download PDF" onclick="downloadPdf('creditmemo','${d.number}')">⬇ PDF</button>`;
+        }
+        return `<tr>
+        <td>${typeIcon[d._t]||'📄'} ${t(d._t)}</td>
         <td><strong>${d.number||'—'}</strong></td>
-        <td>${fmtDate(d._date)}</td>
+        <td>${fmtDate(d._orderDate)}</td>
+        <td>${fmtDate(d._postingDate)}</td>
         <td>${fmtDate(d.dueDate)}</td>
         <td class="amount-pos">${fmt(d._total)}</td>
         <td>${chipStatus(d._status, d._statusLabel)}</td>
-      </tr>`).join('')}</tbody>
+        <td class="action-col">${actionBtn}</td>
+      </tr>`;
+      }).join('')}</tbody>
     </table></div>`;
   } catch(e) { el.innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`; }
 }
@@ -946,6 +1033,75 @@ function chipStatus(s, label) {
   if (!s) return '—';
   const m = {Open:'open','In Review':'pending',Released:'closed',Paid:'closed',Draft:'pending','Pending Prepayment':'pending'};
   return `<span class="chip ${m[s]||'open'}">${label || s}</span>`;
+}
+
+// ---- ORDER STATISTICS ----
+async function showOrderStats(orderNo) {
+  const modal    = document.getElementById('stats-modal');
+  const body     = document.getElementById('stats-modal-body');
+  const title    = document.getElementById('stats-modal-title');
+  const subtitle = document.getElementById('stats-modal-subtitle');
+  title.textContent    = orderNo;
+  subtitle.textContent = '';
+  body.innerHTML = '<div class="loader-wrap"><div class="spinner"></div></div>';
+  modal.classList.remove('hidden');
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Sales.Order.Statistics',
+      source: 'BC Portal', subject: orderNo
+    });
+    subtitle.textContent = [res.customerName, res.currencyCode, fmtDate(res.orderDate)].filter(Boolean).join(' · ');
+    const o = res.order || {};
+    body.innerHTML = `
+      <div class="stats-grid">
+        <div class="stat-row"><span class="stat-label">Total excl. VAT</span><span class="stat-value hl">${fmt(o.totalExclVAT)}</span></div>
+        <div class="stat-row"><span class="stat-label">Total incl. VAT</span><span class="stat-value hl">${fmt(o.totalInclVAT)}</span></div>
+        <div class="stat-row"><span class="stat-label">VAT Amount</span><span class="stat-value">${fmt(o.vatAmount)}</span></div>
+        <div class="stat-row"><span class="stat-label">Quantity</span><span class="stat-value">${(o.quantity||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">Line Discount</span><span class="stat-value">${fmt(o.lineDiscountAmount)}</span></div>
+        <div class="stat-row"><span class="stat-label">Invoice Discount</span><span class="stat-value">${fmt(o.invoiceDiscountAmount)}</span></div>
+        <div class="stat-row"><span class="stat-label">Total Weight</span><span class="stat-value">${(o.totalWeight||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">Total Volume</span><span class="stat-value">${(o.totalVolume||0).toLocaleString()}</span></div>
+      </div>
+      ${(res.vat_totals||[]).length ? `
+        <div class="modal-section-title">VAT Breakdown</div>
+        <table class="vat-table">
+          <thead><tr><th>VAT Identifier</th><th>%</th><th>Base</th><th>VAT</th><th>Total</th></tr></thead>
+          <tbody>${(res.vat_totals||[]).map(v=>`<tr>
+            <td>${v.vatIdentifier||'—'}</td>
+            <td>${v.vatPct||0}%</td>
+            <td>${fmt(v.vatBase)}</td>
+            <td>${fmt(v.vatAmount)}</td>
+            <td>${fmt(v.amountInclVAT)}</td>
+          </tr>`).join('')}</tbody>
+        </table>` : ''}
+    `;
+  } catch(e) {
+    body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
+  }
+}
+
+function closeStatsModal() {
+  document.getElementById('stats-modal').classList.add('hidden');
+}
+
+// ---- PDF DOWNLOAD ----
+async function downloadPdf(docType, docNo) {
+  const eventType = docType === 'invoice' ? 'Sales.SalesInvoice.Pdf' : 'Sales.SalesCreditMemo.Pdf';
+  try {
+    toast('Downloading PDF...', 'info');
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: eventType, source: 'BC Portal', subject: docNo
+    });
+    const b64 = res.pdf || res.result || res.data;
+    if (!b64) throw new Error('No PDF data in response');
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const blob  = new Blob([bytes], { type: 'application/pdf' });
+    const url   = URL.createObjectURL(blob);
+    const a     = document.createElement('a');
+    a.href = url; a.download = `${docNo}.pdf`; a.click();
+    URL.revokeObjectURL(url);
+  } catch(e) { toast(e.message, 'error'); }
 }
 
 // ---- ITEMS ----
@@ -1052,6 +1208,7 @@ async function submitOrder() {
     document.getElementById('order-success-msg').textContent=`Order ${createdNo} created for ${selectedCustomer.displayName}.`;
     document.getElementById('order-success').classList.add('visible');
     toast('Sales order created!', 'success');
+    loadDocuments();
   } catch(e) {
     toast('Failed: ' + e.message, 'error');
   } finally {
