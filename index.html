@@ -675,7 +675,7 @@ async function loadUiTranslations() {
     const res = await cePost(selectedCompany.id, {
       specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
       subject: 'Cloud Event Translation',
-      data: JSON.stringify({ tableView: `WHERE(Windows Language ID=CONST(${selectedLcid}),Source=CONST(BC Portal))` })
+      data: JSON.stringify({ tableView: `WHERE(Windows Language ID=CONST(${selectedLcid}),Source=CONST(BC Portal))`, take: UI_STRINGS.length + 50 })
     });
     const rows = res.result || [];
     for (const rec of rows) {
