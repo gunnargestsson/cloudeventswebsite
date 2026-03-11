@@ -385,6 +385,7 @@
   .item-picture-gallery img { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: var(--radius-sm); background: var(--surface2); cursor: pointer; }
   .item-picture-back-btn { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 0.75rem; padding: 0 0 14px; display: block; }
 </style>
+<link rel="stylesheet" href="customer-create.css" />
 </head>
 <body>
 <div id="app">
@@ -435,6 +436,7 @@
       </div>
       <div class="section-header">
         <div class="section-title"><small id="customers-company-label">—</small><span data-t="Customers">Customers</span></div>
+        <button class="btn-ghost" onclick="showCreateCustomer()" data-t="+ Create Customer" style="margin-left:auto">+ Create Customer</button>
         <span class="badge" id="customer-count">—</span>
       </div>
       <div class="search-wrap">
@@ -535,6 +537,217 @@
         </div>
       </div>
     </div>
+
+    <!-- CREATE CUSTOMER -->
+    <div id="view-create-customer" style="display:none">
+      <div class="breadcrumb">
+        <span class="crumb" onclick="showCompanies()" data-t="Companies">Companies</span>
+        <span class="sep">/</span>
+        <span class="crumb" onclick="showCustomers()" id="crumb-company3">—</span>
+        <span class="sep">/</span>
+        <span style="color:var(--text)" data-t="Create Customer">Create Customer</span>
+      </div>
+
+      <div class="section-header">
+        <div class="section-title">
+          <small id="create-customer-company-label">—</small>
+          <span data-t="Create New Customer">Create New Customer</span>
+        </div>
+      </div>
+
+      <button class="customer-back-btn" onclick="showCustomers()">
+        ← <span data-t="Back to Customers">Back to Customers</span>
+      </button>
+
+      <form id="customer-create-form">
+        <!-- Identification Section -->
+        <fieldset>
+          <legend data-t="Identification">Identification</legend>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-registration-no" class="required" id="label-registration-no">Registration No.</label>
+              <div class="reg-no-wrapper">
+                <input type="text" id="customer-registration-no" maxlength="10" required />
+                <span id="kennitala-indicator" class="validation-indicator"></span>
+              </div>
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-no" id="label-no">No.</label>
+              <input type="text" id="customer-no" class="readonly-field" readonly />
+            </div>
+          </div>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-name" class="required" id="label-name">Name</label>
+              <input type="text" id="customer-name" maxlength="100" required />
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-name2" id="label-name2">Name 2</label>
+              <input type="text" id="customer-name2" maxlength="50" />
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Address Section -->
+        <fieldset>
+          <legend data-t="Address">Address</legend>
+          <div class="customer-form-group">
+            <label for="customer-address" id="label-address">Address</label>
+            <input type="text" id="customer-address" maxlength="100" />
+          </div>
+          <div class="customer-form-group">
+            <label for="customer-address2" id="label-address2">Address 2</label>
+            <input type="text" id="customer-address2" maxlength="50" />
+          </div>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-post-code" id="label-post-code">Post Code</label>
+              <input type="text" id="customer-post-code" maxlength="20" />
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-city" id="label-city">City</label>
+              <input type="text" id="customer-city" class="readonly-field" readonly />
+            </div>
+          </div>
+          <div class="customer-form-group">
+            <label for="customer-country-code" id="label-country-code">Country/Region Code</label>
+            <input type="text" id="customer-country-code" class="readonly-field" readonly />
+          </div>
+        </fieldset>
+
+        <!-- Contact Section -->
+        <fieldset>
+          <legend data-t="Contact">Contact</legend>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-phone" id="label-phone">Phone No.</label>
+              <input type="tel" id="customer-phone" maxlength="30" />
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-email" id="label-email">E-Mail</label>
+              <input type="email" id="customer-email" maxlength="80" />
+            </div>
+          </div>
+          <div class="customer-form-group">
+            <label for="customer-contact" id="label-contact">Contact</label>
+            <input type="text" id="customer-contact" maxlength="100" />
+          </div>
+        </fieldset>
+
+        <!-- Posting Section -->
+        <fieldset>
+          <legend data-t="Posting">Posting</legend>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-posting-group" class="required" id="label-posting-group">Customer Posting Group</label>
+              <select id="customer-posting-group" required>
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-gen-bus-posting-group" class="required" id="label-gen-bus-posting-group">Gen. Bus. Posting Group</label>
+              <select id="customer-gen-bus-posting-group" required>
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+          </div>
+          <div class="customer-form-group">
+            <label for="customer-vat-bus-posting-group" id="label-vat-bus-posting-group">VAT Bus. Posting Group</label>
+            <input type="text" id="customer-vat-bus-posting-group" class="readonly-field" readonly />
+          </div>
+        </fieldset>
+
+        <!-- Payment Section -->
+        <fieldset>
+          <legend data-t="Payment">Payment</legend>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-payment-terms" id="label-payment-terms">Payment Terms Code</label>
+              <select id="customer-payment-terms">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-payment-method" id="label-payment-method">Payment Method Code</label>
+              <select id="customer-payment-method">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Sales Section -->
+        <fieldset>
+          <legend data-t="Sales">Sales</legend>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-currency" id="label-currency">Currency Code</label>
+              <select id="customer-currency">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-language" id="label-language">Language Code</label>
+              <select id="customer-language">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+          </div>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-salesperson" id="label-salesperson">Salesperson Code</label>
+              <select id="customer-salesperson">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-location" id="label-location">Location Code</label>
+              <select id="customer-location">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Credit Management Section -->
+        <fieldset>
+          <legend data-t="Credit Management">Credit Management</legend>
+          <div class="customer-form-group">
+            <label for="customer-credit-limit" id="label-credit-limit">Credit Limit (LCY)</label>
+            <input type="number" id="customer-credit-limit" min="0" step="0.01" value="0" />
+          </div>
+        </fieldset>
+
+        <!-- Tax Section -->
+        <fieldset>
+          <legend data-t="Tax">Tax</legend>
+          <div class="customer-form-group">
+            <label for="customer-tax-liable" id="label-tax-liable">Tax Liable</label>
+            <select id="customer-tax-liable">
+              <option value="true" selected>true</option>
+              <option value="false">false</option>
+            </select>
+          </div>
+        </fieldset>
+
+        <!-- Media Section -->
+        <fieldset>
+          <legend data-t="Media">Media</legend>
+          <div class="customer-form-group">
+            <label for="customer-image" id="label-image">Image</label>
+            <input type="file" id="customer-image" accept="image/*" />
+            <div class="helper-text" data-t="Upload a customer logo or image (optional)">Upload a customer logo or image (optional)</div>
+            <div id="imagePreview"></div>
+          </div>
+        </fieldset>
+
+        <!-- Form Actions -->
+        <div class="customer-form-actions">
+          <button type="button" class="customer-btn customer-btn-secondary" onclick="resetCustomerForm()" data-t="Reset Form">Reset Form</button>
+          <button type="submit" class="customer-btn customer-btn-primary" data-t="Create Customer">Create Customer</button>
+        </div>
+      </form>
+    </div>
   </main>
 </div>
 
@@ -608,6 +821,10 @@ const UI_STRINGS = [
   'Failed to create sales order', 'Failed to add line for', 'Failed: ',
   'Order {no} created for {name}.',
   'Pictures', 'View all', 'Back', 'No picture',
+  '+ Create Customer', 'Create Customer', 'Create New Customer', 'Back to Customers',
+  'Identification', 'Address', 'Contact', 'Posting', 'Payment', 'Sales', 
+  'Credit Management', 'Tax', 'Media', 'Reset Form',
+  'Upload a customer logo or image (optional)',
 ];
 
 // Fallback names used only when the Language table lookup fails
@@ -833,7 +1050,7 @@ function toast(msg, type='info') {
 }
 
 function show(id) {
-  ['view-companies','view-customers','view-detail'].forEach(v => {
+  ['view-companies','view-customers','view-detail','view-create-customer'].forEach(v => {
     document.getElementById(v).style.display = v===id ? 'block' : 'none';
   });
 }
@@ -1627,5 +1844,6 @@ async function loadConfig() {
 // ---- BOOT ----
 window.onload = () => { show('view-companies'); loadConfig(); loadCompanies(); };
 </script>
+<script src="customer-create.js"></script>
 </body>
 </html>

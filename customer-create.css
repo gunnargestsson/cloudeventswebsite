@@ -1,0 +1,398 @@
+/* Customer Creation Form Styles */
+/* Matches the dark theme design of the main BC Portal */
+
+#view-create-customer {
+  animation: fadeIn 0.3s ease;
+}
+
+#customer-create-form {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Form Fieldsets */
+#customer-create-form fieldset {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+#customer-create-form fieldset::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  opacity: 0.5;
+}
+
+#customer-create-form legend {
+  font-family: 'Syne', sans-serif;
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: var(--text);
+  padding: 0 12px;
+  margin-bottom: 8px;
+}
+
+/* Form Groups */
+.customer-form-group {
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+.customer-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.customer-form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 0.88rem;
+  color: var(--text-mid);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.customer-form-group label.required::after {
+  content: ' *';
+  color: var(--red);
+}
+
+/* Form Inputs */
+.customer-form-group input,
+.customer-form-group select {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.88rem;
+  padding: 11px 14px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+
+.customer-form-group input:focus,
+.customer-form-group select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+  background: var(--surface);
+}
+
+.customer-form-group input::placeholder {
+  color: var(--text-dim);
+}
+
+.customer-form-group input:disabled,
+.customer-form-group select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Read-only fields */
+.customer-form-group input.readonly-field {
+  background: var(--surface2);
+  border-color: var(--border);
+  color: var(--text-dim);
+  cursor: not-allowed; 
+  font-style: italic;
+}
+
+.customer-form-group input.readonly-field:focus {
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+/* Validation Indicator */
+.validation-indicator {
+  display: inline-block;
+  margin-left: 10px;
+  font-weight: bold;
+  font-size: 1.1rem;
+  vertical-align: middle;
+}
+
+.validation-indicator.valid {
+  color: var(--green);
+}
+
+.validation-indicator.valid::after {
+  content: '✓';
+}
+
+.validation-indicator.invalid {
+  color: var(--red);
+}
+
+.validation-indicator.invalid::after {
+  content: '✗';
+}
+
+.validation-indicator.invalid[title]:hover::before {
+  content: attr(title);
+  position: absolute;
+  background: var(--surface2);
+  border: 1px solid var(--border-bright);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: normal;
+  white-space: nowrap;
+  z-index: 1000;
+  margin-left: -10px;
+  margin-top: 25px;
+}
+
+/* Registration Number with Indicator */
+.reg-no-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Number inputs */
+.customer-form-group input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.customer-form-group input[type="number"]::-webkit-outer-spin-button,
+.customer-form-group input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Select dropdowns */
+.customer-form-group select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3e%3cpath fill='%239ba8c8' d='M6 9L1 4h10z'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+.customer-form-group select:focus {
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3e%3cpath fill='%234f7fff' d='M6 9L1 4h10z'/%3e%3c/svg%3e");
+}
+
+/* File input */
+.customer-form-group input[type="file"] {
+  padding: 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.customer-form-group input[type="file"]::file-selector-button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: 'DM Mono', monospace;
+  font-size: 0.85rem;
+  margin-right: 12px;
+  transition: background-color 0.2s;
+}
+
+.customer-form-group input[type="file"]::file-selector-button:hover {
+  background: var(--accent2);
+}
+
+#imagePreview {
+  margin-top: 12px;
+  text-align: center;
+}
+
+#imagePreview img {
+  border: 1px solid var(--border-bright);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* Form Actions */
+.customer-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+
+.customer-btn {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 12px 28px;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.02em;
+}
+
+.customer-btn-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: white;
+  box-shadow: 0 4px 12px rgba(79,127,255,0.2);
+}
+
+.customer-btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(79,127,255,0.3);
+}
+
+.customer-btn-primary:active {
+  transform: translateY(0);
+}
+
+.customer-btn-secondary {
+  background: var(--surface2);
+  color: var(--text-mid);
+  border: 1px solid var(--border-bright);
+}
+
+.customer-btn-secondary:hover {
+  background: var(--surface);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Back Button */
+.customer-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-mid);
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-family: 'DM Mono', monospace;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 20px;
+}
+
+.customer-back-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: translateX(-2px);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  #customer-create-form fieldset {
+    padding: 16px;
+  }
+  
+  .customer-form-row {
+    grid-template-columns: 1fr;
+  }
+  
+  .customer-form-actions {
+    flex-direction: column-reverse;
+  }
+  
+  .customer-btn {
+    width: 100%;
+  }
+}
+
+/* Animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Loading State */
+#customer-create-form.loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+#customer-create-form.loading::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+/* Error States */
+.customer-form-group input.error,
+.customer-form-group select.error {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(242, 95, 92, 0.18);
+}
+
+.customer-form-group .error-message {
+  color: var(--red);
+  font-size: 0.8rem;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.customer-form-group .error-message::before {
+  content: '⚠';
+}
+
+/* Success States */
+.customer-form-group input.success,
+.customer-form-group select.success {
+  border-color: var(--green);
+}
+
+/* Helper Text */
+.customer-form-group .helper-text {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  margin-top: 6px;
+  font-style: italic;
+}
+
+/* Section Indicators */
+#customer-create-form fieldset legend::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  margin-right: 10px;
+  vertical-align: middle;
+}
