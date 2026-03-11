@@ -100,6 +100,120 @@ Do not construct this URL manually — always use `task.data` verbatim from the 
 
 ---
 
+## Response Structure & Error Handling
+
+### Two Response Patterns
+
+Cloud Events can return results in two ways depending on the operation:
+
+#### Pattern 1: Direct Error Response (No `data` field)
+
+Some operations (e.g., PDF generation, inbound-only operations) return success or error **immediately in the POST response**. When these operations fail, the POST response contains:
+
+```json
+{
+  "@odata.context": "...",
+  "status": "Error",
+  "error": "There is no property with the 'tableName' key on the JSON object.",
+  "callStack": "..."
+}
+```
+
+**No `data` field is present** — the error information is in the POST response itself.
+
+#### Pattern 2: Two-Step Response (With `data` field)
+
+Most data operations return a `data` URL in the POST response. The actual task result must be fetched separately:
+
+1. POST returns a task with a `data` URL
+2. GET the `data` URL to retrieve the result
+3. Check the `status` field in the result
+
+**Important:** The initial POST response only indicates whether the Cloud Event was **accepted and queued**. The actual task success/failure is determined by checking `status` in the response from the `data` endpoint.
+
+### Implementation Strategy
+
+**Always check for errors in this order:**
+1. Check if POST response has `status: "Error"` (direct error, no data URL)
+2. If `data` field exists, GET the data URL
+3. Check if GET response has `status: "Error"` (task execution error)
+
+### Success Response
+
+When a task completes successfully, the response from the `/data` endpoint contains:
+
+```json
+{
+  "status": "Success",
+  "noOfRecords": 150,
+  "result": [...]
+}
+```
+
+### Error Response
+
+When a task encounters an error, the response from the `/data` endpoint contains:
+
+```json
+{
+  "status": "Error",
+  "error": "There is no property with the 'tableName' key on the JSON object.",
+  "callStack": "\"Data Records Get Impl\"(CodeUnit 65314).ExecuteCloudEventTask line 42 - Cloud Events Base by Origo version 27.0.42.0\\\"Cloud Event Message Task\"(CodeUnit 65313).ProcessIncomingMessage line 29 - Cloud Events Base by Origo version 27.0.42.0\\\"Cloud Event Message Task\"(CodeUnit 65313).OnRun(Trigger) line 2 - Cloud Events Base by Origo version 27.0.42.0\\"
+}
+```
+
+| Field | Description |
+|---|---|
+| `status` | Always `"Error"` for failed tasks |
+| `error` | Human-readable error message describing what went wrong |
+| `callStack` | Full AL call stack trace showing where the error occurred, including codeunit names, line numbers, and extension versions |
+
+### Error Handling Workflow
+
+```
+POST /tasks
+  ↓
+Response includes data URL
+  ↓
+GET {data URL}
+  ↓
+Check status field:
+  • "Success" → use result
+  • "Error" → read error + callStack for details
+```
+
+Always check the `status` field before attempting to process `result`, `noOfRecords`, or other response fields. When `status` is `"Error"`, the `result` field may be absent or empty.
+
+### Examples
+
+**Direct error from POST (PDF generation failure):**
+```javascript
+const postResponse = await POST('/tasks', pdfEvent);
+if (postResponse.status === 'Error') {
+  // Handle error immediately - no data URL to follow
+  console.error(postResponse.error, postResponse.callStack);
+}
+```
+
+**Two-step with error in data endpoint:**
+```javascript
+const postResponse = await POST('/tasks', dataEvent);
+if (postResponse.status === 'Error') {
+  // Immediate error (rare for data operations)
+  console.error(postResponse.error);
+} else if (postResponse.data) {
+  const result = await GET(postResponse.data);
+  if (result.status === 'Error') {
+    // Task execution failed
+    console.error(result.error, result.callStack);
+  } else {
+    // Success - process result.result
+  }
+}
+```
+
+---
+
 ## Request Envelope
 
 All calls share these fields:

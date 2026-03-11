@@ -629,6 +629,9 @@ async function bcGet(path) {
 }
 
 // cePost: Cloud Events two-step — proxy POSTs to /tasks and follows the data URL
+// Errors can occur at two points:
+// 1. POST response itself (e.g., PDF generation failures, validation errors)
+// 2. GET /data response (e.g., data operation failures)
 async function cePost(companyId, event) {
   const r = await fetch('/api/bc?companyId=' + encodeURIComponent(companyId), {
     method: 'POST',
@@ -639,7 +642,18 @@ async function cePost(companyId, event) {
     const e = await r.json().catch(() => ({}));
     throw new Error(e.error || 'API error ' + r.status);
   }
-  return r.json();
+  const result = await r.json();
+  // Check Cloud Events task status — "Error" means the task failed
+  // This can be in the POST response (direct error) or GET /data response (task execution error)
+  if (result.status === 'Error') {
+    let errorMsg = result.error || 'Cloud Events task failed';
+    // Include callStack if available for detailed debugging
+    if (result.callStack) {
+      errorMsg += '\n\nCall Stack:\n' + result.callStack.replace(/\\\"/g, '"');
+    }
+    throw new Error(errorMsg);
+  }
+  return result;
 }
 
 // getFieldMeta: returns Help.Fields.Get result array for a table, cached by company+lcid+table.
@@ -1270,8 +1284,17 @@ async function downloadPdf(docType, docNo) {
     const ct = r.headers.get('content-type') || '';
     const isBinary = ct.includes('pdf') || ct.includes('octet-stream');
     if (!isBinary) {
-      const e = await r.json().catch(() => ({}));
-      throw new Error(e.error || 'Unexpected response type: ' + ct);
+      // PDF generation failed - check for Cloud Events error response
+      // Error can be in the POST response directly (no data URL) or from the data endpoint
+      const result = await r.json().catch(() => ({}));
+      if (result.status === 'Error') {
+        let errorMsg = result.error || 'PDF generation failed';
+        if (result.callStack) {
+          errorMsg += '\n\nCall Stack:\n' + result.callStack.replace(/\\\"/g, '"');
+        }
+        throw new Error(errorMsg);
+      }
+      throw new Error(result.error || 'Unexpected response type: ' + ct);
     }
     const blob = new Blob([await r.arrayBuffer()], { type: 'application/pdf' });
     const a = document.createElement('a');
