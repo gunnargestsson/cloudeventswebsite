@@ -3,6 +3,25 @@
 ## Overview
 Implement a customer creation form in the Business Central Cloud Events web portal that allows users to create new customer records with validation, auto-population, and lookup field support.
 
+**Key Features:**
+- ✅ **Full Localization**: All field labels retrieved from BC in user's language
+- ✅ **Translatable UI**: All UI constants (buttons, messages, section headers) support multiple languages
+- ✅ **Icelandic Kennitala Validation**: Matches BC AL validation exactly
+- ✅ **Smart Auto-Population**: Registration Number → No., Post Code → City/Country, Gen. Bus. → VAT Bus.
+- ✅ **10 Lookup Tables**: Dropdown controls populated from BC reference tables
+- ✅ **Image Upload**: Customer images with base64 encoding and GUID generation
+- ✅ **Comprehensive Validation**: Required fields, email format, credit limits, and Kennitala check digit
+
+## API Reference
+This implementation follows the **Business Central Cloud Events API** specification documented in [CLOUD_EVENTS_API.md](../../CLOUD_EVENTS_API.md).
+
+**Key API Message Types Used:**
+- `Data.Records.Get` - Retrieve records from BC tables (for lookup data)
+- `Data.Records.Set` - Create/update customer records
+- `Help.Fields.Get` - Retrieve field metadata and captions in user's language
+
+All API calls must be made using the `cePost()` function with proper authentication and company context.
+
 ## Target Table
 - **Table Number**: 18 (Customer)
 - **Primary Key**: No.
@@ -101,13 +120,15 @@ const LOOKUP_TABLES = {
 
 ## Validation Rules
 
+> **Note**: All validation error messages use the `t()` translation function to support multiple languages. Error messages are defined in the `TRANSLATIONS` object.
+
 ### 1. Icelandic Kennitala (Registration Number)
 **Algorithm** (matches BC AL implementation exactly):
 ```javascript
 function validateIcelandicKennitala(kennitala) {
   // Must be exactly 10 digits
   if (!/^\d{10}$/.test(kennitala)) {
-    return { valid: false, error: 'Must be 10 digits' };
+    return { valid: false, error: t('valMust10Digits') };
   }
   
   // Extract first 8 digits and 9th digit (check digit)
@@ -125,7 +146,7 @@ function validateIcelandicKennitala(kennitala) {
   
   // Validate
   if (checkDigit !== expectedCheckDigit) {
-    return { valid: false, error: 'Invalid Kennitala check digit' };
+    return { valid: false, error: t('valInvalidKennitala') };
   }
   
   return { valid: true };
@@ -139,7 +160,8 @@ function validateEmail(email) {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email) 
     ? { valid: true } 
-    : { valid: false, error: 'Invalid email format' };
+    : { valid: false, error: t('valInvalidEmail') };
+}
 }
 ```
 
@@ -149,7 +171,7 @@ function validateCreditLimit(value) {
   if (!value) return { valid: true }; // Optional field
   const num = parseFloat(value);
   if (isNaN(num) || num < 0) {
-    return { valid: false, error: 'Must be a non-negative number' };
+    return { valid: false, error: t('valNonNegative') };
   }
   return { valid: true };
 }
@@ -230,6 +252,8 @@ document.getElementById('genBusPostingGroup').addEventListener('change', functio
 ## UI Implementation Guide
 
 ### Form Structure
+> **Note**: The field labels shown below are English defaults. During initialization, `loadFieldCaptions()` will dynamically replace these labels with localized captions from Business Central based on the user's selected language. Section legends (e.g., "Customer Identification", "Address Information") should also be localized if needed.
+
 ```html
 <div id="customerCreateForm">
   <h2>Create New Customer</h2>
@@ -511,6 +535,284 @@ fieldset {
 }
 ```
 
+## Localization & Field Captions
+
+### Language Support
+All field labels must be retrieved from Business Central in the user's selected language using the `Help.Fields.Get` API message type. All UI constants (buttons, section headers, messages, placeholders) must also be translatable to support multiple languages.
+
+### Field Caption Mapping
+```javascript
+// Map HTML element IDs to BC field numbers for Customer table (18)
+const FIELD_MAPPING = {
+  'registrationNumber': 'RegistrationNumber',
+  'customerNo': 'No.',
+  'name': 'Name',
+  'searchName': 'Search Name',
+  'address': 'Address',
+  'address2': 'Address 2',
+  'postCode': 'Post Code',
+  'city': 'City',
+  'countryRegion': 'Country/Region Code',
+  'mobilePhone': 'Mobile Phone No.',
+  'email': 'E-Mail',
+  'homePage': 'Home Page',
+  'customerPostingGroup': 'Customer Posting Group',
+  'genBusPostingGroup': 'Gen. Bus. Posting Group',
+  'vatBusPostingGroup': 'VAT Bus. Posting Group',
+  'paymentTerms': 'Payment Terms Code',
+  'currency': 'Currency Code',
+  'paymentMethod': 'Payment Method Code',
+  'salesperson': 'Salesperson Code',
+  'location': 'Location Code',
+  'language': 'Language Code',
+  'creditLimit': 'Credit Limit (LCY)',
+  'blocked': 'Blocked',
+  'vatRegistrationNo': 'VAT Registration No.'
+};
+```
+
+### Load Field Captions
+```javascript
+async function loadFieldCaptions() {
+  try {
+    const result = await cePost('Help.Fields.Get', {
+      TableNo: 18
+    });
+    
+    if (result.Fields) {
+      // Store captions for each field
+      const fieldCaptions = {};
+      result.Fields.forEach(field => {
+        fieldCaptions[field.FieldName] = field.FieldCaption || field.FieldName;
+      });
+      
+      // Apply captions to form labels
+      Object.keys(FIELD_MAPPING).forEach(elementId => {
+        const fieldName = FIELD_MAPPING[elementId];
+        const caption = fieldCaptions[fieldName];
+        if (caption) {
+          const label = document.querySelector(`label[for="${elementId}"]`);
+          if (label) {
+            // Preserve required indicator (*)
+            const isRequired = label.textContent.includes('*');
+            label.textContent = caption + (isRequired ? ' *' : '');
+          }
+        }
+      });
+      
+      // Update form heading if "Customer" caption is available
+      const customerCaption = fieldCaptions['Name'] || 'Customer';
+      const heading = document.querySelector('#customerCreateForm h2');
+      if (heading) {
+        heading.textContent = `Create New ${customerCaption.replace(' Name', '')}`;
+      }
+    }
+  } catch (error) {
+    console.error('Error loading field captions:', error);
+    // Fallback to English labels if caption loading fails
+  }
+}
+```
+
+### UI Translations
+All UI constants must be stored in a translations object that supports multiple languages. The active language should match the user's Business Central language setting.
+
+```javascript
+// Translation constants for UI elements
+const TRANSLATIONS = {
+  'en-US': {
+    // Form sections
+    sectionIdentification: 'Customer Identification',
+    sectionAddress: 'Address Information',
+    sectionContact: 'Contact Information',
+    sectionPosting: 'Posting Configuration',
+    sectionPayment: 'Payment Information',
+    sectionSales: 'Sales Configuration',
+    sectionCredit: 'Credit Management',
+    sectionTax: 'Tax Information',
+    sectionMedia: 'Customer Image',
+    
+    // Form heading
+    formTitle: 'Create New Customer',
+    
+    // Buttons
+    btnCreate: 'Create Customer',
+    btnCancel: 'Cancel',
+    
+    // Dropdown placeholders
+    dropdownSelect: '-- Select --',
+    dropdownNotBlocked: '-- Not Blocked --',
+    dropdownLCY: '-- LCY --',
+    
+    // Messages
+    msgLoading: 'Loading form data...',
+    msgCreating: 'Creating customer...',
+    msgSuccess: 'Customer {0} created successfully!',
+    msgErrorGeneric: 'An error occurred while creating the customer.',
+    msgErrorFailed: 'Failed to create customer: {0}',
+    msgErrorLoadFailed: 'Failed to load form data. Please refresh the page.',
+    msgCancelConfirm: 'Are you sure you want to cancel? All entered data will be lost.',
+    
+    // Validation messages
+    valRequired: '{0} is required',
+    valInvalidEmail: 'Invalid email format',
+    valInvalidKennitala: 'Invalid Kennitala check digit',
+    valMust10Digits: 'Must be 10 digits',
+    valNonNegative: 'Must be a non-negative number',
+    valFixErrors: 'Please fix the following errors:',
+    
+    // Blocked options
+    blockedShip: 'Ship',
+    blockedInvoice: 'Invoice',
+    blockedAll: 'All',
+    
+    // Upload
+    uploadImage: 'Upload Image'
+  },
+  'is-IS': {
+    // Icelandic translations
+    sectionIdentification: 'Auðkenning viðskiptamanns',
+    sectionAddress: 'Heimilisfangsupplýsingar',
+    sectionContact: 'Tengiliðaupplýsingar',
+    sectionPosting: 'Bókunarstillingar',
+    sectionPayment: 'Greiðsluupplýsingar',
+    sectionSales: 'Sölustillingar',
+    sectionCredit: 'Lánsfjárstjórnun',
+    sectionTax: 'Skattur',
+    sectionMedia: 'Mynd viðskiptamanns',
+    
+    formTitle: 'Búa til nýjan viðskiptamann',
+    
+    btnCreate: 'Búa til viðskiptamann',
+    btnCancel: 'Hætta við',
+    
+    dropdownSelect: '-- Velja --',
+    dropdownNotBlocked: '-- Ekki læst --',
+    dropdownLCY: '-- SGM --',
+    
+    msgLoading: 'Hleð inn gögnum...',
+    msgCreating: 'Búa til viðskiptamann...',
+    msgSuccess: 'Viðskiptamaður {0} búinn til!',
+    msgErrorGeneric: 'Villa kom upp við að búa til viðskiptamann.',
+    msgErrorFailed: 'Mistókst að búa til viðskiptamann: {0}',
+    msgErrorLoadFailed: 'Mistókst að hlaða inn gögnum. Vinsamlegast endurnýjaðu síðuna.',
+    msgCancelConfirm: 'Ertu viss um að þú viljir hætta við? Öll gögn tapast.',
+    
+    valRequired: '{0} er nauðsynlegt',
+    valInvalidEmail: 'Ógilt tölvupóstfang',
+    valInvalidKennitala: 'Ógild kennitala',
+    valMust10Digits: 'Verður að vera 10 tölustafir',
+    valNonNegative: 'Verður að vera jákvæð tala',
+    valFixErrors: 'Vinsamlegast lagaðu eftirfarandi villur:',
+    
+    blockedShip: 'Afhending',
+    blockedInvoice: 'Reikningur',
+    blockedAll: 'Allt',
+    
+    uploadImage: 'Hlaða upp mynd'
+  }
+  // Add more languages as needed
+};
+
+// Current language (should match BC user's language)
+let currentLanguage = 'en-US';
+
+// Get translated text
+function t(key, ...args) {
+  const translation = TRANSLATIONS[currentLanguage]?.[key] || TRANSLATIONS['en-US']?.[key] || key;
+  
+  // Replace placeholders {0}, {1}, etc. with arguments
+  return translation.replace(/\{(\d+)\}/g, (match, index) => {
+    return args[index] !== undefined ? args[index] : match;
+  });
+}
+
+// Apply UI translations to the form
+function applyUITranslations() {
+  // Section legends
+  const sections = [
+    { selector: '#customerCreateForm fieldset:nth-of-type(1) legend', key: 'sectionIdentification', prefix: '1. ' },
+    { selector: '#customerCreateForm fieldset:nth-of-type(2) legend', key: 'sectionAddress', prefix: '2. ' },
+    { selector: '#customerCreateForm fieldset:nth-of-type(3) legend', key: 'sectionContact', prefix: '3. ' },
+    { selector: '#customerCreateForm fieldset:nth-of-type(4) legend', key: 'sectionPosting', prefix: '4. ' },
+    { selector: '#customerCreateForm fieldset:nth-of-type(5) legend', key: 'sectionPayment', prefix: '5. ' },
+    { selector: '#customerCreateForm fieldset:nth-of-type(6) legend', key: 'sectionSales', prefix: '6. ' },
+    { selector: '#customerCreateForm fieldset:nth-of-type(7) legend', key: 'sectionCredit', prefix: '7. ' },
+    { selector: '#customerCreateForm fieldset:nth-of-type(8) legend', key: 'sectionTax', prefix: '8. ' },
+    { selector: '#customerCreateForm fieldset:nth-of-type(9) legend', key: 'sectionMedia', prefix: '9. ' }
+  ];
+  
+  sections.forEach(section => {
+    const element = document.querySelector(section.selector);
+    if (element) {
+      element.textContent = section.prefix + t(section.key);
+    }
+  });
+  
+  // Form heading
+  const heading = document.querySelector('#customerCreateForm h2');
+  if (heading) {
+    heading.textContent = t('formTitle');
+  }
+  
+  // Buttons
+  const btnCreate = document.getElementById('btnCreateCustomer');
+  if (btnCreate) btnCreate.textContent = t('btnCreate');
+  
+  const btnCancel = document.getElementById('btnCancel');
+  if (btnCancel) btnCancel.textContent = t('btnCancel');
+  
+  // Dropdown placeholders
+  updateDropdownPlaceholder('customerPostingGroup', 'dropdownSelect');
+  updateDropdownPlaceholder('genBusPostingGroup', 'dropdownSelect');
+  updateDropdownPlaceholder('vatBusPostingGroup', 'dropdownSelect');
+  updateDropdownPlaceholder('paymentTerms', 'dropdownSelect');
+  updateDropdownPlaceholder('currency', 'dropdownLCY');
+  updateDropdownPlaceholder('paymentMethod', 'dropdownSelect');
+  updateDropdownPlaceholder('salesperson', 'dropdownSelect');
+  updateDropdownPlaceholder('location', 'dropdownSelect');
+  updateDropdownPlaceholder('language', 'dropdownSelect');
+  
+  // Blocked dropdown options
+  const blockedDropdown = document.getElementById('blocked');
+  if (blockedDropdown && blockedDropdown.options.length > 0) {
+    blockedDropdown.options[0].text = t('dropdownNotBlocked');
+    blockedDropdown.options[1].text = t('blockedShip');
+    blockedDropdown.options[2].text = t('blockedInvoice');
+    blockedDropdown.options[3].text = t('blockedAll');
+  }
+  
+  // Image upload label
+  const imageLabel = document.querySelector('label[for="customerImage"]');
+  if (imageLabel) {
+    imageLabel.textContent = t('uploadImage');
+  }
+}
+
+function updateDropdownPlaceholder(dropdownId, translationKey) {
+  const dropdown = document.getElementById(dropdownId);
+  if (dropdown && dropdown.options.length > 0) {
+    dropdown.options[0].text = t(translationKey);
+  }
+}
+
+// Detect language from BC or browser
+function detectLanguage() {
+  // Try to get language from BC session or user preferences
+  // For now, use browser language as fallback
+  const browserLang = navigator.language || navigator.userLanguage;
+  
+  // Map browser language to supported languages
+  if (browserLang.startsWith('is')) {
+    currentLanguage = 'is-IS';
+  } else {
+    currentLanguage = 'en-US';
+  }
+  
+  // TODO: Override with BC user's language setting if available
+}
+```
+
 ## JavaScript Implementation
 
 ### Initialization
@@ -518,11 +820,18 @@ fieldset {
 // Load all lookup data on page load
 async function initCustomerCreateForm() {
   try {
-    // Show loading indicator
-    showLoading('Loading form data...');
+    // Detect user's language
+    detectLanguage();
     
-    // Load all lookup tables in parallel
+    // Apply UI translations
+    applyUITranslations();
+    
+    // Show loading indicator
+    showLoading(t('msgLoading'));
+    
+    // Load field captions and lookup tables in parallel
     await Promise.all([
+      loadFieldCaptions(),
       loadCustomerPostingGroups(),
       loadGenBusPostingGroups(),
       loadVATBusPostingGroups(),
@@ -540,7 +849,7 @@ async function initCustomerCreateForm() {
     hideLoading();
   } catch (error) {
     console.error('Error initializing form:', error);
-    showError('Failed to load form data. Please refresh the page.');
+    showError(t('msgErrorLoadFailed'));
   }
 }
 
@@ -699,7 +1008,7 @@ function setupEventListeners() {
   
   // Cancel button
   document.getElementById('btnCancel').addEventListener('click', function() {
-    if (confirm('Are you sure you want to cancel? All entered data will be lost.')) {
+    if (confirm(t('msgCancelConfirm'))) {
       document.getElementById('customerCreateForm').reset();
     }
   });
@@ -729,7 +1038,7 @@ async function handleCreateCustomer() {
     }
     
     // Show loading
-    showLoading('Creating customer...');
+    showLoading(t('msgCreating'));
     
     // Gather form data
     const customerData = {
@@ -776,17 +1085,17 @@ async function handleCreateCustomer() {
     });
     
     if (result.Success) {
-      showSuccess(`Customer ${customerData.No_} created successfully!`);
+      showSuccess(t('msgSuccess', customerData.No_));
       
       // Reset form
       document.getElementById('customerCreateForm').reset();
       document.getElementById('imagePreview').innerHTML = '';
     } else {
-      showError('Failed to create customer: ' + (result.Error || 'Unknown error'));
+      showError(t('msgErrorFailed', result.Error || 'Unknown error'));
     }
   } catch (error) {
     console.error('Error creating customer:', error);
-    showError('An error occurred while creating the customer.');
+    showError(t('msgErrorGeneric'));
   } finally {
     hideLoading();
   }
@@ -795,25 +1104,31 @@ async function handleCreateCustomer() {
 function validateForm() {
   const errors = [];
   
+  // Get field captions for error messages
+  const getFieldCaption = (elementId) => {
+    const label = document.querySelector(`label[for="${elementId}"]`);
+    return label ? label.textContent.replace(' *', '') : elementId;
+  };
+  
   // Registration Number
   const regNo = document.getElementById('registrationNumber').value;
   if (!regNo) {
-    errors.push('Registration Number is required');
+    errors.push(t('valRequired', getFieldCaption('registrationNumber')));
   } else {
     const validation = validateIcelandicKennitala(regNo);
     if (!validation.valid) {
-      errors.push('Registration Number: ' + validation.error);
+      errors.push(getFieldCaption('registrationNumber') + ': ' + validation.error);
     }
   }
   
   // Customer Name
   if (!document.getElementById('name').value) {
-    errors.push('Customer Name is required');
+    errors.push(t('valRequired', getFieldCaption('name')));
   }
   
   // Post Code
   if (!document.getElementById('postCode').value) {
-    errors.push('Post Code is required');
+    errors.push(t('valRequired', getFieldCaption('postCode')));
   }
   
   // Email validation
@@ -821,24 +1136,24 @@ function validateForm() {
   if (email) {
     const emailValidation = validateEmail(email);
     if (!emailValidation.valid) {
-      errors.push('Email: ' + emailValidation.error);
+      errors.push(getFieldCaption('email') + ': ' + emailValidation.error);
     }
   }
   
   // Posting Groups
   if (!document.getElementById('customerPostingGroup').value) {
-    errors.push('Customer Posting Group is required');
+    errors.push(t('valRequired', getFieldCaption('customerPostingGroup')));
   }
   if (!document.getElementById('genBusPostingGroup').value) {
-    errors.push('Gen. Bus. Posting Group is required');
+    errors.push(t('valRequired', getFieldCaption('genBusPostingGroup')));
   }
   if (!document.getElementById('vatBusPostingGroup').value) {
-    errors.push('VAT Bus. Posting Group is required');
+    errors.push(t('valRequired', getFieldCaption('vatBusPostingGroup')));
   }
   
   // Payment Terms
   if (!document.getElementById('paymentTerms').value) {
-    errors.push('Payment Terms is required');
+    errors.push(t('valRequired', getFieldCaption('paymentTerms')));
   }
   
   // Credit Limit
@@ -846,13 +1161,13 @@ function validateForm() {
   if (creditLimit) {
     const creditValidation = validateCreditLimit(creditLimit);
     if (!creditValidation.valid) {
-      errors.push('Credit Limit: ' + creditValidation.error);
+      errors.push(getFieldCaption('creditLimit') + ': ' + creditValidation.error);
     }
   }
   
   // Display errors if any
   if (errors.length > 0) {
-    showError('Please fix the following errors:\n\n' + errors.join('\n'));
+    showError(t('valFixErrors') + '\n\n' + errors.join('\n'));
     return false;
   }
   
@@ -918,7 +1233,19 @@ function convertImageToBase64(file) {
 - [ ] Edge
 - [ ] Safari
 
+### Localization Testing
+- [ ] Field captions loaded from BC in user's selected language
+- [ ] All UI constants (buttons, section headers, messages) translated correctly
+- [ ] Form displays correctly with non-English captions
+- [ ] Required field indicators (*) preserved in all languages
+- [ ] Dropdown placeholders translated (Select, LCY, Not Blocked, etc.)
+- [ ] Validation error messages appear in correct language
+- [ ] Success/error messages appear in correct language
+- [ ] Fallback to English labels if caption loading fails
+- [ ] Test with multiple BC language settings (e.g., English, Icelandic, Danish)
+
 ## Dependencies
+- **Cloud Events API** - All implementation must follow the specification in [CLOUD_EVENTS_API.md](../../CLOUD_EVENTS_API.md)
 - Existing `cePost()` function for Cloud Events API communication
 - Company selection context (must be set before form is accessible)
 - Valid OAuth token for BC API authentication
@@ -930,3 +1257,6 @@ function convertImageToBase64(file) {
 4. Customer templates for common configurations
 5. Address validation via postal service API
 6. Mobile-responsive design improvements
+7. Additional language translations (Danish, Swedish, Norwegian, etc.)
+8. Load UI translations from external resource file or API
+9. User preference for UI language override
