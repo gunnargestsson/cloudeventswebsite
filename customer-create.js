@@ -593,6 +593,8 @@ function setupCustomerEventListeners() {
         }
       } catch (error) {
         console.error('Error looking up post code:', error);
+        const errorDetails = error.stack || error.message;
+        toast('Error looking up post code:\n' + errorDetails, 'error');
       }
     });
   }
@@ -717,7 +719,8 @@ async function handleCreateCustomer() {
     }
   } catch (error) {
     console.error('Error creating customer:', error);
-    toast(tCustomer('msgErrorGeneric') + '\n' + error.message, 'error');
+    const errorDetails = error.stack || error.message;
+    toast(tCustomer('msgErrorGeneric') + '\n\n' + errorDetails, 'error');
   }
 }
 
@@ -772,7 +775,8 @@ async function initCustomerCreateForm() {
     toast('Form ready', 'success');
   } catch (error) {
     console.error('Error initializing form:', error);
-    toast(tCustomer('msgErrorLoadFailed'), 'error');
+    const errorDetails = error.stack || error.message;
+    toast(tCustomer('msgErrorLoadFailed') + ':\n\n' + errorDetails, 'error');
   }
 }
 

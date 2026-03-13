@@ -840,7 +840,12 @@ async function bcGet(path) {
   const r = await fetch('/api/bc?path=' + encodeURIComponent(path));
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
-    throw new Error(e.error || 'API error ' + r.status);
+    let errorMsg = e.error || 'API error ' + r.status;
+    // Include full error details for demo debugging
+    if (e && Object.keys(e).length > 0) {
+      errorMsg += '\n\nFull Error Details:\n' + JSON.stringify(e, null, 2);
+    }
+    throw new Error(errorMsg);
   }
   return r.json();
 }
@@ -857,7 +862,12 @@ async function cePost(companyId, event) {
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
-    throw new Error(e.error || 'API error ' + r.status);
+    let errorMsg = e.error || 'API error ' + r.status;
+    // Include full error details for demo debugging
+    if (e && Object.keys(e).length > 0) {
+      errorMsg += '\n\nFull Error Details:\n' + JSON.stringify(e, null, 2);
+    }
+    throw new Error(errorMsg);
   }
   const result = await r.json();
   // Check Cloud Events task status — "Error" means the task failed
@@ -868,6 +878,8 @@ async function cePost(companyId, event) {
     if (result.callStack) {
       errorMsg += '\n\nCall Stack:\n' + result.callStack.replace(/\\\"/g, '"');
     }
+    // Include full result object for complete context
+    errorMsg += '\n\nFull Error Response:\n' + JSON.stringify(result, null, 2);
     throw new Error(errorMsg);
   }
   return result;
@@ -1045,8 +1057,10 @@ function toast(msg, type='info') {
   document.getElementById('toast-icon').textContent = type==='success'?'✓':type==='error'?'✕':'ℹ';
   document.getElementById('toast-msg').textContent = msg;
   el.style.borderColor = type==='error'?'var(--red)':type==='success'?'var(--green)':'var(--border-bright)';
+  el.style.whiteSpace = 'pre-wrap'; // Allow multi-line error messages
+  el.style.maxWidth = type==='error' ? '600px' : '320px'; // Wider for error details
   el.classList.add('show');
-  setTimeout(()=>el.classList.remove('show'), 3500);
+  setTimeout(()=>el.classList.remove('show'), type==='error' ? 8000 : 3500); // Longer display for errors
 }
 
 function show(id) {
@@ -1081,8 +1095,9 @@ async function loadCompanies() {
       </div>`).join('');
   } catch(e) {
     setStatus('error');
-    document.getElementById('company-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
-    toast(e.message, 'error');
+    const errorDetails = e.stack || e.message;
+    document.getElementById('company-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`;
+    toast(errorDetails, 'error');
   }
 }
 
@@ -1128,8 +1143,9 @@ async function loadCustomers(skip = 0) {
     renderCustomers(customers);
     paginate('customer-pagination', total, skip, take, 'loadCustomers');
   } catch(e) {
-    document.getElementById('customer-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
-    toast(e.message, 'error');
+    const errorDetails = e.stack || e.message;
+    document.getElementById('customer-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`;
+    toast(errorDetails, 'error');
   }
 }
 
@@ -1254,7 +1270,11 @@ async function loadLedger(skip = 0) {
     </table></div>
     <div id="ledger-pagination"></div>`;
     paginate('ledger-pagination', total, skip, take, 'loadLedger');
-  } catch(e) { el.innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`; toast(e.message,'error'); }
+  } catch(e) { 
+    const errorDetails = e.stack || e.message;
+    el.innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`; 
+    toast(errorDetails,'error'); 
+  }
 }
 
 // ---- DOCUMENTS ----
@@ -1332,7 +1352,11 @@ async function loadDocuments() {
       </tr>`;
       }).join('')}</tbody>
     </table></div>`;
-  } catch(e) { el.innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`; }
+  } catch(e) { 
+    const errorDetails = e.stack || e.message;
+    el.innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`; 
+    toast(errorDetails,'error');
+  }
 }
 
 function chipStatus(s, label) {
@@ -1516,7 +1540,10 @@ async function downloadPdf(docType, docNo) {
     const blob = new Blob([await r.arrayBuffer()], { type: 'application/pdf' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = `${docNo}.pdf`; a.click();
-  } catch(e) { toast(e.message, 'error'); }
+  } catch(e) { 
+    const errorDetails = e.stack || e.message;
+    toast(errorDetails, 'error'); 
+  }
 }
 
 // ---- ITEMS ----
@@ -1534,7 +1561,11 @@ async function loadItems() {
     itemPrices = {};
     itemPictures = {};
     renderItems(items);
-  } catch(e) { document.getElementById('items-list').innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`; }
+  } catch(e) { 
+    const errorDetails = e.stack || e.message;
+    document.getElementById('items-list').innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`; 
+    toast(errorDetails, 'error');
+  }
 }
 
 
@@ -1594,7 +1625,9 @@ async function showItemAvailability(id) {
     res = availResult;
     avail = mergeAvailability(res.availability || []);
   } catch(e) {
-    body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
+    const errorDetails = e.stack || e.message;
+    body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`;
+    toast(errorDetails, 'error');
     return;
   }
   // Fetch fresh price; fetch picture only if not yet loaded for this session
