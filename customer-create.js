@@ -72,12 +72,16 @@ function validateIcelandicKennitala(kennitala) {
   // Calculate sum
   const sum = digits.reduce((acc, digit, index) => acc + (digit * weights[index]), 0);
   
-  // Calculate expected check digit
-  const expectedCheckDigit = sum % 11;
+  // Calculate expected check digit: 11 - (sum mod 11)
+  // If result is 11, check digit should be 0
+  let expectedCheckDigit = 11 - (sum % 11);
+  if (expectedCheckDigit === 11) {
+    expectedCheckDigit = 0;
+  }
   
   // Validate
   if (checkDigit !== expectedCheckDigit) {
-    return { valid: false, error: tCustomer('Invalid Kennitala check digit') };
+    return { valid: false, error: tCustomer('Invalid Registration No. check digit') };
   }
   
   return { valid: true };
@@ -211,11 +215,29 @@ function populateCustomerDropdown(dropdownId, records, valueField, textField) {
     dropdown.remove(1);
   }
   
+  // Debug: log first record to see available fields
+  if (records.length > 0) {
+    console.log(`Dropdown ${dropdownId} - First record:`, records[0]);
+    console.log(`Looking for valueField: ${valueField}, textField: ${textField}`);
+  }
+  
   // Add new options
   records.forEach(record => {
     const option = document.createElement('option');
-    option.value = record[valueField];
-    option.textContent = textField ? `${record[valueField]} - ${record[textField]}` : record[valueField];
+    const value = record[valueField];
+    const text = record[textField];
+    
+    option.value = value || '';
+    
+    // Handle undefined fields gracefully
+    if (value && text) {
+      option.textContent = `${value} - ${text}`;
+    } else if (value) {
+      option.textContent = value;
+    } else {
+      option.textContent = '(No value)';
+    }
+    
     dropdown.appendChild(option);
   });
   
@@ -396,6 +418,19 @@ async function loadLanguages() {
   }
 }
 
+async function loadPostCodes() {
+  const result = await cePost(selectedCompany.id, {
+    specversion: '1.0',
+    type: 'Data.Records.Get',
+    source: 'BC Portal',
+    data: JSON.stringify({ tableName: 'Post Code' })
+  });
+  
+  if (result.result && result.result.length > 0) {
+    populateCustomerDropdown('customer-post-code', result.result, 'code', 'city');
+  }
+}
+
 // =============================
 // UI TRANSLATION APPLICATION
 // =============================
@@ -468,12 +503,16 @@ function setupCustomerEventListeners() {
     });
   }
   
-  // Post Code lookup
-  const postCodeInput = document.getElementById('customer-post-code');
-  if (postCodeInput) {
-    postCodeInput.addEventListener('blur', async function() {
+  // Post Code auto-population
+  const postCodeSelect = document.getElementById('customer-post-code');
+  if (postCodeSelect) {
+    postCodeSelect.addEventListener('change', async function() {
       const postCode = this.value;
-      if (!postCode) return;
+      if (!postCode) {
+        document.getElementById('customer-city').value = '';
+        document.getElementById('customer-country-code').value = '';
+        return;
+      }
       
       try {
         const result = await cePost(selectedCompany.id, {
@@ -666,7 +705,8 @@ async function initCustomerCreateForm() {
       loadPaymentMethods(),
       loadSalespersons(),
       loadLocations(),
-      loadLanguages()
+      loadLanguages(),
+      loadPostCodes()
     ]);
     
     // Setup event listeners

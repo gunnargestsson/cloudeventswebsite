@@ -299,8 +299,8 @@
 
   /* LOADER */
   .loader-wrap { display: flex; align-items: center; justify-content: center; padding: 60px; flex-direction: column; gap: 14px; }
-  .spinner { width: 30px; height: 30px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 30px; height: 30px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   .loader-label { font-size: 0.76rem; color: var(--text-dim); }
   .empty-state { text-align: center; padding: 56px 20px; color: var(--text-dim); font-size: 0.84rem; }
   .empty-icon { font-size: 2.4rem; margin-bottom: 12px; opacity: 0.4; }
@@ -602,7 +602,9 @@
           <div class="customer-form-row">
             <div class="customer-form-group">
               <label for="customer-post-code" id="label-post-code">Post Code</label>
-              <input type="text" id="customer-post-code" maxlength="20" />
+              <select id="customer-post-code">
+                <option value="">-- Select --</option>
+              </select>
             </div>
             <div class="customer-form-group">
               <label for="customer-city" id="label-city">City</label>
@@ -832,7 +834,7 @@ const UI_STRINGS = [
   'Failed to create customer: {0}',
   'Failed to load form data. Please refresh the page.',
   '{0} is required', 'Invalid email format', 
-  'Invalid Kennitala check digit', 'Must be 10 digits',
+  'Invalid Registration No. check digit', 'Must be 10 digits',
   'Must be a non-negative number', 'Please fix the following errors:',
   'Error looking up post code'
 ];
