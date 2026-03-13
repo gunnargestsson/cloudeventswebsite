@@ -16,6 +16,7 @@ const CUSTOMER_FIELD_MAPPING = {
   'customer-post-code': 'PostCode',
   'customer-city': 'City',
   'customer-country-code': 'Country_RegionCode',
+  'customer-county': 'County',
   'customer-phone': 'MobilePhoneNo',
   'customer-email': 'EMail',
   'customer-contact': 'Contact',
@@ -29,12 +30,14 @@ const CUSTOMER_FIELD_MAPPING = {
   'customer-location': 'LocationCode',
   'customer-language': 'LanguageCode',
   'customer-credit-limit': 'CreditLimit_LCY_',
-  'customer-tax-liable': 'TaxLiable',
   'customer-image': 'Image'
 };
 
 // Storage for Gen. Bus. Posting Group to VAT mapping
 let genBusToVATMapping = {};
+
+// Storage for Post Code records (for auto-populating City, County, Country/Region)
+let postCodeRecords = [];
 
 // Field metadata cache for dropdown tables
 const fieldMetadataCache = {};
@@ -319,6 +322,7 @@ function updateDropdownPlaceholder(dropdownId, translationKey) {
 
 async function loadCustomerFieldCaptions() {
   try {
+    // Note: lcid is automatically added by cePost() function from selectedLcid global
     const result = await cePost(selectedCompany.id, {
       specversion: '1.0',
       type: 'Help.Fields.Get',
@@ -353,17 +357,37 @@ async function loadCustomerFieldCaptions() {
   }
 }
 
-async function loadCustomerPostingGroups() {
-  // Get field numbers for Code and Description
-  const fieldNumbers = await getDropdownFieldNumbers('Customer Posting Group', 'Code', 'Description');
+// Reload customer form when language changes
+async function reloadCustomerFormForLanguage() {
+  const createView = document.getElementById('view-create-customer');
+  if (!createView || createView.style.display === 'none') {
+    return; // Form not visible, no need to reload
+  }
   
+  try {
+    // Clear field metadata cache for Customer table to force reload with new lcid
+    const cacheKey = `${selectedCompany.id}:${selectedLcid}:Customer`;
+    delete fieldMetaCache[cacheKey];
+    
+    // Reload field captions with new language
+    await loadCustomerFieldCaptions();
+    
+    // Re-apply UI translations for section headers, buttons, etc.
+    applyCustomerUITranslations();
+  } catch (error) {
+    console.error('Error reloading customer form for new language:', error);
+  }
+}
+
+async function loadCustomerPostingGroups() {
+  // Customer Posting Group: Field 1 = Code, Field 20 = Description
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Customer Posting Group',
-      fieldNumbers: fieldNumbers
+      fieldNumbers: [1, 20]
     })
   });
   
@@ -373,16 +397,14 @@ async function loadCustomerPostingGroups() {
 }
 
 async function loadGenBusPostingGroups() {
-  // Get field numbers for Code, Description, and Def. VAT Bus. Posting Group
-  const fieldNumbers = await getDropdownFieldNumbers('Gen. Business Posting Group', 'Code', 'Description', 'Def. VAT Bus. Posting Group');
-  
+  // Gen. Business Posting Group: Field 1 = Code, Field 2 = Description, Field 3 = Def. VAT Bus. Posting Group
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Gen. Business Posting Group',
-      fieldNumbers: fieldNumbers
+      fieldNumbers: [1, 2, 3]
     })
   });
   
@@ -405,16 +427,14 @@ async function loadGenBusPostingGroups() {
 }
 
 async function loadVATBusPostingGroups() {
-  // Get field numbers for Code and Description
-  const fieldNumbers = await getDropdownFieldNumbers('VAT Business Posting Group', 'Code', 'Description');
-  
+  // VAT Business Posting Group: Field 1 = Code, Field 2 = Description
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'VAT Business Posting Group',
-      fieldNumbers: fieldNumbers
+      fieldNumbers: [1, 2]
     })
   });
   
@@ -424,16 +444,14 @@ async function loadVATBusPostingGroups() {
 }
 
 async function loadPaymentTerms() {
-  // Get field numbers for Code and Description
-  const fieldNumbers = await getDropdownFieldNumbers('Payment Terms', 'Code', 'Description');
-  
+  // Payment Terms: Field 1 = Code, Field 5 = Description
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Payment Terms',
-      fieldNumbers: fieldNumbers
+      fieldNumbers: [1, 5]
     })
   });
   
@@ -443,16 +461,14 @@ async function loadPaymentTerms() {
 }
 
 async function loadCurrencies() {
-  // Get field numbers for Code and Description
-  const fieldNumbers = await getDropdownFieldNumbers('Currency', 'Code', 'Description');
-  
+  // Currency: Field 1 = Code, Field 15 = Description
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Currency',
-      fieldNumbers: fieldNumbers
+      fieldNumbers: [1, 15]
     })
   });
   
@@ -462,16 +478,14 @@ async function loadCurrencies() {
 }
 
 async function loadPaymentMethods() {
-  // Get field numbers for Code and Description
-  const fieldNumbers = await getDropdownFieldNumbers('Payment Method', 'Code', 'Description');
-  
+  // Payment Method: Field 1 = Code, Field 2 = Description
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Payment Method',
-      fieldNumbers: fieldNumbers
+      fieldNumbers: [1, 2]
     })
   });
   
@@ -481,16 +495,14 @@ async function loadPaymentMethods() {
 }
 
 async function loadSalespersons() {
-  // Get field numbers for Code and Name
-  const fieldNumbers = await getDropdownFieldNumbers('Salesperson/Purchaser', 'Code', 'Name');
-  
+  // Salesperson/Purchaser: Field 1 = Code, Field 2 = Name
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Salesperson/Purchaser',
-      fieldNumbers: fieldNumbers
+      fieldNumbers: [1, 2]
     })
   });
   
@@ -500,16 +512,14 @@ async function loadSalespersons() {
 }
 
 async function loadLocations() {
-  // Get field numbers for Code and Name
-  const fieldNumbers = await getDropdownFieldNumbers('Location', 'Code', 'Name');
-  
+  // Location: Field 1 = Code, Field 2 = Name
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Location',
-      fieldNumbers: fieldNumbers
+      fieldNumbers: [1, 2]
     })
   });
   
@@ -519,20 +529,20 @@ async function loadLocations() {
 }
 
 async function loadPostCodes() {
-  // Get field numbers for Code and City
-  const fieldNumbers = await getDropdownFieldNumbers('Post Code', 'Code', 'City');
-  
+  // Post Code: Field 1 = Code, Field 2 = City, Field 4 = Country/Region Code, Field 5 = County
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Post Code',
-      fieldNumbers: fieldNumbers
+      fieldNumbers: [1, 2, 4, 5]
     })
   });
   
   if (result.result && result.result.length > 0) {
+    // Store post code records for auto-population
+    postCodeRecords = result.result;
     populateCustomerDropdown('customer-post-code', result.result, 'code', 'city');
   }
 }
@@ -551,8 +561,7 @@ function applyCustomerUITranslations() {
     { selector: '#customer-create-form fieldset:nth-of-type(5) legend', key: 'Payment', prefix: '5. ' },
     { selector: '#customer-create-form fieldset:nth-of-type(6) legend', key: 'Sales', prefix: '6. ' },
     { selector: '#customer-create-form fieldset:nth-of-type(7) legend', key: 'Credit Management', prefix: '7. ' },
-    { selector: '#customer-create-form fieldset:nth-of-type(8) legend', key: 'Tax', prefix: '8. ' },
-    { selector: '#customer-create-form fieldset:nth-of-type(9) legend', key: 'Media', prefix: '9. ' }
+    { selector: '#customer-create-form fieldset:nth-of-type(8) legend', key: 'Media', prefix: '8. ' }
   ];
   
   sections.forEach(section => {
@@ -612,34 +621,37 @@ function setupCustomerEventListeners() {
   // Post Code auto-population
   const postCodeSelect = document.getElementById('customer-post-code');
   if (postCodeSelect) {
-    postCodeSelect.addEventListener('change', async function() {
-      const postCode = this.value;
-      if (!postCode) {
+    postCodeSelect.addEventListener('change', function() {
+      const selectedCode = this.value;
+      
+      if (!selectedCode) {
+        // Clear fields if no post code selected
         document.getElementById('customer-city').value = '';
         document.getElementById('customer-country-code').value = '';
+        document.getElementById('customer-county').value = '';
         return;
       }
       
-      try {
-        const result = await cePost(selectedCompany.id, {
-          specversion: '1.0',
-          type: 'Data.Records.Get',
-          source: 'BC Portal',
-          data: JSON.stringify({
-            tableName: 'Post Code',
-            filters: [{ fieldName: 'Code', value: postCode }]
-          })
-        });
+      // Find the selected post code record from cached data
+      const postCodeRecord = postCodeRecords.find(record => {
+        const code = (record.primaryKey && record.primaryKey.Code) || 
+                     (record.fields && record.fields.Code);
+        return code === selectedCode;
+      });
+      
+      if (postCodeRecord) {
+        // Auto-populate City (field 2)
+        const city = (postCodeRecord.fields && postCodeRecord.fields.City) || '';
+        document.getElementById('customer-city').value = city;
         
-        if (result.result && result.result.length > 0) {
-          const record = result.result[0];
-          document.getElementById('customer-city').value = record.city || '';
-          document.getElementById('customer-country-code').value = record.country_RegionCode || '';
-        }
-      } catch (error) {
-        console.error('Error looking up post code:', error);
-        const errorDetails = error.stack || error.message;
-        toast(tCustomer('Error looking up post code') + ':\n' + errorDetails, 'error');
+        // Auto-populate Country/Region Code (field 4)
+        const countryCode = (postCodeRecord.fields && postCodeRecord.fields.Country_RegionCode) || 
+                            (postCodeRecord.fields && postCodeRecord.fields.CountryRegionCode) || '';
+        document.getElementById('customer-country-code').value = countryCode;
+        
+        // Auto-populate County (field 5)
+        const county = (postCodeRecord.fields && postCodeRecord.fields.County) || '';
+        document.getElementById('customer-county').value = county;
       }
     });
   }
@@ -723,8 +735,7 @@ async function handleCreateCustomer() {
       salespersonCode: document.getElementById('customer-salesperson').value || '',
       locationCode: document.getElementById('customer-location').value || '',
       languageCode: document.getElementById('customer-language').value || '',
-      creditLimit_LCY_: parseFloat(document.getElementById('customer-credit-limit').value) || 0,
-      taxLiable: document.getElementById('customer-tax-liable').value === 'true'
+      creditLimit_LCY_: parseFloat(document.getElementById('customer-credit-limit').value) || 0
     };
     
     // Handle image upload if present

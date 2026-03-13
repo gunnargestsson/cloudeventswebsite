@@ -42,9 +42,10 @@ All API calls must be made using the `cePost()` function with proper authenticat
 |------------|----------|------|----------|---------|---------------|-------|
 | Address | Address | Text(100) | No | Text Input | No | |
 | Address 2 | Address2 | Text(50) | No | Text Input | No | |
-| Post Code | PostCode | Code(20) | Yes | Text Input | No | Triggers City/Country lookup |
-| City | City | Text(30) | Yes | Read-only | Yes | From Post Code table |
-| Country/Region | Country_RegionCode | Code(10) | Yes | Read-only | Yes | From Post Code table |
+| Post Code | PostCode | Code(20) | Yes | Dropdown | No | Triggers City/County/Country auto-fill |
+| City | City | Text(30) | Yes | Read-only | Yes | From Post Code table (field 2) |
+| Country/Region | Country_RegionCode | Code(10) | Yes | Read-only | Yes | From Post Code table (field 4) |
+| County | County | Text(30) | No | Read-only | Yes | From Post Code table (field 5) |
 
 ### 3. Contact Information
 | Field Name | BC Field | Type | Required | Control | Notes |
@@ -56,23 +57,23 @@ All API calls must be made using the `cePost()` function with proper authenticat
 ### 4. Posting Configuration
 | Field Name | BC Field | Type | Required | Control | Lookup Info | Auto-Populate |
 |------------|----------|------|----------|---------|-------------|---------------|
-| Customer Posting Group | CustomerPostingGroup | Code(20) | Yes | Dropdown | Table 92, Key: Code | No |
-| Gen. Bus. Posting Group | GenBusPostingGroup | Code(20) | Yes | Dropdown | Table 251, Key: Code, Include: Def. VAT Bus. Posting Group | Triggers VAT auto-fill |
-| VAT Bus. Posting Group | VATBusPostingGroup | Code(20) | Yes | Dropdown | Table 323, Key: Code | Auto-filled from Gen. Bus. |
+| Customer Posting Group | CustomerPostingGroup | Code(20) | Yes | Dropdown | Table 92, Fields: 1 (Code), 20 (Description) | No |
+| Gen. Bus. Posting Group | GenBusPostingGroup | Code(20) | Yes | Dropdown | Table 250, Fields: 1 (Code), 2 (Description), 3 (Def. VAT Bus. Posting Group) | Triggers VAT auto-fill |
+| VAT Bus. Posting Group | VATBusPostingGroup | Code(20) | Yes | Dropdown | Table 323, Fields: 1 (Code), 2 (Description) | Auto-filled from Gen. Bus. (field 3) |
 
 ### 5. Payment Information
 | Field Name | BC Field | Type | Required | Control | Lookup Info | Notes |
 |------------|----------|------|----------|---------|-------------|-------|
-| Payment Terms | PaymentTermsCode | Code(10) | Yes | Dropdown | Table 3, Key: Code | |
-| Currency | CurrencyCode | Code(10) | No | Dropdown | Table 4, Key: Code | Blank = LCY |
-| Payment Method | PaymentMethodCode | Code(10) | No | Dropdown | Table 289, Key: Code | |
+| Payment Terms | PaymentTermsCode | Code(10) | Yes | Dropdown | Table 3, Fields: 1 (Code), 5 (Description) | |
+| Currency | CurrencyCode | Code(10) | No | Dropdown | Table 4, Fields: 1 (Code), 15 (Description) | Blank = LCY |
+| Payment Method | PaymentMethodCode | Code(10) | No | Dropdown | Table 289, Fields: 1 (Code), 2 (Description) | |
 
 ### 6. Sales Configuration
 | Field Name | BC Field | Type | Required | Control | Lookup Info | Notes |
 |------------|----------|------|----------|---------|-------------|-------|
-| Salesperson | SalespersonCode | Code(20) | No | Dropdown | Table 13, Key: Code | |
-| Location | LocationCode | Code(10) | No | Dropdown | Table 14, Key: Code | |
-| Language | LanguageCode | Code(10) | No | Dropdown | Table 8, Key: Code | |
+| Salesperson | SalespersonCode | Code(20) | No | Dropdown | Table 13, Fields: 1 (Code), 2 (Name) | |
+| Location | LocationCode | Code(10) | No | Dropdown | Table 14, Fields: 1 (Code), 2 (Name) | |
+| Language | LanguageCode | Code(10) | No | Dropdown | Table 8 (all languages loaded at company selection) | |
 
 ### 7. Credit Management
 | Field Name | BC Field | Type | Required | Control | Notes |
@@ -102,21 +103,23 @@ All API calls must be made using the `cePost()` function with proper authenticat
 
 ## Lookup Tables Reference
 
-### Complete Lookup Table List
+### Complete Lookup Table List with Field Numbers
 ```javascript
 const LOOKUP_TABLES = {
-  postCode: { table: 225, keyField: 'Code', displayFields: ['Code', 'City', 'Country_RegionCode'] },
-  customerPostingGroup: { table: 92, keyField: 'Code', displayFields: ['Code', 'Description'] },
-  genBusPostingGroup: { table: 251, keyField: 'Code', displayFields: ['Code', 'Description', 'Def_VATBusPostingGroup'] },
-  vatBusPostingGroup: { table: 323, keyField: 'Code', displayFields: ['Code', 'Description'] },
-  paymentTerms: { table: 3, keyField: 'Code', displayFields: ['Code', 'Description'] },
-  currency: { table: 4, keyField: 'Code', displayFields: ['Code', 'Description'] },
-  paymentMethod: { table: 289, keyField: 'Code', displayFields: ['Code', 'Description'] },
-  salesperson: { table: 13, keyField: 'Code', displayFields: ['Code', 'Name'] },
-  location: { table: 14, keyField: 'Code', displayFields: ['Code', 'Name'] },
-  language: { table: 8, keyField: 'Code', displayFields: ['Code', 'Name'] }
+  postCode: { table: 225, fields: [1, 2, 4, 5], mapping: { 1: 'Code', 2: 'City', 4: 'Country_RegionCode', 5: 'County' } },
+  customerPostingGroup: { table: 92, fields: [1, 20], mapping: { 1: 'Code', 20: 'Description' } },
+  genBusPostingGroup: { table: 250, fields: [1, 2, 3], mapping: { 1: 'Code', 2: 'Description', 3: 'Def_VATBusPostingGroup' } },
+  vatBusPostingGroup: { table: 323, fields: [1, 2], mapping: { 1: 'Code', 2: 'Description' } },
+  paymentTerms: { table: 3, fields: [1, 5], mapping: { 1: 'Code', 5: 'Description' } },
+  currency: { table: 4, fields: [1, 15], mapping: { 1: 'Code', 15: 'Description' } },
+  paymentMethod: { table: 289, fields: [1, 2], mapping: { 1: 'Code', 2: 'Description' } },
+  salesperson: { table: 13, fields: [1, 2], mapping: { 1: 'Code', 2: 'Name' } },
+  location: { table: 14, fields: [1, 2], mapping: { 1: 'Code', 2: 'Name' } },
+  language: { table: 8, fields: [], note: 'All fields loaded at company selection' }
 };
 ```
+
+**Important**: Field access in responses uses `record.primaryKey.FieldName` for primary key fields and `record.fields.FieldName` for all other fields.
 
 ## Validation Rules
 
@@ -221,7 +224,7 @@ document.getElementById('customer-post-code').addEventListener('blur', async fun
 
 ### 3. Gen. Bus. Posting Group → VAT Bus. Posting Group
 ```javascript
-// Store the mapping when Gen. Bus. Posting Group data is loaded
+// Store the mapping when Gen. Bus. Posting Group data is loaded (field 3)
 let genBusToVATMapping = {};
 
 async function loadGenBusPostingGroups() {
@@ -229,12 +232,19 @@ async function loadGenBusPostingGroups() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Gen. Business Posting Group' })
+    data: JSON.stringify({ 
+      tableName: 'Gen. Business Posting Group',
+      fieldNumbers: [1, 2, 3]  // Code, Description, Def. VAT Bus. Posting Group
+    })
   });
   
   if (result.result && result.result.length > 0) {
     result.result.forEach(record => {
-      genBusToVATMapping[record.code] = record.def_VATBusPostingGroup;
+      const code = record.primaryKey?.Code || record.fields?.Code;
+      const defVAT = record.fields?.Def_VATBusPostingGroup;
+      if (code && defVAT) {
+        genBusToVATMapping[code] = defVAT;
+      }
     });
     
     // Populate dropdown
@@ -242,13 +252,14 @@ async function loadGenBusPostingGroups() {
   }
 }
 
-// When Gen. Bus. Posting Group changes
+// When Gen. Bus. Posting Group dropdown changes, auto-select VAT Bus. Posting Group
 document.getElementById('customer-gen-bus-posting-group').addEventListener('change', function() {
   const selectedCode = this.value;
   const defaultVAT = genBusToVATMapping[selectedCode];
+  const vatDropdown = document.getElementById('customer-vat-bus-posting-group');
   
-  if (defaultVAT) {
-    document.getElementById('customer-vat-bus-posting-group').value = defaultVAT;
+  if (defaultVAT && vatDropdown) {
+    vatDropdown.value = defaultVAT;  // Sets dropdown to default value
   }
 });
 ```

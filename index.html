@@ -619,6 +619,10 @@
             <label for="customer-country-code" id="label-country-code">Country/Region Code</label>
             <input type="text" id="customer-country-code" class="readonly-field" readonly />
           </div>
+          <div class="customer-form-group">
+            <label for="customer-county" id="label-county">County</label>
+            <input type="text" id="customer-county" class="readonly-field" readonly />
+          </div>
         </fieldset>
 
         <!-- Contact Section -->
@@ -659,7 +663,9 @@
           </div>
           <div class="customer-form-group">
             <label for="customer-vat-bus-posting-group" id="label-vat-bus-posting-group">VAT Bus. Posting Group</label>
-            <input type="text" id="customer-vat-bus-posting-group" class="readonly-field" readonly />
+            <select id="customer-vat-bus-posting-group">
+              <option value="">-- Select --</option>
+            </select>
           </div>
         </fieldset>
 
@@ -721,18 +727,6 @@
           <div class="customer-form-group">
             <label for="customer-credit-limit" id="label-credit-limit">Credit Limit (LCY)</label>
             <input type="number" id="customer-credit-limit" min="0" step="0.01" value="0" />
-          </div>
-        </fieldset>
-
-        <!-- Tax Section -->
-        <fieldset>
-          <legend data-t="Tax">Tax</legend>
-          <div class="customer-form-group">
-            <label for="customer-tax-liable" id="label-tax-liable">Tax Liable</label>
-            <select id="customer-tax-liable">
-              <option value="true" selected>true</option>
-              <option value="false">false</option>
-            </select>
           </div>
         </fieldset>
 
@@ -830,7 +824,7 @@ const UI_STRINGS = [
   'Pictures', 'View all', 'Back', 'No picture',
   '+ Create Customer', 'Create Customer', 'Create New Customer', 'Back to Customers',
   'Identification', 'Address', 'Contact', 'Posting', 'Payment', 'Sales', 
-  'Credit Management', 'Tax', 'Media', 'Reset Form',
+  'Credit Management', 'Media', 'Reset Form',
   'Upload a customer logo or image (optional)',
   // Customer creation messages and validation
   '-- Select --', '-- LCY --', 'Loading form data...', 'Creating customer...',
@@ -1035,6 +1029,11 @@ async function onLangChange(value) {
     updateSummary();
   } else {
     loadCustomers();
+  }
+  
+  // Reload customer creation form if it's open
+  if (typeof reloadCustomerFormForLanguage === 'function') {
+    await reloadCustomerFormForLanguage();
   }
 }
 
