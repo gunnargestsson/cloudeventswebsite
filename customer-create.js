@@ -17,19 +17,19 @@ const CUSTOMER_FIELD_MAPPING = {
   'customer-city': 'City',
   'customer-country-code': 'Country_RegionCode',
   'customer-county': 'County',
-  'customer-phone': 'MobilePhoneNo',
+  'customer-phone': 'MobilePhoneNo_',
   'customer-email': 'EMail',
   'customer-contact': 'Contact',
   'customer-posting-group': 'CustomerPostingGroup',
-  'customer-gen-bus-posting-group': 'GenBusPostingGroup',
-  'customer-vat-bus-posting-group': 'VATBusPostingGroup',
+  'customer-gen-bus-posting-group': 'Gen_Bus_PostingGroup',
+  'customer-vat-bus-posting-group': 'VATBus_PostingGroup',
   'customer-payment-terms': 'PaymentTermsCode',
   'customer-currency': 'CurrencyCode',
   'customer-payment-method': 'PaymentMethodCode',
   'customer-salesperson': 'SalespersonCode',
   'customer-location': 'LocationCode',
   'customer-language': 'LanguageCode',
-  'customer-credit-limit': 'CreditLimit_LCY_',
+  'customer-credit-limit': 'CreditLimitLCY',
   'customer-image': 'Image'
 };
 
@@ -38,6 +38,9 @@ let genBusToVATMapping = {};
 
 // Storage for Post Code records (for auto-populating City, County, Country/Region)
 let postCodeRecords = [];
+
+// Storage for Post Code field names (jsonName from Help.Fields.Get)
+let postCodeFieldNames = {};
 
 // Field metadata cache for dropdown tables
 const fieldMetadataCache = {};
@@ -529,25 +532,48 @@ async function loadLocations() {
 }
 
 async function loadPostCodes() {
-  // Post Code: Field 1 = Code, Field 2 = City, Field 4 = Country/Region Code, Field 5 = County
-  const result = await cePost(selectedCompany.id, {
-    specversion: '1.0',
-    type: 'Data.Records.Get',
-    source: 'BC Portal',
-    data: JSON.stringify({ 
-      tableName: 'Post Code',
-      fieldNumbers: [1, 2, 4, 5]
-    })
-  });
-  
-  if (result.result && result.result.length > 0) {
-    // Store post code records for auto-population
-    postCodeRecords = result.result;
-    console.log('Post Code records loaded:', postCodeRecords.length);
-    if (postCodeRecords.length > 0) {
-      console.log('Sample post code record:', postCodeRecords[0]);
+  try {
+    // First, get field metadata to discover correct JSON field names
+    const fieldsResult = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Help.Fields.Get',
+      source: 'BC Portal',
+      data: JSON.stringify({ 
+        tableNo: 225,  // Post Code table
+        fieldNumbers: [1, 2, 4, 5]  // Code, City, Country/Region Code, County
+      })
+    });
+    
+    // Store the jsonName for each field number
+    if (fieldsResult.result && Array.isArray(fieldsResult.result)) {
+      fieldsResult.result.forEach(field => {
+        postCodeFieldNames[field.id] = field.jsonName;
+      });
+      console.log('Post Code field names:', postCodeFieldNames);
     }
-    populateCustomerDropdown('customer-post-code', result.result, 'code', 'city');
+    
+    // Now get the actual Post Code data
+    const result = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Data.Records.Get',
+      source: 'BC Portal',
+      data: JSON.stringify({ 
+        tableName: 'Post Code',
+        fieldNumbers: [1, 2, 4, 5]
+      })
+    });
+    
+    if (result.result && result.result.length > 0) {
+      // Store post code records for auto-population
+      postCodeRecords = result.result;
+      console.log('Post Code records loaded:', postCodeRecords.length);
+      if (postCodeRecords.length > 0) {
+        console.log('Sample post code record:', postCodeRecords[0]);
+      }
+      populateCustomerDropdown('customer-post-code', result.result, 'code', 'city');
+    }
+  } catch (error) {
+    console.error('Error loading post codes:', error);
   }
 }
 
@@ -629,7 +655,7 @@ function setupCustomerEventListeners() {
       const selectedCode = this.value;
       
       console.log('Post Code changed to:', selectedCode);
-      console.log('postCodeRecords array:', postCodeRecords);
+      console.log('Available field names:', postCodeFieldNames);
       
       if (!selectedCode) {
         // Clear fields if no post code selected
@@ -639,33 +665,40 @@ function setupCustomerEventListeners() {
         return;
       }
       
+      // Get the correct JSON field names from metadata
+      const codeFieldName = postCodeFieldNames[1] || 'Code';
+      const cityFieldName = postCodeFieldNames[2] || 'City';
+      const countryFieldName = postCodeFieldNames[4] || 'Country_RegionCode';
+      const countyFieldName = postCodeFieldNames[5] || 'County';
+      
       // Find the selected post code record from cached data
       const postCodeRecord = postCodeRecords.find(record => {
-        const code = (record.primaryKey && record.primaryKey.Code) || 
-                     (record.fields && record.fields.Code);
+        const code = (record.primaryKey && record.primaryKey[codeFieldName]) || 
+                     (record.fields && record.fields[codeFieldName]);
         return code === selectedCode;
       });
       
       console.log('Found post code record:', postCodeRecord);
       
       if (postCodeRecord) {
-        console.log('Record structure - primaryKey:', postCodeRecord.primaryKey);
-        console.log('Record structure - fields:', postCodeRecord.fields);
+        console.log('Using field names - City:', cityFieldName, 'Country:', countryFieldName, 'County:', countyFieldName);
         
-        // Auto-populate City (field 2)
-        const city = (postCodeRecord.fields && postCodeRecord.fields.City) || '';
-        console.log('City value:', city);
+        // Auto-populate City (field 2) - using correct jsonName
+        const city = (postCodeRecord.fields && postCodeRecord.fields[cityFieldName]) || 
+                     (postCodeRecord.primaryKey && postCodeRecord.primaryKey[cityFieldName]) || '';
+        console.log('City value from field "' + cityFieldName + '":', city);
         document.getElementById('customer-city').value = city;
         
-        // Auto-populate Country/Region Code (field 4)
-        const countryCode = (postCodeRecord.fields && postCodeRecord.fields.Country_RegionCode) || 
-                            (postCodeRecord.fields && postCodeRecord.fields.CountryRegionCode) || '';
-        console.log('Country code value:', countryCode);
+        // Auto-populate Country/Region Code (field 4) - using correct jsonName
+        const countryCode = (postCodeRecord.fields && postCodeRecord.fields[countryFieldName]) || 
+                            (postCodeRecord.primaryKey && postCodeRecord.primaryKey[countryFieldName]) || '';
+        console.log('Country code value from field "' + countryFieldName + '":', countryCode);
         document.getElementById('customer-country-code').value = countryCode;
         
-        // Auto-populate County (field 5)
-        const county = (postCodeRecord.fields && postCodeRecord.fields.County) || '';
-        console.log('County value:', county);
+        // Auto-populate County (field 5) - using correct jsonName
+        const county = (postCodeRecord.fields && postCodeRecord.fields[countyFieldName]) || 
+                       (postCodeRecord.primaryKey && postCodeRecord.primaryKey[countyFieldName]) || '';
+        console.log('County value from field "' + countyFieldName + '":', county);
         document.getElementById('customer-county').value = county;
       } else {
         console.log('Post code record not found in cache');
@@ -744,19 +777,19 @@ async function handleCreateCustomer() {
       City: document.getElementById('customer-city').value,
       Country_RegionCode: document.getElementById('customer-country-code').value,
       County: document.getElementById('customer-county').value || '',
-      MobilePhoneNo: document.getElementById('customer-phone').value || '',
+      MobilePhoneNo_: document.getElementById('customer-phone').value || '',
       EMail: document.getElementById('customer-email').value || '',
       Contact: document.getElementById('customer-contact').value || '',
       CustomerPostingGroup: document.getElementById('customer-posting-group').value,
-      GenBusPostingGroup: document.getElementById('customer-gen-bus-posting-group').value,
-      VATBusPostingGroup: document.getElementById('customer-vat-bus-posting-group').value,
+      Gen_Bus_PostingGroup: document.getElementById('customer-gen-bus-posting-group').value,
+      VATBus_PostingGroup: document.getElementById('customer-vat-bus-posting-group').value,
       PaymentTermsCode: document.getElementById('customer-payment-terms').value,
       CurrencyCode: document.getElementById('customer-currency').value || '',
       PaymentMethodCode: document.getElementById('customer-payment-method').value || '',
       SalespersonCode: document.getElementById('customer-salesperson').value || '',
       LocationCode: document.getElementById('customer-location').value || '',
       LanguageCode: document.getElementById('customer-language').value || '',
-      CreditLimit_LCY_: String(parseFloat(document.getElementById('customer-credit-limit').value) || 0)
+      CreditLimitLCY: String(parseFloat(document.getElementById('customer-credit-limit').value) || 0)
     };
     
     // Handle image upload if present
