@@ -518,25 +518,6 @@ async function loadLocations() {
   }
 }
 
-async function loadLanguages() {
-  // Get field numbers for Code and Name
-  const fieldNumbers = await getDropdownFieldNumbers('Language', 'Code', 'Name');
-  
-  const result = await cePost(selectedCompany.id, {
-    specversion: '1.0',
-    type: 'Data.Records.Get',
-    source: 'BC Portal',
-    data: JSON.stringify({ 
-      tableName: 'Language',
-      fieldNumbers: fieldNumbers
-    })
-  });
-  
-  if (result.result && result.result.length > 0) {
-    populateCustomerDropdown('customer-language', result.result, 'code', 'name');
-  }
-}
-
 async function loadPostCodes() {
   // Get field numbers for Code and City
   const fieldNumbers = await getDropdownFieldNumbers('Post Code', 'Code', 'City');
@@ -819,6 +800,11 @@ async function initCustomerCreateForm() {
     // Apply UI translations
     applyCustomerUITranslations();
     
+    // Populate language dropdown from global allLanguages
+    if (allLanguages && allLanguages.length > 0) {
+      populateCustomerDropdown('customer-language', allLanguages, 'code', 'name');
+    }
+    
     // Load field captions and lookup tables in parallel
     await Promise.all([
       loadCustomerFieldCaptions(),
@@ -830,7 +816,6 @@ async function initCustomerCreateForm() {
       loadPaymentMethods(),
       loadSalespersons(),
       loadLocations(),
-      loadLanguages(),
       loadPostCodes()
     ]);
     

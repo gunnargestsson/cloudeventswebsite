@@ -787,6 +787,7 @@ let customerCredit = null;
 let itemPrices = {};       // keyed by item.id; value = best priceListLine — always fetched fresh on interaction
 let itemPictures = {};     // keyed by item.id; value = Media array or null once loaded, undefined = not yet fetched
 let selectedLcid = 1033;
+let allLanguages = [];     // All languages from Language table for customer dropdown
 
 // Field metadata cache — keyed by "companyId:lcid:tableName"
 // Cleared when a different company is selected; LCID is part of the key so
@@ -969,7 +970,7 @@ function initials(s) { if (!s) return '?'; return s.split(' ').map(w=>w[0]).join
 // ---- LANGUAGE ----
 async function loadLanguages() {
   try {
-    // Step 1: get allowed LCIDs
+    // Step 1: get allowed LCIDs for UI language selector
     const allowedRes = await cePost(selectedCompany.id, {
       specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
       subject: 'Allowed Language'
@@ -998,6 +999,25 @@ async function loadLanguages() {
     document.getElementById('lang-wrap').style.display = '';
   } catch(e) {
     // fall back silently — English is already the default
+  }
+}
+
+// Load ALL languages from Language table for customer dropdown
+async function loadAllLanguages() {
+  try {
+    const result = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Data.Records.Get',
+      source: 'BC Portal',
+      data: JSON.stringify({ tableName: 'Language' })
+    });
+    
+    if (result.result) {
+      allLanguages = result.result;
+    }
+  } catch(e) {
+    console.error('Error loading all languages:', e);
+    allLanguages = [];
   }
 }
 
@@ -1130,7 +1150,8 @@ async function selectCompany(id) {
   document.getElementById('crumb-company2').textContent = name;
   document.getElementById('customers-company-label').textContent = name;
   show('view-customers');
-  await loadLanguages();
+  await loadLanguages();         // Load allowed languages for UI selector
+  await loadAllLanguages();      // Load all languages for customer dropdown
   await loadUiTranslations();
   applyUiTranslations();
   await loadCustomers();
