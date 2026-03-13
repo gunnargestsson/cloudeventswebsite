@@ -36,6 +36,23 @@ const CUSTOMER_FIELD_MAPPING = {
 // Storage for Gen. Bus. Posting Group to VAT mapping
 let genBusToVATMapping = {};
 
+// Field metadata cache for dropdown tables
+const fieldMetadataCache = {};
+
+// Table ID mappings for dropdown data
+const DROPDOWN_TABLE_IDS = {
+  'Payment Terms': 3,
+  'Currency': 4,
+  'Language': 8,
+  'Salesperson/Purchaser': 13,
+  'Location': 14,
+  'Customer Posting Group': 92,
+  'Post Code': 225,
+  'Gen. Business Posting Group': 250,
+  'Payment Method': 289,
+  'VAT Business Posting Group': 323
+};
+
 // =============================
 // TRANSLATION HELPER
 // =============================
@@ -204,6 +221,43 @@ function convertImageToBase64(file) {
   });
 }
 
+// Get field numbers for dropdown tables using Help.Fields.Get
+async function getDropdownFieldNumbers(tableName, ...fieldNames) {
+  // Check cache first
+  if (fieldMetadataCache[tableName]) {
+    const fields = fieldMetadataCache[tableName];
+    return fieldNames.map(name => {
+      const field = fields.find(f => f.fieldName.toLowerCase() === name.toLowerCase());
+      return field ? field.id : null;
+    }).filter(id => id !== null);
+  }
+  
+  // Fetch field metadata from BC
+  try {
+    const result = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Help.Fields.Get',
+      source: 'BC Portal',
+      data: JSON.stringify({ tableName })
+    });
+    
+    if (result.result) {
+      // Cache the metadata
+      fieldMetadataCache[tableName] = result.result;
+      
+      // Find field numbers for requested field names
+      return fieldNames.map(name => {
+        const field = result.result.find(f => f.fieldName.toLowerCase() === name.toLowerCase());
+        return field ? field.id : null;
+      }).filter(id => id !== null);
+    }
+  } catch (error) {
+    console.error(`Error fetching field metadata for ${tableName}:`, error);
+  }
+  
+  return [];
+}
+
 function populateCustomerDropdown(dropdownId, records, valueField, textField) {
   const dropdown = document.getElementById(dropdownId);
   if (!dropdown || !dropdown.options) return;
@@ -215,17 +269,22 @@ function populateCustomerDropdown(dropdownId, records, valueField, textField) {
     dropdown.remove(1);
   }
   
-  // Debug: log first record to see available fields
-  if (records.length > 0) {
-    console.log(`Dropdown ${dropdownId} - First record:`, records[0]);
-    console.log(`Looking for valueField: ${valueField}, textField: ${textField}`);
-  }
+  // Capitalize first letter to match BC field naming convention (e.g., 'code' -> 'Code')
+  const capitalizeFirst = str => str.charAt(0).toUpperCase() + str.slice(1);
+  const valueFieldCap = capitalizeFirst(valueField);
+  const textFieldCap = capitalizeFirst(textField);
   
   // Add new options
   records.forEach(record => {
     const option = document.createElement('option');
-    const value = record[valueField];
-    const text = record[textField];
+    
+    // Try to get value from primaryKey first (for primary key fields), then from fields
+    const value = (record.primaryKey && record.primaryKey[valueFieldCap]) || 
+                  (record.fields && record.fields[valueFieldCap]);
+    
+    // Try to get text from fields first (most common), then from primaryKey
+    const text = (record.fields && record.fields[textFieldCap]) || 
+                 (record.primaryKey && record.primaryKey[textFieldCap]);
     
     option.value = value || '';
     
@@ -295,11 +354,17 @@ async function loadCustomerFieldCaptions() {
 }
 
 async function loadCustomerPostingGroups() {
+  // Get field numbers for Code and Description
+  const fieldNumbers = await getDropdownFieldNumbers('Customer Posting Group', 'Code', 'Description');
+  
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Customer Posting Group' })
+    data: JSON.stringify({ 
+      tableName: 'Customer Posting Group',
+      fieldNumbers: fieldNumbers
+    })
   });
   
   if (result.result && result.result.length > 0) {
@@ -308,19 +373,31 @@ async function loadCustomerPostingGroups() {
 }
 
 async function loadGenBusPostingGroups() {
+  // Get field numbers for Code, Description, and Def. VAT Bus. Posting Group
+  const fieldNumbers = await getDropdownFieldNumbers('Gen. Business Posting Group', 'Code', 'Description', 'Def. VAT Bus. Posting Group');
+  
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Gen. Business Posting Group' })
+    data: JSON.stringify({ 
+      tableName: 'Gen. Business Posting Group',
+      fieldNumbers: fieldNumbers
+    })
   });
   
   if (result.result && result.result.length > 0) {
     // Store mapping for auto-population
     genBusToVATMapping = {};
     result.result.forEach(record => {
-      if (record.def_VATBusPostingGroup) {
-        genBusToVATMapping[record.code] = record.def_VATBusPostingGroup;
+      const defVAT = (record.fields && record.fields.Def_VATBusPostingGroup) ||
+                     (record.fields && record.fields.DefVATBusPostingGroup);
+      if (defVAT) {
+        const code = (record.primaryKey && record.primaryKey.Code) || 
+                     (record.fields && record.fields.Code);
+        if (code) {
+          genBusToVATMapping[code] = defVAT;
+        }
       }
     });
     populateCustomerDropdown('customer-gen-bus-posting-group', result.result, 'code', 'description');
@@ -328,11 +405,17 @@ async function loadGenBusPostingGroups() {
 }
 
 async function loadVATBusPostingGroups() {
+  // Get field numbers for Code and Description
+  const fieldNumbers = await getDropdownFieldNumbers('VAT Business Posting Group', 'Code', 'Description');
+  
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'VAT Business Posting Group' })
+    data: JSON.stringify({ 
+      tableName: 'VAT Business Posting Group',
+      fieldNumbers: fieldNumbers
+    })
   });
   
   if (result.result && result.result.length > 0) {
@@ -341,11 +424,17 @@ async function loadVATBusPostingGroups() {
 }
 
 async function loadPaymentTerms() {
+  // Get field numbers for Code and Description
+  const fieldNumbers = await getDropdownFieldNumbers('Payment Terms', 'Code', 'Description');
+  
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Payment Terms' })
+    data: JSON.stringify({ 
+      tableName: 'Payment Terms',
+      fieldNumbers: fieldNumbers
+    })
   });
   
   if (result.result && result.result.length > 0) {
@@ -354,11 +443,17 @@ async function loadPaymentTerms() {
 }
 
 async function loadCurrencies() {
+  // Get field numbers for Code and Description
+  const fieldNumbers = await getDropdownFieldNumbers('Currency', 'Code', 'Description');
+  
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Currency' })
+    data: JSON.stringify({ 
+      tableName: 'Currency',
+      fieldNumbers: fieldNumbers
+    })
   });
   
   if (result.result && result.result.length > 0) {
@@ -367,11 +462,17 @@ async function loadCurrencies() {
 }
 
 async function loadPaymentMethods() {
+  // Get field numbers for Code and Description
+  const fieldNumbers = await getDropdownFieldNumbers('Payment Method', 'Code', 'Description');
+  
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Payment Method' })
+    data: JSON.stringify({ 
+      tableName: 'Payment Method',
+      fieldNumbers: fieldNumbers
+    })
   });
   
   if (result.result && result.result.length > 0) {
@@ -380,11 +481,17 @@ async function loadPaymentMethods() {
 }
 
 async function loadSalespersons() {
+  // Get field numbers for Code and Name
+  const fieldNumbers = await getDropdownFieldNumbers('Salesperson/Purchaser', 'Code', 'Name');
+  
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Salesperson/Purchaser' })
+    data: JSON.stringify({ 
+      tableName: 'Salesperson/Purchaser',
+      fieldNumbers: fieldNumbers
+    })
   });
   
   if (result.result && result.result.length > 0) {
@@ -393,11 +500,17 @@ async function loadSalespersons() {
 }
 
 async function loadLocations() {
+  // Get field numbers for Code and Name
+  const fieldNumbers = await getDropdownFieldNumbers('Location', 'Code', 'Name');
+  
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Location' })
+    data: JSON.stringify({ 
+      tableName: 'Location',
+      fieldNumbers: fieldNumbers
+    })
   });
   
   if (result.result && result.result.length > 0) {
@@ -406,11 +519,17 @@ async function loadLocations() {
 }
 
 async function loadLanguages() {
+  // Get field numbers for Code and Name
+  const fieldNumbers = await getDropdownFieldNumbers('Language', 'Code', 'Name');
+  
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Language' })
+    data: JSON.stringify({ 
+      tableName: 'Language',
+      fieldNumbers: fieldNumbers
+    })
   });
   
   if (result.result && result.result.length > 0) {
@@ -419,11 +538,17 @@ async function loadLanguages() {
 }
 
 async function loadPostCodes() {
+  // Get field numbers for Code and City
+  const fieldNumbers = await getDropdownFieldNumbers('Post Code', 'Code', 'City');
+  
   const result = await cePost(selectedCompany.id, {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Post Code' })
+    data: JSON.stringify({ 
+      tableName: 'Post Code',
+      fieldNumbers: fieldNumbers
+    })
   });
   
   if (result.result && result.result.length > 0) {

@@ -474,11 +474,15 @@
       </div>
       <div class="tabs">
         <button class="tab active" onclick="switchTab('ledger')" data-t="Ledger Entries">Ledger Entries</button>
+        <button class="tab" onclick="switchTab('sales-history')" data-t="Sales History">Sales History</button>
         <button class="tab" onclick="switchTab('documents')" data-t="Documents">Documents</button>
         <button class="tab" onclick="switchTab('create-order')" data-t="Create Order">Create Order</button>
       </div>
       <div id="tab-ledger" class="tab-panel active">
         <div id="ledger-content"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label" data-t="Loading...">Loading...</span></div></div>
+      </div>
+      <div id="tab-sales-history" class="tab-panel">
+        <div id="sales-history-content"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label" data-t="Loading...">Loading...</span></div></div>
       </div>
       <div id="tab-documents" class="tab-panel">
         <div id="documents-content"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label" data-t="Loading...">Loading...</span></div></div>
@@ -794,7 +798,7 @@ let blockedEnumCaptions = {};
 let uiTranslations = {};
 const UI_STRINGS = [
   'Customers', 'Select Company', '← Customers', 'Companies',
-  'Ledger Entries', 'Documents', 'Create Order',
+  'Ledger Entries', 'Sales History', 'Documents', 'Create Order',
   'Search by name or number...',
   'Active', 'Order', 'Invoice', 'Paid', 'Type', 'No.', 'Credit Memo',
   'Select Items', 'Search items...',
@@ -806,7 +810,7 @@ const UI_STRINGS = [
   'Total excl. VAT', 'Total incl. VAT', 'VAT Amount', 'Quantity',
   'Line Discount', 'Invoice Discount', 'Total Weight', 'Total Volume',
   'VAT Breakdown', 'VAT Identifier', 'Base', 'VAT', 'Downloading PDF...',
-  'Loading customers...', 'Loading ledger entries...', 'Loading documents...', 'Loading items...',
+  'Loading customers...', 'Loading ledger entries...', 'Loading sales history...', 'Loading documents...', 'Loading items...',
   'Credit Limit', 'Remaining Credit', 'Balance', 'Outstanding',
   'Item Availability', 'Available Quantity', 'Inventory', 'Reserved',
   'Gross Requirement', 'Scheduled Receipt', 'Planned Receipt',
@@ -817,7 +821,7 @@ const UI_STRINGS = [
   'Overdue balance', 'Credit limit exceeded', 'Credit limit reached',
   'Credit information', 'Remaining with tolerance', 'Details', 'Tolerance', 'Due this period',
   'Authenticating...', 'Loading...',
-  'No ledger entries', 'No items added yet',
+  'No ledger entries', 'No sales history', 'No items added yet',
   'Statistics', 'Download PDF',
   'Add at least one item', 'Creating...', 'Sales order created!',
   'Failed to create sales order', 'Failed to add line for', 'Failed: ',
@@ -1231,10 +1235,48 @@ async function selectCustomer(id) {
 // ---- TABS ----
 function switchTab(tab) {
   document.querySelectorAll('.tab').forEach((t,i)=>{
-    t.classList.toggle('active', ['ledger','documents','create-order'][i]===tab);
+    t.classList.toggle('active', ['ledger','sales-history','documents','create-order'][i]===tab);
   });
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('tab-'+tab).classList.add('active');
+  
+  // Load content on first access
+  if (tab === 'sales-history' && !document.getElementById('sales-history-content').dataset.loaded) {
+    loadSalesHistory();
+  }
+}
+
+// ---- SALES HISTORY ----
+async function loadSalesHistory(skip = 0) {
+  const take = pageSize();
+  const el = document.getElementById('sales-history-content');
+  el.innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading sales history...')}</span></div>`;
+  el.dataset.loaded = 'true';
+  
+  try {
+    // TODO: Implement sales history loading based on requirements
+    // Placeholder for now - will be implemented with user requirements
+    
+    // const result = await cePost(selectedCompany.id, {
+    //   specversion: '1.0',
+    //   type: 'Data.Records.Get',
+    //   source: 'BC Portal',
+    //   data: JSON.stringify({
+    //     tableName: 'Sales Invoice Header',  // or relevant table
+    //     filters: [{ fieldName: 'Sell-to Customer No.', value: activeCustomer.no }],
+    //     skip,
+    //     take
+    //   })
+    // });
+    
+    // For now, show empty state
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><p>' + t('No sales history') + '</p></div>';
+  } catch (error) {
+    console.error('Error loading sales history:', error);
+    const errorDetails = error.stack || error.message;
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠</div><p>Error loading sales history</p></div>';
+    toast('Failed to load sales history:\n' + errorDetails, 'error');
+  }
 }
 
 // ---- LEDGER ----

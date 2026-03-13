@@ -608,6 +608,85 @@ Response (all fields verified):
 
 ---
 
+#### `Customer.SalesHistory.Get`
+
+Direction: **Outbound**. `subject` = customer number. Returns aggregated sales history by item.
+
+```json
+{
+  "specversion": "1.0",
+  "type": "Customer.SalesHistory.Get",
+  "source": "BC Portal",
+  "subject": "10000",
+  "data": "{\"fromDate\":\"2025-01-01\",\"toDate\":\"2025-12-31\"}"
+}
+```
+
+**Data parameters:**
+- `customerNo` (optional if in `subject`) — Customer number to retrieve history for
+- `fromDate` (required) — Start date for sales history query (YYYY-MM-DD)
+- `toDate` (optional) — End date for sales history query (YYYY-MM-DD); defaults to today if not provided
+
+**Response (all fields verified):**
+```json
+{
+  "status": "Success",
+  "noOfRecords": 5,
+  "customerNo": "10000",
+  "customerName": "Adatum Corporation",
+  "fromDate": "2025-01-01",
+  "toDate": "2025-12-31",
+  "salesHistory": [
+    {
+      "itemNo": "1000",
+      "variantCode": "",
+      "description": "Bicycle",
+      "unitOfMeasureCode": "PCS",
+      "baseUnitOfMeasure": "PCS",
+      "baseUOMDescription": "Piece",
+      "quantity": 25,
+      "noOfOrders": 3
+    },
+    {
+      "itemNo": "1001",
+      "variantCode": "RED",
+      "description": "Touring Bike Red",
+      "unitOfMeasureCode": "PCS",
+      "baseUnitOfMeasure": "PCS",
+      "baseUOMDescription": "Piece",
+      "quantity": 10,
+      "noOfOrders": 2
+    }
+  ]
+}
+```
+
+**Sales History Item Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| itemNo | Code[20] | Item number |
+| variantCode | Code[10] | Item variant code (blank if no variant) |
+| description | Text[100] | Item description from the sales invoice line |
+| unitOfMeasureCode | Code[10] | Unit of measure code used on the sales invoice line |
+| baseUnitOfMeasure | Code[10] | Base unit of measure from the item card |
+| baseUOMDescription | Text[50] | Description of the base unit of measure |
+| quantity | Decimal | Total quantity sold (sum of all invoiced quantities) |
+| noOfOrders | Integer | Number of sales invoices containing this item |
+
+**Notes:**
+- Sales history is based on **posted sales invoices only** (not quotes, orders, or shipments)
+- Only items of type **Item** are included (excludes G/L Accounts, Resources, etc.)
+- `quantity` is aggregated sum of all quantities across invoices in the date range
+- `noOfOrders` is count of unique invoice document numbers containing this item
+- Date filter is applied to the **posting date** of the sales invoice
+- Customer number can be provided either in the `subject` field or in the `data.customerNo` parameter
+- `variantCode` is blank string when item has no variant
+- `noOfRecords` reflects total count of unique items sold in the period
+- Errors: invalid customer number throws a top-level error
+
+---
+
 #### `Item.Availability.Get`
 
 Direction: **Outbound**. `subject` = item number.
