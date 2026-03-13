@@ -7,30 +7,30 @@
 
 // Map HTML element IDs to BC field names for Customer table (18)
 const CUSTOMER_FIELD_MAPPING = {
-  'registrationNumber': 'RegistrationNumber',
-  'customerNo': 'No_',
-  'name': 'Name',
-  'searchName': 'SearchName',
-  'address': 'Address',
-  'address2': 'Address2',
-  'postCode': 'PostCode',
-  'city': 'City',
-  'countryRegion': 'Country_RegionCode',
-  'mobilePhone': 'MobilePhoneNo',
-  'email': 'EMail',
-  'homePage': 'HomePage',
-  'customerPostingGroup': 'CustomerPostingGroup',
-  'genBusPostingGroup': 'GenBusPostingGroup',
-  'vatBusPostingGroup': 'VATBusPostingGroup',
-  'paymentTerms': 'PaymentTermsCode',
-  'currency': 'CurrencyCode',
-  'paymentMethod': 'PaymentMethodCode',
-  'salesperson': 'SalespersonCode',
-  'location': 'LocationCode',
-  'language': 'LanguageCode',
-  'creditLimit': 'CreditLimit_LCY_',
-  'blocked': 'Blocked',
-  'vatRegistrationNo': 'VATRegistrationNo'
+  'customer-registration-no': 'RegistrationNumber',
+  'customer-no': 'No_',
+  'customer-name': 'Name',
+  'customer-name2': 'Name2',
+  'customer-address': 'Address',
+  'customer-address2': 'Address2',
+  'customer-post-code': 'PostCode',
+  'customer-city': 'City',
+  'customer-country-code': 'Country_RegionCode',
+  'customer-phone': 'MobilePhoneNo',
+  'customer-email': 'EMail',
+  'customer-contact': 'Contact',
+  'customer-posting-group': 'CustomerPostingGroup',
+  'customer-gen-bus-posting-group': 'GenBusPostingGroup',
+  'customer-vat-bus-posting-group': 'VATBusPostingGroup',
+  'customer-payment-terms': 'PaymentTermsCode',
+  'customer-currency': 'CurrencyCode',
+  'customer-payment-method': 'PaymentMethodCode',
+  'customer-salesperson': 'SalespersonCode',
+  'customer-location': 'LocationCode',
+  'customer-language': 'LanguageCode',
+  'customer-credit-limit': 'CreditLimit_LCY_',
+  'customer-tax-liable': 'TaxLiable',
+  'customer-image': 'Image'
 };
 
 // Translation constants for UI elements
@@ -182,57 +182,57 @@ function validateCustomerForm() {
   };
   
   // Registration Number
-  const regNo = document.getElementById('registrationNumber').value;
+  const regNo = document.getElementById('customer-registration-no').value;
   if (!regNo) {
-    errors.push(tCustomer('valRequired', getFieldCaption('registrationNumber')));
+    errors.push(tCustomer('valRequired', getFieldCaption('customer-registration-no')));
   } else {
     const validation = validateIcelandicKennitala(regNo);
     if (!validation.valid) {
-      errors.push(getFieldCaption('registrationNumber') + ': ' + validation.error);
+      errors.push(getFieldCaption('customer-registration-no') + ': ' + validation.error);
     }
   }
   
   // Customer Name
-  if (!document.getElementById('name').value) {
-    errors.push(tCustomer('valRequired', getFieldCaption('name')));
+  if (!document.getElementById('customer-name').value) {
+    errors.push(tCustomer('valRequired', getFieldCaption('customer-name')));
   }
   
   // Post Code
-  if (!document.getElementById('postCode').value) {
-    errors.push(tCustomer('valRequired', getFieldCaption('postCode')));
+  if (!document.getElementById('customer-post-code').value) {
+    errors.push(tCustomer('valRequired', getFieldCaption('customer-post-code')));
   }
   
   // Email validation
-  const email = document.getElementById('email').value;
+  const email = document.getElementById('customer-email').value;
   if (email) {
     const emailValidation = validateEmail(email);
     if (!emailValidation.valid) {
-      errors.push(getFieldCaption('email') + ': ' + emailValidation.error);
+      errors.push(getFieldCaption('customer-email') + ': ' + emailValidation.error);
     }
   }
   
   // Posting Groups
-  if (!document.getElementById('customerPostingGroup').value) {
-    errors.push(tCustomer('valRequired', getFieldCaption('customerPostingGroup')));
+  if (!document.getElementById('customer-posting-group').value) {
+    errors.push(tCustomer('valRequired', getFieldCaption('customer-posting-group')));
   }
-  if (!document.getElementById('genBusPostingGroup').value) {
-    errors.push(tCustomer('valRequired', getFieldCaption('genBusPostingGroup')));
+  if (!document.getElementById('customer-gen-bus-posting-group').value) {
+    errors.push(tCustomer('valRequired', getFieldCaption('customer-gen-bus-posting-group')));
   }
-  if (!document.getElementById('vatBusPostingGroup').value) {
-    errors.push(tCustomer('valRequired', getFieldCaption('vatBusPostingGroup')));
+  if (!document.getElementById('customer-vat-bus-posting-group').value) {
+    errors.push(tCustomer('valRequired', getFieldCaption('customer-vat-bus-posting-group')));
   }
   
   // Payment Terms
-  if (!document.getElementById('paymentTerms').value) {
-    errors.push(tCustomer('valRequired', getFieldCaption('paymentTerms')));
+  if (!document.getElementById('customer-payment-terms').value) {
+    errors.push(tCustomer('valRequired', getFieldCaption('customer-payment-terms')));
   }
   
   // Credit Limit
-  const creditLimit = document.getElementById('creditLimit').value;
+  const creditLimit = document.getElementById('customer-credit-limit').value;
   if (creditLimit) {
     const creditValidation = validateCreditLimit(creditLimit);
     if (!creditValidation.valid) {
-      errors.push(getFieldCaption('creditLimit') + ': ' + creditValidation.error);
+      errors.push(getFieldCaption('customer-credit-limit') + ': ' + creditValidation.error);
     }
   }
   
@@ -349,11 +349,14 @@ async function loadCustomerPostingGroups() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Customer Posting Group' })
+    data: JSON.stringify({
+      tableName: 'Customer Posting Group',
+      fields: ['code', 'description']
+    })
   });
   
   if (result.result && result.result.length > 0) {
-    populateCustomerDropdown('customerPostingGroup', result.result, 'code', 'description');
+    populateCustomerDropdown('customer-posting-group', result.result, 'code', 'description');
   }
 }
 
@@ -362,7 +365,10 @@ async function loadGenBusPostingGroups() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Gen. Business Posting Group' })
+    data: JSON.stringify({
+      tableName: 'Gen. Business Posting Group',
+      fields: ['code', 'description', 'def_VATBusPostingGroup']
+    })
   });
   
   if (result.result && result.result.length > 0) {
@@ -373,7 +379,7 @@ async function loadGenBusPostingGroups() {
         genBusToVATMapping[record.code] = record.def_VATBusPostingGroup;
       }
     });
-    populateCustomerDropdown('genBusPostingGroup', result.result, 'code', 'description');
+    populateCustomerDropdown('customer-gen-bus-posting-group', result.result, 'code', 'description');
   }
 }
 
@@ -382,11 +388,14 @@ async function loadVATBusPostingGroups() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'VAT Business Posting Group' })
+    data: JSON.stringify({
+      tableName: 'VAT Business Posting Group',
+      fields: ['code', 'description']
+    })
   });
   
   if (result.result && result.result.length > 0) {
-    populateCustomerDropdown('vatBusPostingGroup', result.result, 'code', 'description');
+    populateCustomerDropdown('customer-vat-bus-posting-group', result.result, 'code', 'description');
   }
 }
 
@@ -395,11 +404,14 @@ async function loadPaymentTerms() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Payment Terms' })
+    data: JSON.stringify({
+      tableName: 'Payment Terms',
+      fields: ['code', 'description']
+    })
   });
   
   if (result.result && result.result.length > 0) {
-    populateCustomerDropdown('paymentTerms', result.result, 'code', 'description');
+    populateCustomerDropdown('customer-payment-terms', result.result, 'code', 'description');
   }
 }
 
@@ -408,11 +420,14 @@ async function loadCurrencies() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Currency' })
+    data: JSON.stringify({
+      tableName: 'Currency',
+      fields: ['code', 'description']
+    })
   });
   
   if (result.result && result.result.length > 0) {
-    populateCustomerDropdown('currency', result.result, 'code', 'description');
+    populateCustomerDropdown('customer-currency', result.result, 'code', 'description');
   }
 }
 
@@ -421,11 +436,14 @@ async function loadPaymentMethods() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Payment Method' })
+    data: JSON.stringify({
+      tableName: 'Payment Method',
+      fields: ['code', 'description']
+    })
   });
   
   if (result.result && result.result.length > 0) {
-    populateCustomerDropdown('paymentMethod', result.result, 'code', 'description');
+    populateCustomerDropdown('customer-payment-method', result.result, 'code', 'description');
   }
 }
 
@@ -434,11 +452,14 @@ async function loadSalespersons() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Salesperson/Purchaser' })
+    data: JSON.stringify({
+      tableName: 'Salesperson/Purchaser',
+      fields: ['code', 'name']
+    })
   });
   
   if (result.result && result.result.length > 0) {
-    populateCustomerDropdown('salesperson', result.result, 'code', 'name');
+    populateCustomerDropdown('customer-salesperson', result.result, 'code', 'name');
   }
 }
 
@@ -447,11 +468,14 @@ async function loadLocations() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Location' })
+    data: JSON.stringify({
+      tableName: 'Location',
+      fields: ['code', 'name']
+    })
   });
   
   if (result.result && result.result.length > 0) {
-    populateCustomerDropdown('location', result.result, 'code', 'name');
+    populateCustomerDropdown('customer-location', result.result, 'code', 'name');
   }
 }
 
@@ -460,11 +484,14 @@ async function loadLanguages() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({ tableName: 'Language' })
+    data: JSON.stringify({
+      tableName: 'Language',
+      fields: ['code', 'name']
+    })
   });
   
   if (result.result && result.result.length > 0) {
-    populateCustomerDropdown('language', result.result, 'code', 'name');
+    populateCustomerDropdown('customer-language', result.result, 'code', 'name');
   }
 }
 
@@ -499,32 +526,16 @@ function applyCustomerUITranslations() {
     heading.textContent = tCustomer('formTitle');
   }
   
-  // Buttons
-  const btnCreate = document.getElementById('btnCreateCustomer');
-  if (btnCreate) btnCreate.textContent = tCustomer('btnCreate');
-  
-  const btnCancel = document.getElementById('btnCancelCustomer');
-  if (btnCancel) btnCancel.textContent = tCustomer('btnCancel');
-  
   // Dropdown placeholders
-  updateDropdownPlaceholder('customerPostingGroup', 'dropdownSelect');
-  updateDropdownPlaceholder('genBusPostingGroup', 'dropdownSelect');
-  updateDropdownPlaceholder('vatBusPostingGroup', 'dropdownSelect');
-  updateDropdownPlaceholder('paymentTerms', 'dropdownSelect');
-  updateDropdownPlaceholder('currency', 'dropdownLCY');
-  updateDropdownPlaceholder('paymentMethod', 'dropdownSelect');
-  updateDropdownPlaceholder('salesperson', 'dropdownSelect');
-  updateDropdownPlaceholder('location', 'dropdownSelect');
-  updateDropdownPlaceholder('language', 'dropdownSelect');
-  
-  // Blocked dropdown options
-  const blockedDropdown = document.getElementById('blocked');
-  if (blockedDropdown && blockedDropdown.options.length > 0) {
-    blockedDropdown.options[0].text = tCustomer('dropdownNotBlocked');
-    if (blockedDropdown.options[1]) blockedDropdown.options[1].text = tCustomer('blockedShip');
-    if (blockedDropdown.options[2]) blockedDropdown.options[2].text = tCustomer('blockedInvoice');
-    if (blockedDropdown.options[3]) blockedDropdown.options[3].text = tCustomer('blockedAll');
-  }
+  updateDropdownPlaceholder('customer-posting-group', 'dropdownSelect');
+  updateDropdownPlaceholder('customer-gen-bus-posting-group', 'dropdownSelect');
+  updateDropdownPlaceholder('customer-vat-bus-posting-group', 'dropdownSelect');
+  updateDropdownPlaceholder('customer-payment-terms', 'dropdownSelect');
+  updateDropdownPlaceholder('customer-currency', 'dropdownLCY');
+  updateDropdownPlaceholder('customer-payment-method', 'dropdownSelect');
+  updateDropdownPlaceholder('customer-salesperson', 'dropdownSelect');
+  updateDropdownPlaceholder('customer-location', 'dropdownSelect');
+  updateDropdownPlaceholder('customer-language', 'dropdownSelect');
 }
 
 // =============================
@@ -533,78 +544,77 @@ function applyCustomerUITranslations() {
 
 function setupCustomerEventListeners() {
   // Registration Number validation and auto-population
-  document.getElementById('registrationNumber').addEventListener('input', function() {
-    const regNo = this.value;
-    const indicator = document.getElementById('regNoIndicator');
-    
-    if (regNo.length === 10) {
-      const validation = validateIcelandicKennitala(regNo);
-      if (validation.valid) {
-        indicator.className = 'validation-indicator valid';
-        indicator.title = '';
-        document.getElementById('customerNo').value = regNo;
+  const regNoInput = document.getElementById('customer-registration-no');
+  if (regNoInput) {
+    regNoInput.addEventListener('input', function() {
+      const regNo = this.value;
+      const indicator = document.getElementById('kennitala-indicator');
+      
+      if (regNo.length === 10) {
+        const validation = validateIcelandicKennitala(regNo);
+        if (validation.valid) {
+          indicator.className = 'validation-indicator valid';
+          indicator.title = '';
+          document.getElementById('customer-no').value = regNo;
+        } else {
+          indicator.className = 'validation-indicator invalid';
+          indicator.title = validation.error;
+        }
       } else {
-        indicator.className = 'validation-indicator invalid';
-        indicator.title = validation.error;
+        indicator.className = 'validation-indicator';
+        indicator.title = '';
       }
-    } else {
-      indicator.className = 'validation-indicator';
-      indicator.title = '';
-    }
-  });
+    });
+  }
   
   // Post Code lookup
-  document.getElementById('postCode').addEventListener('blur', async function() {
-    const postCode = this.value;
-    if (!postCode) return;
-    
-    try {
-      const result = await cePost(selectedCompany.id, {
-        specversion: '1.0',
-        type: 'Data.Records.Get',
-        source: 'BC Portal',
-        data: JSON.stringify({
-          tableName: 'Post Code',
-          filters: [{ fieldName: 'Code', value: postCode }]
-        })
-      });
+  const postCodeInput = document.getElementById('customer-post-code');
+  if (postCodeInput) {
+    postCodeInput.addEventListener('blur', async function() {
+      const postCode = this.value;
+      if (!postCode) return;
       
-      if (result.result && result.result.length > 0) {
-        const record = result.result[0];
-        document.getElementById('city').value = record.city || '';
-        document.getElementById('countryRegion').value = record.country_RegionCode || '';
+      try {
+        const result = await cePost(selectedCompany.id, {
+          specversion: '1.0',
+          type: 'Data.Records.Get',
+          source: 'BC Portal',
+          data: JSON.stringify({
+            tableName: 'Post Code',
+            fields: ['code', 'city', 'country_RegionCode'],
+            filters: [{ fieldName: 'Code', value: postCode }]
+          })
+        });
+        
+        if (result.result && result.result.length > 0) {
+          const record = result.result[0];
+          document.getElementById('customer-city').value = record.city || '';
+          document.getElementById('customer-country-code').value = record.country_RegionCode || '';
+        }
+      } catch (error) {
+        console.error('Error looking up post code:', error);
       }
-    } catch (error) {
-      console.error('Error looking up post code:', error);
-    }
-  });
+    });
+  }
   
   // Gen. Bus. Posting Group auto-population of VAT
-  document.getElementById('genBusPostingGroup').addEventListener('change', function() {
-    const selectedCode = this.value;
-    const defaultVAT = genBusToVATMapping[selectedCode];
-    
-    if (defaultVAT) {
-      const vatDropdown = document.getElementById('vatBusPostingGroup');
-      if (Array.from(vatDropdown.options).some(opt => opt.value === defaultVAT)) {
-        vatDropdown.value = defaultVAT;
+  const genBusSelect = document.getElementById('customer-gen-bus-posting-group');
+  if (genBusSelect) {
+    genBusSelect.addEventListener('change', function() {
+      const selectedCode = this.value;
+      const defaultVAT = genBusToVATMapping[selectedCode];
+      
+      if (defaultVAT) {
+        const vatInput = document.getElementById('customer-vat-bus-posting-group');
+        if (vatInput) {
+          vatInput.value = defaultVAT;
+        }
       }
-    }
-  });
-  
-  // Cancel button
-  document.getElementById('btnCancelCustomer').addEventListener('click', function() {
-    if (confirm(tCustomer('msgCancelConfirm'))) {
-      resetCustomerForm();
-      showCustomers();
-    }
-  });
-  
-  // Create button
-  document.getElementById('btnCreateCustomer').addEventListener('click', handleCreateCustomer);
+    });
+  }
   
   // Image preview
-  const imageInput = document.getElementById('customerImage');
+  const imageInput = document.getElementById('customer-image');
   if (imageInput) {
     imageInput.addEventListener('change', function(e) {
       const file = e.target.files[0];
@@ -616,6 +626,15 @@ function setupCustomerEventListeners() {
         };
         reader.readAsDataURL(file);
       }
+    });
+  }
+  
+  // Form submit handler
+  const form = document.getElementById('customer-create-form');
+  if (form) {
+    form.addEventListener('submit', function(e) {
+      e.preventDefault();
+      handleCreateCustomer();
     });
   }
 }
@@ -636,34 +655,33 @@ async function handleCreateCustomer() {
     
     // Gather form data
     const customerData = {
-      registrationNumber: document.getElementById('registrationNumber').value,
-      no_: document.getElementById('customerNo').value,
-      name: document.getElementById('name').value,
-      searchName: document.getElementById('searchName').value || '',
-      address: document.getElementById('address').value || '',
-      address2: document.getElementById('address2').value || '',
-      postCode: document.getElementById('postCode').value,
-      city: document.getElementById('city').value,
-      country_RegionCode: document.getElementById('countryRegion').value,
-      mobilePhoneNo: document.getElementById('mobilePhone').value || '',
-      eMail: document.getElementById('email').value || '',
-      homePage: document.getElementById('homePage').value || '',
-      customerPostingGroup: document.getElementById('customerPostingGroup').value,
-      genBusPostingGroup: document.getElementById('genBusPostingGroup').value,
-      vATBusPostingGroup: document.getElementById('vatBusPostingGroup').value,
-      paymentTermsCode: document.getElementById('paymentTerms').value,
-      currencyCode: document.getElementById('currency').value || '',
-      paymentMethodCode: document.getElementById('paymentMethod').value || '',
-      salespersonCode: document.getElementById('salesperson').value || '',
-      locationCode: document.getElementById('location').value || '',
-      languageCode: document.getElementById('language').value || '',
-      creditLimit_LCY_: parseFloat(document.getElementById('creditLimit').value) || 0,
-      blocked: document.getElementById('blocked').value || '',
-      vATRegistrationNo: document.getElementById('vatRegistrationNo').value || ''
+      registrationNumber: document.getElementById('customer-registration-no').value,
+      no_: document.getElementById('customer-no').value,
+      name: document.getElementById('customer-name').value,
+      name2: document.getElementById('customer-name2').value || '',
+      address: document.getElementById('customer-address').value || '',
+      address2: document.getElementById('customer-address2').value || '',
+      postCode: document.getElementById('customer-post-code').value,
+      city: document.getElementById('customer-city').value,
+      country_RegionCode: document.getElementById('customer-country-code').value,
+      mobilePhoneNo: document.getElementById('customer-phone').value || '',
+      eMail: document.getElementById('customer-email').value || '',
+      contact: document.getElementById('customer-contact').value || '',
+      customerPostingGroup: document.getElementById('customer-posting-group').value,
+      genBusPostingGroup: document.getElementById('customer-gen-bus-posting-group').value,
+      vATBusPostingGroup: document.getElementById('customer-vat-bus-posting-group').value,
+      paymentTermsCode: document.getElementById('customer-payment-terms').value,
+      currencyCode: document.getElementById('customer-currency').value || '',
+      paymentMethodCode: document.getElementById('customer-payment-method').value || '',
+      salespersonCode: document.getElementById('customer-salesperson').value || '',
+      locationCode: document.getElementById('customer-location').value || '',
+      languageCode: document.getElementById('customer-language').value || '',
+      creditLimit_LCY_: parseFloat(document.getElementById('customer-credit-limit').value) || 0,
+      taxLiable: document.getElementById('customer-tax-liable').value === 'true'
     };
     
     // Handle image upload if present
-    const imageFile = document.getElementById('customerImage').files[0];
+    const imageFile = document.getElementById('customer-image').files[0];
     if (imageFile) {
       const imageData = await convertImageToBase64(imageFile);
       customerData.image = {
@@ -709,7 +727,7 @@ function resetCustomerForm() {
     form.reset();
   }
   document.getElementById('imagePreview').innerHTML = '';
-  const indicator = document.getElementById('regNoIndicator');
+  const indicator = document.getElementById('kennitala-indicator');
   if (indicator) {
     indicator.className = 'validation-indicator';
     indicator.title = '';

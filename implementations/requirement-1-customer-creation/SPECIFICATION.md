@@ -177,15 +177,15 @@ function validateCreditLimit(value) {
 }
 ```
 
-## Auto-Population Logic
+### Auto-Population Logic
 
 ### 1. Registration Number → Customer Number
 ```javascript
 // When Registration Number changes
-document.getElementById('registrationNumber').addEventListener('blur', function() {
+document.getElementById('customer-registration-no').addEventListener('input', function() {
   const regNo = this.value;
-  if (regNo && validateIcelandicKennitala(regNo).valid) {
-    document.getElementById('customerNo').value = regNo;
+  if (regNo.length === 10 && validateIcelandicKennitala(regNo).valid) {
+    document.getElementById('customer-no').value = regNo;
   }
 });
 ```
@@ -193,20 +193,25 @@ document.getElementById('registrationNumber').addEventListener('blur', function(
 ### 2. Post Code → City & Country/Region
 ```javascript
 // When Post Code changes
-document.getElementById('postCode').addEventListener('blur', async function() {
+document.getElementById('customer-post-code').addEventListener('blur', async function() {
   const postCode = this.value;
   if (!postCode) return;
   
   try {
-    const result = await cePost('Data.Records.Get', {
-      TableNo: 225,
-      Filters: [{ FieldNo: 1, Value: postCode }] // Assuming Field 1 is Code
+    const result = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Data.Records.Get',
+      source: 'BC Portal',
+      data: JSON.stringify({
+        tableName: 'Post Code',
+        filters: [{ fieldName: 'Code', value: postCode }]
+      })
     });
     
-    if (result.Records && result.Records.length > 0) {
-      const record = result.Records[0];
-      document.getElementById('city').value = record.City || '';
-      document.getElementById('countryRegion').value = record.Country_RegionCode || '';
+    if (result.result && result.result.length > 0) {
+      const record = result.result[0];
+      document.getElementById('customer-city').value = record.city || '';
+      document.getElementById('customer-country-code').value = record.country_RegionCode || '';
     }
   } catch (error) {
     console.error('Error looking up post code:', error);
@@ -220,31 +225,30 @@ document.getElementById('postCode').addEventListener('blur', async function() {
 let genBusToVATMapping = {};
 
 async function loadGenBusPostingGroups() {
-  const result = await cePost('Data.Records.Get', {
-    TableNo: 251
+  const result = await cePost(selectedCompany.id, {
+    specversion: '1.0',
+    type: 'Data.Records.Get',
+    source: 'BC Portal',
+    data: JSON.stringify({ tableName: 'Gen. Business Posting Group' })
   });
   
-  if (result.Records) {
-    result.Records.forEach(record => {
-      genBusToVATMapping[record.Code] = record.Def_VATBusPostingGroup;
+  if (result.result && result.result.length > 0) {
+    result.result.forEach(record => {
+      genBusToVATMapping[record.code] = record.def_VATBusPostingGroup;
     });
     
     // Populate dropdown
-    populateDropdown('genBusPostingGroup', result.Records, 'Code', 'Description');
+    populateCustomerDropdown('customer-gen-bus-posting-group', result.result, 'code', 'description');
   }
 }
 
 // When Gen. Bus. Posting Group changes
-document.getElementById('genBusPostingGroup').addEventListener('change', function() {
+document.getElementById('customer-gen-bus-posting-group').addEventListener('change', function() {
   const selectedCode = this.value;
   const defaultVAT = genBusToVATMapping[selectedCode];
   
   if (defaultVAT) {
-    const vatDropdown = document.getElementById('vatBusPostingGroup');
-    // Set the value if it exists in dropdown
-    if (Array.from(vatDropdown.options).some(opt => opt.value === defaultVAT)) {
-      vatDropdown.value = defaultVAT;
-    }
+    document.getElementById('customer-vat-bus-posting-group').value = defaultVAT;
   }
 });
 ```
