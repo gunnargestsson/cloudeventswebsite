@@ -33,78 +33,6 @@ const CUSTOMER_FIELD_MAPPING = {
   'customer-image': 'Image'
 };
 
-// Translation constants for UI elements
-const CUSTOMER_CREATE_TRANSLATIONS = {
-  'en-US': {
-    sectionIdentification: 'Customer Identification',
-    sectionAddress: 'Address Information',
-    sectionContact: 'Contact Information',
-    sectionPosting: 'Posting Configuration',
-    sectionPayment: 'Payment Information',
-    sectionSales: 'Sales Configuration',
-    sectionCredit: 'Credit Management',
-    sectionTax: 'Tax Information',
-    sectionMedia: 'Customer Image',
-    formTitle: 'Create New Customer',
-    btnCreate: 'Create Customer',
-    btnCancel: 'Cancel',
-    dropdownSelect: '-- Select --',
-    dropdownNotBlocked: '-- Not Blocked --',
-    dropdownLCY: '-- LCY --',
-    msgLoading: 'Loading form data...',
-    msgCreating: 'Creating customer...',
-    msgSuccess: 'Customer {0} created successfully!',
-    msgErrorGeneric: 'An error occurred while creating the customer.',
-    msgErrorFailed: 'Failed to create customer: {0}',
-    msgErrorLoadFailed: 'Failed to load form data. Please refresh the page.',
-    msgCancelConfirm: 'Are you sure you want to cancel? All entered data will be lost.',
-    valRequired: '{0} is required',
-    valInvalidEmail: 'Invalid email format',
-    valInvalidKennitala: 'Invalid Kennitala check digit',
-    valMust10Digits: 'Must be 10 digits',
-    valNonNegative: 'Must be a non-negative number',
-    valFixErrors: 'Please fix the following errors:',
-    blockedShip: 'Ship',
-    blockedInvoice: 'Invoice',
-    blockedAll: 'All',
-    uploadImage: 'Upload Image'
-  },
-  'is-IS': {
-    sectionIdentification: 'Auðkenning viðskiptamanns',
-    sectionAddress: 'Heimilisfangsupplýsingar',
-    sectionContact: 'Tengiliðaupplýsingar',
-    sectionPosting: 'Bókunarstillingar',
-    sectionPayment: 'Greiðsluupplýsingar',
-    sectionSales: 'Sölustillingar',
-    sectionCredit: 'Lánsfjárstjórnun',
-    sectionTax: 'Skattur',
-    sectionMedia: 'Mynd viðskiptamanns',
-    formTitle: 'Búa til nýjan viðskiptamann',
-    btnCreate: 'Búa til viðskiptamann',
-    btnCancel: 'Hætta við',
-    dropdownSelect: '-- Velja --',
-    dropdownNotBlocked: '-- Ekki læst --',
-    dropdownLCY: '-- SGM --',
-    msgLoading: 'Hleð inn gögnum...',
-    msgCreating: 'Búa til viðskiptamann...',
-    msgSuccess: 'Viðskiptamaður {0} búinn til!',
-    msgErrorGeneric: 'Villa kom upp við að búa til viðskiptamann.',
-    msgErrorFailed: 'Mistókst að búa til viðskiptamann: {0}',
-    msgErrorLoadFailed: 'Mistókst að hlaða inn gögnum. Vinsamlegast endurnýjaðu síðuna.',
-    msgCancelConfirm: 'Ertu viss um að þú viljir hætta við? Öll gögn tapast.',
-    valRequired: '{0} er nauðsynlegt',
-    valInvalidEmail: 'Ógilt tölvupóstfang',
-    valInvalidKennitala: 'Ógild kennitala',
-    valMust10Digits: 'Verður að vera 10 tölustafir',
-    valNonNegative: 'Verður að vera jákvæð tala',
-    valFixErrors: 'Vinsamlegast lagaðu eftirfarandi villur:',
-    blockedShip: 'Afhending',
-    blockedInvoice: 'Reikningur',
-    blockedAll: 'Allt',
-    uploadImage: 'Hlaða upp mynd'
-  }
-};
-
 // Storage for Gen. Bus. Posting Group to VAT mapping
 let genBusToVATMapping = {};
 
@@ -112,11 +40,11 @@ let genBusToVATMapping = {};
 // TRANSLATION HELPER
 // =============================
 
+// Use global t() function from index.html for translations
+// Translations are loaded from Cloud Events Translation table
 function tCustomer(key, ...args) {
-  const lang = selectedLcid || 'en-US';
-  const translation = CUSTOMER_CREATE_TRANSLATIONS[lang]?.[key] || 
-                     CUSTOMER_CREATE_TRANSLATIONS['en-US']?.[key] || 
-                     key;
+  // Use the global t() function for translation lookup
+  const translation = (typeof t === 'function') ? t(key) : key;
   
   // Replace placeholders {0}, {1}, etc. with arguments
   return translation.replace(/\{(\d+)\}/g, (match, index) => {
@@ -131,7 +59,7 @@ function tCustomer(key, ...args) {
 function validateIcelandicKennitala(kennitala) {
   // Must be exactly 10 digits
   if (!/^\d{10}$/.test(kennitala)) {
-    return { valid: false, error: tCustomer('valMust10Digits') };
+    return { valid: false, error: tCustomer('Must be 10 digits') };
   }
   
   // Extract first 8 digits and 9th digit (check digit)
@@ -149,7 +77,7 @@ function validateIcelandicKennitala(kennitala) {
   
   // Validate
   if (checkDigit !== expectedCheckDigit) {
-    return { valid: false, error: tCustomer('valInvalidKennitala') };
+    return { valid: false, error: tCustomer('Invalid Kennitala check digit') };
   }
   
   return { valid: true };
@@ -160,14 +88,14 @@ function validateEmail(email) {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email) 
     ? { valid: true } 
-    : { valid: false, error: tCustomer('valInvalidEmail') };
+    : { valid: false, error: tCustomer('Invalid email format') };
 }
 
 function validateCreditLimit(value) {
   if (!value) return { valid: true }; // Optional field
   const num = parseFloat(value);
   if (isNaN(num) || num < 0) {
-    return { valid: false, error: tCustomer('valNonNegative') };
+    return { valid: false, error: tCustomer('Must be a non-negative number') };
   }
   return { valid: true };
 }
@@ -184,7 +112,7 @@ function validateCustomerForm() {
   // Registration Number
   const regNo = document.getElementById('customer-registration-no').value;
   if (!regNo) {
-    errors.push(tCustomer('valRequired', getFieldCaption('customer-registration-no')));
+    errors.push(tCustomer('{0} is required', getFieldCaption('customer-registration-no')));
   } else {
     const validation = validateIcelandicKennitala(regNo);
     if (!validation.valid) {
@@ -194,12 +122,12 @@ function validateCustomerForm() {
   
   // Customer Name
   if (!document.getElementById('customer-name').value) {
-    errors.push(tCustomer('valRequired', getFieldCaption('customer-name')));
+    errors.push(tCustomer('{0} is required', getFieldCaption('customer-name')));
   }
   
   // Post Code
   if (!document.getElementById('customer-post-code').value) {
-    errors.push(tCustomer('valRequired', getFieldCaption('customer-post-code')));
+    errors.push(tCustomer('{0} is required', getFieldCaption('customer-post-code')));
   }
   
   // Email validation
@@ -213,18 +141,18 @@ function validateCustomerForm() {
   
   // Posting Groups
   if (!document.getElementById('customer-posting-group').value) {
-    errors.push(tCustomer('valRequired', getFieldCaption('customer-posting-group')));
+    errors.push(tCustomer('{0} is required', getFieldCaption('customer-posting-group')));
   }
   if (!document.getElementById('customer-gen-bus-posting-group').value) {
-    errors.push(tCustomer('valRequired', getFieldCaption('customer-gen-bus-posting-group')));
+    errors.push(tCustomer('{0} is required', getFieldCaption('customer-gen-bus-posting-group')));
   }
   if (!document.getElementById('customer-vat-bus-posting-group').value) {
-    errors.push(tCustomer('valRequired', getFieldCaption('customer-vat-bus-posting-group')));
+    errors.push(tCustomer('{0} is required', getFieldCaption('customer-vat-bus-posting-group')));
   }
   
   // Payment Terms
   if (!document.getElementById('customer-payment-terms').value) {
-    errors.push(tCustomer('valRequired', getFieldCaption('customer-payment-terms')));
+    errors.push(tCustomer('{0} is required', getFieldCaption('customer-payment-terms')));
   }
   
   // Credit Limit
@@ -238,7 +166,7 @@ function validateCustomerForm() {
   
   // Display errors if any
   if (errors.length > 0) {
-    toast(tCustomer('valFixErrors') + '\n\n' + errors.join('\n'), 'error');
+    toast(tCustomer('Please fix the following errors:') + '\n\n' + errors.join('\n'), 'error');
     return false;
   }
   
@@ -274,7 +202,7 @@ function convertImageToBase64(file) {
 
 function populateCustomerDropdown(dropdownId, records, valueField, textField) {
   const dropdown = document.getElementById(dropdownId);
-  if (!dropdown) return;
+  if (!dropdown || !dropdown.options) return;
   
   const currentValue = dropdown.value;
   
@@ -299,7 +227,7 @@ function populateCustomerDropdown(dropdownId, records, valueField, textField) {
 
 function updateDropdownPlaceholder(dropdownId, translationKey) {
   const dropdown = document.getElementById(dropdownId);
-  if (dropdown && dropdown.options.length > 0) {
+  if (dropdown && dropdown.options && dropdown.options.length > 0) {
     dropdown.options[0].text = tCustomer(translationKey);
   }
 }
@@ -475,15 +403,15 @@ async function loadLanguages() {
 function applyCustomerUITranslations() {
   // Section legends
   const sections = [
-    { selector: '#customer-create-form fieldset:nth-of-type(1) legend', key: 'sectionIdentification', prefix: '1. ' },
-    { selector: '#customer-create-form fieldset:nth-of-type(2) legend', key: 'sectionAddress', prefix: '2. ' },
-    { selector: '#customer-create-form fieldset:nth-of-type(3) legend', key: 'sectionContact', prefix: '3. ' },
-    { selector: '#customer-create-form fieldset:nth-of-type(4) legend', key: 'sectionPosting', prefix: '4. ' },
-    { selector: '#customer-create-form fieldset:nth-of-type(5) legend', key: 'sectionPayment', prefix: '5. ' },
-    { selector: '#customer-create-form fieldset:nth-of-type(6) legend', key: 'sectionSales', prefix: '6. ' },
-    { selector: '#customer-create-form fieldset:nth-of-type(7) legend', key: 'sectionCredit', prefix: '7. ' },
-    { selector: '#customer-create-form fieldset:nth-of-type(8) legend', key: 'sectionTax', prefix: '8. ' },
-    { selector: '#customer-create-form fieldset:nth-of-type(9) legend', key: 'sectionMedia', prefix: '9. ' }
+    { selector: '#customer-create-form fieldset:nth-of-type(1) legend', key: 'Identification', prefix: '1. ' },
+    { selector: '#customer-create-form fieldset:nth-of-type(2) legend', key: 'Address', prefix: '2. ' },
+    { selector: '#customer-create-form fieldset:nth-of-type(3) legend', key: 'Contact', prefix: '3. ' },
+    { selector: '#customer-create-form fieldset:nth-of-type(4) legend', key: 'Posting', prefix: '4. ' },
+    { selector: '#customer-create-form fieldset:nth-of-type(5) legend', key: 'Payment', prefix: '5. ' },
+    { selector: '#customer-create-form fieldset:nth-of-type(6) legend', key: 'Sales', prefix: '6. ' },
+    { selector: '#customer-create-form fieldset:nth-of-type(7) legend', key: 'Credit Management', prefix: '7. ' },
+    { selector: '#customer-create-form fieldset:nth-of-type(8) legend', key: 'Tax', prefix: '8. ' },
+    { selector: '#customer-create-form fieldset:nth-of-type(9) legend', key: 'Media', prefix: '9. ' }
   ];
   
   sections.forEach(section => {
@@ -496,19 +424,19 @@ function applyCustomerUITranslations() {
   // Form heading
   const heading = document.querySelector('#view-create-customer .section-title span');
   if (heading) {
-    heading.textContent = tCustomer('formTitle');
+    heading.textContent = tCustomer('Create New Customer');
   }
   
   // Dropdown placeholders
-  updateDropdownPlaceholder('customer-posting-group', 'dropdownSelect');
-  updateDropdownPlaceholder('customer-gen-bus-posting-group', 'dropdownSelect');
-  updateDropdownPlaceholder('customer-vat-bus-posting-group', 'dropdownSelect');
-  updateDropdownPlaceholder('customer-payment-terms', 'dropdownSelect');
-  updateDropdownPlaceholder('customer-currency', 'dropdownLCY');
-  updateDropdownPlaceholder('customer-payment-method', 'dropdownSelect');
-  updateDropdownPlaceholder('customer-salesperson', 'dropdownSelect');
-  updateDropdownPlaceholder('customer-location', 'dropdownSelect');
-  updateDropdownPlaceholder('customer-language', 'dropdownSelect');
+  updateDropdownPlaceholder('customer-posting-group', '-- Select --');
+  updateDropdownPlaceholder('customer-gen-bus-posting-group', '-- Select --');
+  updateDropdownPlaceholder('customer-vat-bus-posting-group', '-- Select --');
+  updateDropdownPlaceholder('customer-payment-terms', '-- Select --');
+  updateDropdownPlaceholder('customer-currency', '-- LCY --');
+  updateDropdownPlaceholder('customer-payment-method', '-- Select --');
+  updateDropdownPlaceholder('customer-salesperson', '-- Select --');
+  updateDropdownPlaceholder('customer-location', '-- Select --');
+  updateDropdownPlaceholder('customer-language', '-- Select --');
 }
 
 // =============================
@@ -566,7 +494,7 @@ function setupCustomerEventListeners() {
       } catch (error) {
         console.error('Error looking up post code:', error);
         const errorDetails = error.stack || error.message;
-        toast('Error looking up post code:\n' + errorDetails, 'error');
+        toast(tCustomer('Error looking up post code') + ':\n' + errorDetails, 'error');
       }
     });
   }
@@ -625,7 +553,7 @@ async function handleCreateCustomer() {
     }
     
     // Show loading
-    toast(tCustomer('msgCreating'), 'info');
+    toast(tCustomer('Creating customer...'), 'info');
     
     // Gather form data
     const customerData = {
@@ -676,7 +604,7 @@ async function handleCreateCustomer() {
     });
     
     if (result.status !== 'Error') {
-      toast(tCustomer('msgSuccess', customerData.no_), 'success');
+      toast(tCustomer('Customer {0} created successfully!', customerData.no_), 'success');
       
       // Reset form
       resetCustomerForm();
@@ -687,12 +615,12 @@ async function handleCreateCustomer() {
         loadCustomers();
       }
     } else {
-      toast(tCustomer('msgErrorFailed', result.error || 'Unknown error'), 'error');
+      toast(tCustomer('Failed to create customer: {0}', result.error || 'Unknown error'), 'error');
     }
   } catch (error) {
     console.error('Error creating customer:', error);
     const errorDetails = error.stack || error.message;
-    toast(tCustomer('msgErrorGeneric') + '\n\n' + errorDetails, 'error');
+    toast(tCustomer('An error occurred while creating the customer.') + '\n\n' + errorDetails, 'error');
   }
 }
 
@@ -722,7 +650,7 @@ async function initCustomerCreateForm() {
     }
     
     // Show loading
-    toast(tCustomer('msgLoading'), 'info');
+    toast(tCustomer('Loading form data...'), 'info');
     
     // Apply UI translations
     applyCustomerUITranslations();
@@ -748,7 +676,7 @@ async function initCustomerCreateForm() {
   } catch (error) {
     console.error('Error initializing form:', error);
     const errorDetails = error.stack || error.message;
-    toast(tCustomer('msgErrorLoadFailed') + ':\n\n' + errorDetails, 'error');
+    toast(tCustomer('Failed to load form data. Please refresh the page.') + ':\n\n' + errorDetails, 'error');
   }
 }
 
