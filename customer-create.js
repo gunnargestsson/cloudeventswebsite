@@ -349,10 +349,7 @@ async function loadCustomerPostingGroups() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({
-      tableName: 'Customer Posting Group',
-      fields: ['code', 'description']
-    })
+    data: JSON.stringify({ tableName: 'Customer Posting Group' })
   });
   
   if (result.result && result.result.length > 0) {
@@ -365,10 +362,7 @@ async function loadGenBusPostingGroups() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({
-      tableName: 'Gen. Business Posting Group',
-      fields: ['code', 'description', 'def_VATBusPostingGroup']
-    })
+    data: JSON.stringify({ tableName: 'Gen. Business Posting Group' })
   });
   
   if (result.result && result.result.length > 0) {
@@ -388,10 +382,7 @@ async function loadVATBusPostingGroups() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({
-      tableName: 'VAT Business Posting Group',
-      fields: ['code', 'description']
-    })
+    data: JSON.stringify({ tableName: 'VAT Business Posting Group' })
   });
   
   if (result.result && result.result.length > 0) {
@@ -404,10 +395,7 @@ async function loadPaymentTerms() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({
-      tableName: 'Payment Terms',
-      fields: ['code', 'description']
-    })
+    data: JSON.stringify({ tableName: 'Payment Terms' })
   });
   
   if (result.result && result.result.length > 0) {
@@ -420,10 +408,7 @@ async function loadCurrencies() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({
-      tableName: 'Currency',
-      fields: ['code', 'description']
-    })
+    data: JSON.stringify({ tableName: 'Currency' })
   });
   
   if (result.result && result.result.length > 0) {
@@ -436,10 +421,7 @@ async function loadPaymentMethods() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({
-      tableName: 'Payment Method',
-      fields: ['code', 'description']
-    })
+    data: JSON.stringify({ tableName: 'Payment Method' })
   });
   
   if (result.result && result.result.length > 0) {
@@ -452,10 +434,7 @@ async function loadSalespersons() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({
-      tableName: 'Salesperson/Purchaser',
-      fields: ['code', 'name']
-    })
+    data: JSON.stringify({ tableName: 'Salesperson/Purchaser' })
   });
   
   if (result.result && result.result.length > 0) {
@@ -468,10 +447,7 @@ async function loadLocations() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({
-      tableName: 'Location',
-      fields: ['code', 'name']
-    })
+    data: JSON.stringify({ tableName: 'Location' })
   });
   
   if (result.result && result.result.length > 0) {
@@ -484,10 +460,7 @@ async function loadLanguages() {
     specversion: '1.0',
     type: 'Data.Records.Get',
     source: 'BC Portal',
-    data: JSON.stringify({
-      tableName: 'Language',
-      fields: ['code', 'name']
-    })
+    data: JSON.stringify({ tableName: 'Language' })
   });
   
   if (result.result && result.result.length > 0) {
@@ -581,7 +554,6 @@ function setupCustomerEventListeners() {
           source: 'BC Portal',
           data: JSON.stringify({
             tableName: 'Post Code',
-            fields: ['code', 'city', 'country_RegionCode'],
             filters: [{ fieldName: 'Code', value: postCode }]
           })
         });
