@@ -39,8 +39,13 @@ let genBusToVATMapping = {};
 // Storage for Post Code records (for auto-populating City, County, Country/Region)
 let postCodeRecords = [];
 
-// Storage for Post Code field names (jsonName from Help.Fields.Get)
-let postCodeFieldNames = {};
+// Post Code field names (exact JSON field names from BC)
+const POST_CODE_FIELDS = {
+  code: 'Code',           // Field 1 - Primary Key
+  city: 'city',           // Field 2 - lowercase!
+  countryRegion: 'CountryRegionCode',  // Field 4 - no underscores!
+  county: 'County'        // Field 5
+};
 
 // Field metadata cache for dropdown tables
 const fieldMetadataCache = {};
@@ -533,26 +538,7 @@ async function loadLocations() {
 
 async function loadPostCodes() {
   try {
-    // First, get field metadata to discover correct JSON field names
-    const fieldsResult = await cePost(selectedCompany.id, {
-      specversion: '1.0',
-      type: 'Help.Fields.Get',
-      source: 'BC Portal',
-      data: JSON.stringify({ 
-        tableNo: 225,  // Post Code table
-        fieldNumbers: [1, 2, 4, 5]  // Code, City, Country/Region Code, County
-      })
-    });
-    
-    // Store the jsonName for each field number
-    if (fieldsResult.result && Array.isArray(fieldsResult.result)) {
-      fieldsResult.result.forEach(field => {
-        postCodeFieldNames[field.id] = field.jsonName;
-      });
-      console.log('Post Code field names:', postCodeFieldNames);
-    }
-    
-    // Now get the actual Post Code data
+    // Get Post Code data: Field 1 = Code, Field 2 = city, Field 4 = CountryRegionCode, Field 5 = County
     const result = await cePost(selectedCompany.id, {
       specversion: '1.0',
       type: 'Data.Records.Get',
@@ -568,15 +554,42 @@ async function loadPostCodes() {
       postCodeRecords = result.result;
       console.log('Post Code records loaded:', postCodeRecords.length);
       if (postCodeRecords.length > 0) {
-        console.log('Sample post code record:', postCodeRecords[0]);
+        console.log('Sample post code record:', JSON.stringify(postCodeRecords[0]));
       }
       
-      // Use actual field names from metadata (convert to lowercase for capitalize function)
-      const codeFieldName = (postCodeFieldNames[1] || 'Code').toLowerCase();
-      const cityFieldName = (postCodeFieldNames[2] || 'City').toLowerCase();
-      
-      console.log('Populating dropdown with fields:', codeFieldName, cityFieldName);
-      populateCustomerDropdown('customer-post-code', result.result, codeFieldName, cityFieldName);
+      // Populate dropdown - show Code and city
+      const dropdown = document.getElementById('customer-post-code');
+      if (dropdown) {
+        // Clear existing options except the first one (placeholder)
+        while (dropdown.options.length > 1) {
+          dropdown.remove(1);
+        }
+        
+        // Add post code options using exact field names
+        result.result.forEach(record => {
+          const option = document.createElement('option');
+          
+          // Field 1 (Code) is in primaryKey, Field 2 (city) is in fields
+          const code = (record.primaryKey && record.primaryKey[POST_CODE_FIELDS.code]) || 
+                       (record.fields && record.fields[POST_CODE_FIELDS.code]);
+          const city = (record.fields && record.fields[POST_CODE_FIELDS.city]) || 
+                       (record.primaryKey && record.primaryKey[POST_CODE_FIELDS.city]);
+          
+          option.value = code || '';
+          
+          if (code && city) {
+            option.textContent = `${code} - ${city}`;
+          } else if (code) {
+            option.textContent = code;
+          } else {
+            option.textContent = '(No value)';
+          }
+          
+          dropdown.appendChild(option);
+        });
+        
+        console.log('Post Code dropdown populated with', result.result.length, 'options');
+      }
     }
   } catch (error) {
     console.error('Error loading post codes:', error);
@@ -661,7 +674,6 @@ function setupCustomerEventListeners() {
       const selectedCode = this.value;
       
       console.log('Post Code changed to:', selectedCode);
-      console.log('Available field names:', postCodeFieldNames);
       
       if (!selectedCode) {
         // Clear fields if no post code selected
@@ -671,40 +683,32 @@ function setupCustomerEventListeners() {
         return;
       }
       
-      // Get the correct JSON field names from metadata
-      const codeFieldName = postCodeFieldNames[1] || 'Code';
-      const cityFieldName = postCodeFieldNames[2] || 'City';
-      const countryFieldName = postCodeFieldNames[4] || 'Country_RegionCode';
-      const countyFieldName = postCodeFieldNames[5] || 'County';
-      
       // Find the selected post code record from cached data
       const postCodeRecord = postCodeRecords.find(record => {
-        const code = (record.primaryKey && record.primaryKey[codeFieldName]) || 
-                     (record.fields && record.fields[codeFieldName]);
+        const code = (record.primaryKey && record.primaryKey[POST_CODE_FIELDS.code]) || 
+                     (record.fields && record.fields[POST_CODE_FIELDS.code]);
         return code === selectedCode;
       });
       
       console.log('Found post code record:', postCodeRecord);
       
       if (postCodeRecord) {
-        console.log('Using field names - City:', cityFieldName, 'Country:', countryFieldName, 'County:', countyFieldName);
-        
-        // Auto-populate City (field 2) - using correct jsonName
-        const city = (postCodeRecord.fields && postCodeRecord.fields[cityFieldName]) || 
-                     (postCodeRecord.primaryKey && postCodeRecord.primaryKey[cityFieldName]) || '';
-        console.log('City value from field "' + cityFieldName + '":', city);
+        // Auto-populate City (field 2) - jsonName = "city" (lowercase)
+        const city = (postCodeRecord.fields && postCodeRecord.fields[POST_CODE_FIELDS.city]) || 
+                     (postCodeRecord.primaryKey && postCodeRecord.primaryKey[POST_CODE_FIELDS.city]) || '';
+        console.log('City value (from field "' + POST_CODE_FIELDS.city + '"):', city);
         document.getElementById('customer-city').value = city;
         
-        // Auto-populate Country/Region Code (field 4) - using correct jsonName
-        const countryCode = (postCodeRecord.fields && postCodeRecord.fields[countryFieldName]) || 
-                            (postCodeRecord.primaryKey && postCodeRecord.primaryKey[countryFieldName]) || '';
-        console.log('Country code value from field "' + countryFieldName + '":', countryCode);
+        // Auto-populate Country/Region Code (field 4) - jsonName = "CountryRegionCode"
+        const countryCode = (postCodeRecord.fields && postCodeRecord.fields[POST_CODE_FIELDS.countryRegion]) || 
+                            (postCodeRecord.primaryKey && postCodeRecord.primaryKey[POST_CODE_FIELDS.countryRegion]) || '';
+        console.log('Country code value (from field "' + POST_CODE_FIELDS.countryRegion + '"):', countryCode);
         document.getElementById('customer-country-code').value = countryCode;
         
-        // Auto-populate County (field 5) - using correct jsonName
-        const county = (postCodeRecord.fields && postCodeRecord.fields[countyFieldName]) || 
-                       (postCodeRecord.primaryKey && postCodeRecord.primaryKey[countyFieldName]) || '';
-        console.log('County value from field "' + countyFieldName + '":', county);
+        // Auto-populate County (field 5) - jsonName = "County"
+        const county = (postCodeRecord.fields && postCodeRecord.fields[POST_CODE_FIELDS.county]) || 
+                       (postCodeRecord.primaryKey && postCodeRecord.primaryKey[POST_CODE_FIELDS.county]) || '';
+        console.log('County value (from field "' + POST_CODE_FIELDS.county + '"):', county);
         document.getElementById('customer-county').value = county;
       } else {
         console.log('Post code record not found in cache');
