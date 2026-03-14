@@ -761,6 +761,46 @@ function setupCustomerEventListeners() {
 }
 
 // =============================
+// DUPLICATE CHECK
+// =============================
+
+/**
+ * Check if a customer with the given Registration Number already exists
+ * @param {string} registrationNumber - The Registration Number to check
+ * @returns {Promise<Object>} - { exists: boolean, customerNo?: string, customerName?: string }
+ */
+async function checkCustomerExists(registrationNumber) {
+  try {
+    const result = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Data.Records.Get',
+      source: 'BC Portal',
+      subject: 'Customer',
+      data: JSON.stringify({
+        tableName: 'Customer',
+        tableView: `WHERE(Registration Number=CONST(${registrationNumber}))`
+      })
+    });
+    
+    // Check if any records were returned
+    if (result.result && result.result.length > 0) {
+      const existingCustomer = result.result[0];
+      return {
+        exists: true,
+        customerNo: existingCustomer.primaryKey?.No_ || existingCustomer.fields?.No_ || 'Unknown',
+        customerName: existingCustomer.fields?.Name || 'Unknown'
+      };
+    }
+    
+    return { exists: false };
+  } catch (error) {
+    console.error('Error checking for existing customer:', error);
+    // If check fails, allow creation to proceed (BC will handle constraint)
+    return { exists: false };
+  }
+}
+
+// =============================
 // FORM SUBMISSION
 // =============================
 
@@ -768,6 +808,23 @@ async function handleCreateCustomer() {
   try {
     // Validate required fields
     if (!validateCustomerForm()) {
+      return;
+    }
+    
+    // Check for duplicate customer
+    const registrationNo = document.getElementById('customer-registration-no').value;
+    const duplicateCheck = await checkCustomerExists(registrationNo);
+    
+    if (duplicateCheck.exists) {
+      toast(
+        tCustomer(
+          'A customer with Registration No. {0} already exists (Customer No. {1}: {2}).',
+          registrationNo,
+          duplicateCheck.customerNo,
+          duplicateCheck.customerName
+        ),
+        'error'
+      );
       return;
     }
     

@@ -180,6 +180,75 @@ function validateCreditLimit(value) {
 }
 ```
 
+### 4. Duplicate Customer Check
+Before creating a new customer, the system must verify that no customer with the same Registration Number already exists in Business Central.
+
+**When to Check**: After field validation passes, before calling `Data.Records.Set`
+
+**API Call**:
+```javascript
+async function checkCustomerExists(registrationNumber) {
+  try {
+    const result = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Data.Records.Get',
+      source: 'BC Portal',
+      subject: 'Customer',
+      data: JSON.stringify({
+        tableName: 'Customer',
+        tableView: `WHERE(Registration Number=CONST(${registrationNumber}))`
+      })
+    });
+    
+    // Check if any records were returned
+    if (result.result && result.result.length > 0) {
+      return {
+        exists: true,
+        customerNo: result.result[0].primaryKey?.No_ || result.result[0].fields?.No_,
+        customerName: result.result[0].fields?.Name || 'Unknown'
+      };
+    }
+    
+    return { exists: false };
+  } catch (error) {
+    console.error('Error checking for existing customer:', error);
+    // If check fails, allow creation to proceed (BC will handle constraint)
+    return { exists: false };
+  }
+}
+```
+
+**Usage in Form Submission**:
+```javascript
+async function handleCreateCustomer() {
+  // 1. Validate fields
+  if (!validateCustomerForm()) {
+    return;
+  }
+  
+  // 2. Check for duplicate
+  const registrationNo = document.getElementById('customer-registration-no').value;
+  const duplicateCheck = await checkCustomerExists(registrationNo);
+  
+  if (duplicateCheck.exists) {
+    toast(
+      tCustomer('A customer with Registration No. {0} already exists (Customer No. {1}: {2}).', 
+        registrationNo, 
+        duplicateCheck.customerNo, 
+        duplicateCheck.customerName
+      ), 
+      'error'
+    );
+    return;
+  }
+  
+  // 3. Proceed with creation
+  // ... rest of creation logic
+}
+```
+
+**Error Message**: The error message uses placeholder substitution to show the conflicting Registration Number, Customer Number, and Customer Name.
+
 ### Auto-Population Logic
 
 ### 1. Registration Number → Customer Number
@@ -207,7 +276,7 @@ document.getElementById('customer-post-code').addEventListener('blur', async fun
       source: 'BC Portal',
       data: JSON.stringify({
         tableName: 'Post Code',
-        filters: [{ fieldName: 'Code', value: postCode }]
+        tableView: `WHERE(Code=CONST(${postCode}))`
       })
     });
     
@@ -668,6 +737,7 @@ const UI_STRINGS = [
   'An error occurred while creating the customer.',
   'Failed to create customer: {0}',
   'Failed to load form data. Please refresh the page.',
+  'A customer with Registration No. {0} already exists (Customer No. {1}: {2}).',
   '{0} is required', 'Invalid email format', 
   'Invalid Registration No. check digit', 'Must be 10 digits',
   'Must be a non-negative number', 'Please fix the following errors:',
@@ -973,9 +1043,14 @@ function setupEventListeners() {
     if (!postCode) return;
     
     try {
-      const result = await cePost('Data.Records.Get', {
-        TableNo: 225,
-        Filters: [{ FieldNo: 1, Value: postCode }]
+      const result = await cePost(selectedCompany.id, {
+        specversion: '1.0',
+        type: 'Data.Records.Get',
+        source: 'BC Portal',
+        data: JSON.stringify({
+          tableName: 'Post Code',
+          tableView: `WHERE(Code=CONST(${postCode}))`
+        })
       });
       
       if (result.Records && result.Records.length > 0) {
@@ -1216,6 +1291,8 @@ function convertImageToBase64(file) {
 - [ ] Registration Number validation shows ✓/✗ indicator
 - [ ] Invalid Kennitala rejected with clear error message
 - [ ] Valid Kennitala auto-populates Customer Number
+- [ ] Duplicate Registration Number check prevents creating duplicate customers
+- [ ] Duplicate error message shows existing customer number and name
 - [ ] Post Code lookup populates City and Country/Region
 - [ ] Gen. Bus. Posting Group selection auto-fills VAT Bus. Posting Group
 - [ ] All required fields validated before submission
@@ -1232,9 +1309,9 @@ function convertImageToBase64(file) {
 - [ ] Empty dropdown selections handled gracefully
 - [ ] Invalid Post Code shows appropriate message
 - [ ] Gen. Bus. Posting Group without default VAT doesn't break VAT dropdown
+- [ ] Duplicate customer check API failure allows creation to proceed
 - [ ] Large image files handled appropriately
 - [ ] Network errors handled with user-friendly messages
-- [ ] Duplicate customer number handled by BC (should show error)
 
 ### Browser Compatibility
 - [ ] Chrome

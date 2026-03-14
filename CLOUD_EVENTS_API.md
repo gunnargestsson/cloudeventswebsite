@@ -272,6 +272,76 @@ Input parameters:
 
 All filter parameters (`fieldNumbers`, date range, `tableView`) can be combined freely.
 
+##### Filtering with `tableView`
+
+The `tableView` parameter uses Business Central's AL table view syntax to filter records. This is the **only supported filtering mechanism** - do not use `filters` or similar parameters.
+
+**Syntax**: `"WHERE(FieldName=FILTER(value))"`
+
+**Common Filter Examples**:
+
+```javascript
+// Exact match (use CONST for single value)
+tableView: "WHERE(No.=CONST(10000))"
+tableView: `WHERE(Registration Number=CONST(${regNo}))`
+
+// Exact match with spaces (CONST handles spaces automatically)
+tableView: "WHERE(Blocked=CONST( ))"  // Empty/blank
+
+// Multiple conditions with AND
+tableView: "WHERE(Blocked=CONST( ),Balance=FILTER(>0))"
+
+// Value ranges
+tableView: "WHERE(Balance=FILTER(>1000))"
+tableView: "WHERE(Balance=FILTER(>0&<10000))"
+tableView: "WHERE(PostingDate=FILTER(>=2024-01-01&<=2024-12-31))"
+
+// Text filters (use * for wildcards)
+tableView: "WHERE(Name=FILTER(@*Corporation*))"  // Case-insensitive contains
+tableView: "WHERE(No.=FILTER(C*))"               // Starts with 'C'
+
+// Multiple values (OR)
+tableView: "WHERE(Type=FILTER(Sale|Purchase))"
+tableView: "WHERE(No.=FILTER(10000|20000|30000))"
+
+// Complex example with multiple fields
+tableView: "WHERE(Blocked=CONST( ),Balance=FILTER(>1000),City=FILTER(Reykjavik))"
+```
+
+**Field Name Rules**:
+- Use the **BC field name** (e.g., `No.`, `Registration Number`, `Credit Limit (LCY)`)
+- BC handles field name normalization internally
+- Spaces and special characters are allowed in field names
+- Check Business Central field definitions if unsure
+
+**Filter Operators**:
+- `CONST(value)` - Exact match (single value)
+- `FILTER(value)` - Pattern/range match
+- `>`, `<`, `>=`, `<=` - Comparison operators
+- `&` - AND (multiple conditions on same field)
+- `|` - OR (multiple values)
+- `*` - Wildcard (text fields)
+- `@` - Case-insensitive (text fields)
+- `..` - Range (e.g., `1000..5000`)
+
+**JavaScript Template Literals**:
+```javascript
+// Using template literals for dynamic values
+const registrationNo = "1234567890";
+const result = await cePost(companyId, {
+  type: 'Data.Records.Get',
+  data: JSON.stringify({
+    tableName: 'Customer',
+    tableView: `WHERE(Registration Number=CONST(${registrationNo}))`
+  })
+});
+
+// Multiple dynamic filters
+const minBalance = 1000;
+const city = "Reykjavik";
+const tableView = `WHERE(Balance=FILTER(>${minBalance}),City=FILTER(${city}))`;
+```
+
 Response (verified from `/data` endpoint):
 ```json
 {
