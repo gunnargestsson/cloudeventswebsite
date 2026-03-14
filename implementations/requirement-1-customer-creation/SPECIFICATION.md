@@ -50,7 +50,7 @@ All API calls must be made using the `cePost()` function with proper authenticat
 ### 3. Contact Information
 | Field Name | BC Field | Type | Required | Control | Notes |
 |------------|----------|------|----------|---------|-------|
-| Mobile Phone | MobilePhoneNo | Text(30) | No | Text Input | |
+| Mobile Phone | MobilePhoneNo_ | Text(30) | No | Text Input | |
 | Email | EMail | Text(80) | No | Text Input | Email validation |
 | Home Page | HomePage | Text(80) | No | Text Input | URL validation |
 
@@ -58,8 +58,8 @@ All API calls must be made using the `cePost()` function with proper authenticat
 | Field Name | BC Field | Type | Required | Control | Lookup Info | Auto-Populate |
 |------------|----------|------|----------|---------|-------------|---------------|
 | Customer Posting Group | CustomerPostingGroup | Code(20) | Yes | Dropdown | Table 92, Fields: 1 (Code), 20 (Description) | No |
-| Gen. Bus. Posting Group | GenBusPostingGroup | Code(20) | Yes | Dropdown | Table 250, Fields: 1 (Code), 2 (Description), 3 (Def. VAT Bus. Posting Group) | Triggers VAT auto-fill |
-| VAT Bus. Posting Group | VATBusPostingGroup | Code(20) | Yes | Dropdown | Table 323, Fields: 1 (Code), 2 (Description) | Auto-filled from Gen. Bus. (field 3) |
+| Gen. Bus. Posting Group | Gen_Bus_PostingGroup | Code(20) | Yes | Dropdown | Table 250, Fields: 1 (Code), 2 (Description), 3 (Def. VAT Bus. Posting Group) | Triggers VAT auto-fill |
+| VAT Bus. Posting Group | VATBus_PostingGroup | Code(20) | Yes | Dropdown | Table 323, Fields: 1 (Code), 2 (Description) | Auto-filled from Gen. Bus. (field 3) |
 
 ### 5. Payment Information
 | Field Name | BC Field | Type | Required | Control | Lookup Info | Notes |
@@ -78,7 +78,7 @@ All API calls must be made using the `cePost()` function with proper authenticat
 ### 7. Credit Management
 | Field Name | BC Field | Type | Required | Control | Notes |
 |------------|----------|------|----------|---------|-------|
-| Credit Limit | CreditLimit_LCY_ | Decimal | No | Number Input | Non-negative |
+| Credit Limit | CreditLimitLCY | Decimal | No | Number Input | Non-negative |
 | Blocked Status | Blocked | Option | No | Dropdown | Values: " " (blank), "Ship", "Invoice", "All" |
 
 ### 8. Tax Information
@@ -106,7 +106,7 @@ All API calls must be made using the `cePost()` function with proper authenticat
 ### Complete Lookup Table List with Field Numbers
 ```javascript
 const LOOKUP_TABLES = {
-  postCode: { table: 225, fields: [1, 2, 4, 5], mapping: { 1: 'Code', 2: 'City', 4: 'Country_RegionCode', 5: 'County' } },
+  postCode: { table: 225, fields: [1, 2, 4, 5], mapping: { 1: 'Code', 2: 'city', 4: 'CountryRegionCode', 5: 'County' } },
   customerPostingGroup: { table: 92, fields: [1, 20], mapping: { 1: 'Code', 20: 'Description' } },
   genBusPostingGroup: { table: 250, fields: [1, 2, 3], mapping: { 1: 'Code', 2: 'Description', 3: 'Def_VATBusPostingGroup' } },
   vatBusPostingGroup: { table: 323, fields: [1, 2], mapping: { 1: 'Code', 2: 'Description' } },
@@ -213,8 +213,9 @@ document.getElementById('customer-post-code').addEventListener('blur', async fun
     
     if (result.result && result.result.length > 0) {
       const record = result.result[0];
+      // Note: Field names are case-sensitive. Post Code table uses lowercase 'city' and 'CountryRegionCode' (no underscore)
       document.getElementById('customer-city').value = record.city || '';
-      document.getElementById('customer-country-code').value = record.country_RegionCode || '';
+      document.getElementById('customer-country-code').value = record.CountryRegionCode || '';
     }
   } catch (error) {
     console.error('Error looking up post code:', error);
@@ -241,7 +242,8 @@ async function loadGenBusPostingGroups() {
   if (result.result && result.result.length > 0) {
     result.result.forEach(record => {
       const code = record.primaryKey?.Code || record.fields?.Code;
-      const defVAT = record.fields?.Def_VATBusPostingGroup;
+      // Note: BC may return this field as either Def_VATBusPostingGroup or DefVATBusPostingGroup
+      const defVAT = record.fields?.Def_VATBusPostingGroup || record.fields?.DefVATBusPostingGroup;
       if (code && defVAT) {
         genBusToVATMapping[code] = defVAT;
       }
@@ -550,10 +552,28 @@ fieldset {
 }
 ```
 
-## Localization & Field Captions
+## Localization & Translation
 
-### Language Support
-All field labels must be retrieved from Business Central in the user's selected language using the `Help.Fields.Get` API message type. All UI constants (buttons, section headers, messages, placeholders) must also be translatable to support multiple languages.
+### Translation Architecture
+The customer creation form uses the same translation system as the rest of the BC Portal:
+- **Field Captions**: Retrieved from Business Central via `Help.Fields.Get` API in the user's selected language (LCID)
+- **UI Constants**: Translated via the Cloud Event Translation table with automatic placeholder creation
+- **Language Selection**: Changes to the language dropdown immediately update all UI text and field captions
+
+### Two-Level Translation System
+
+#### Level 1: BC Field Captions (Dynamic)
+Field labels are populated from Business Central's field metadata using the selected LCID (Windows Language ID):
+- **API**: `Help.Fields.Get` with `lcid` parameter
+- **Cache Key**: `companyId:lcid:tableName`
+- **Updates**: When language changes, cache is invalidated and field captions reload
+
+#### Level 2: UI Constants (Cloud Event Translation Table)
+All UI text (buttons, messages, section headers, placeholders) is translated via the portal's translation system:
+- **Table**: Cloud Event Translation (custom BC table)
+- **Primary Key**: Source (fixed: "BC Portal"), Windows Language ID, Source Text
+- **Fields**: Target Text (the translation)
+- **Auto-Creation**: Missing translations are automatically created as blank records for users to fill in BC
 
 ### Field Caption Mapping
 ```javascript
@@ -568,19 +588,19 @@ const FIELD_MAPPING = {
   'postCode': 'Post Code',
   'city': 'City',
   'countryRegion': 'Country/Region Code',
-  'mobilePhone': 'Mobile Phone No.',
+  'mobilePhone': 'Mobile Phone No.',  // BC field: MobilePhoneNo_
   'email': 'E-Mail',
   'homePage': 'Home Page',
   'customerPostingGroup': 'Customer Posting Group',
-  'genBusPostingGroup': 'Gen. Bus. Posting Group',
-  'vatBusPostingGroup': 'VAT Bus. Posting Group',
+  'genBusPostingGroup': 'Gen. Bus. Posting Group',  // BC field: Gen_Bus_PostingGroup
+  'vatBusPostingGroup': 'VAT Bus. Posting Group',  // BC field: VATBus_PostingGroup
   'paymentTerms': 'Payment Terms Code',
   'currency': 'Currency Code',
   'paymentMethod': 'Payment Method Code',
   'salesperson': 'Salesperson Code',
   'location': 'Location Code',
   'language': 'Language Code',
-  'creditLimit': 'Credit Limit (LCY)',
+  'creditLimit': 'Credit Limit (LCY)',  // BC field: CreditLimitLCY
   'blocked': 'Blocked',
   'vatRegistrationNo': 'VAT Registration No.'
 };
@@ -629,204 +649,167 @@ async function loadFieldCaptions() {
 }
 ```
 
-### UI Translations
-All UI constants must be stored in a translations object that supports multiple languages. The active language should match the user's Business Central language setting.
+### UI Strings Registry
+All UI text that needs translation must be added to the `UI_STRINGS` array in index.html:
 
 ```javascript
-// Translation constants for UI elements
-const TRANSLATIONS = {
-  'en-US': {
-    // Form sections
-    sectionIdentification: 'Customer Identification',
-    sectionAddress: 'Address Information',
-    sectionContact: 'Contact Information',
-    sectionPosting: 'Posting Configuration',
-    sectionPayment: 'Payment Information',
-    sectionSales: 'Sales Configuration',
-    sectionCredit: 'Credit Management',
-    sectionTax: 'Tax Information',
-    sectionMedia: 'Customer Image',
-    
-    // Form heading
-    formTitle: 'Create New Customer',
-    
-    // Buttons
-    btnCreate: 'Create Customer',
-    btnCancel: 'Cancel',
-    
-    // Dropdown placeholders
-    dropdownSelect: '-- Select --',
-    dropdownNotBlocked: '-- Not Blocked --',
-    dropdownLCY: '-- LCY --',
-    
-    // Messages
-    msgLoading: 'Loading form data...',
-    msgCreating: 'Creating customer...',
-    msgSuccess: 'Customer {0} created successfully!',
-    msgErrorGeneric: 'An error occurred while creating the customer.',
-    msgErrorFailed: 'Failed to create customer: {0}',
-    msgErrorLoadFailed: 'Failed to load form data. Please refresh the page.',
-    msgCancelConfirm: 'Are you sure you want to cancel? All entered data will be lost.',
-    
-    // Validation messages
-    valRequired: '{0} is required',
-    valInvalidEmail: 'Invalid email format',
-    valInvalidKennitala: 'Invalid Kennitala check digit',
-    valMust10Digits: 'Must be 10 digits',
-    valNonNegative: 'Must be a non-negative number',
-    valFixErrors: 'Please fix the following errors:',
-    
-    // Blocked options
-    blockedShip: 'Ship',
-    blockedInvoice: 'Invoice',
-    blockedAll: 'All',
-    
-    // Upload
-    uploadImage: 'Upload Image'
-  },
-  'is-IS': {
-    // Icelandic translations
-    sectionIdentification: 'Auðkenning viðskiptamanns',
-    sectionAddress: 'Heimilisfangsupplýsingar',
-    sectionContact: 'Tengiliðaupplýsingar',
-    sectionPosting: 'Bókunarstillingar',
-    sectionPayment: 'Greiðsluupplýsingar',
-    sectionSales: 'Sölustillingar',
-    sectionCredit: 'Lánsfjárstjórnun',
-    sectionTax: 'Skattur',
-    sectionMedia: 'Mynd viðskiptamanns',
-    
-    formTitle: 'Búa til nýjan viðskiptamann',
-    
-    btnCreate: 'Búa til viðskiptamann',
-    btnCancel: 'Hætta við',
-    
-    dropdownSelect: '-- Velja --',
-    dropdownNotBlocked: '-- Ekki læst --',
-    dropdownLCY: '-- SGM --',
-    
-    msgLoading: 'Hleð inn gögnum...',
-    msgCreating: 'Búa til viðskiptamann...',
-    msgSuccess: 'Viðskiptamaður {0} búinn til!',
-    msgErrorGeneric: 'Villa kom upp við að búa til viðskiptamann.',
-    msgErrorFailed: 'Mistókst að búa til viðskiptamann: {0}',
-    msgErrorLoadFailed: 'Mistókst að hlaða inn gögnum. Vinsamlegast endurnýjaðu síðuna.',
-    msgCancelConfirm: 'Ertu viss um að þú viljir hætta við? Öll gögn tapast.',
-    
-    valRequired: '{0} er nauðsynlegt',
-    valInvalidEmail: 'Ógilt tölvupóstfang',
-    valInvalidKennitala: 'Ógild kennitala',
-    valMust10Digits: 'Verður að vera 10 tölustafir',
-    valNonNegative: 'Verður að vera jákvæð tala',
-    valFixErrors: 'Vinsamlegast lagaðu eftirfarandi villur:',
-    
-    blockedShip: 'Afhending',
-    blockedInvoice: 'Reikningur',
-    blockedAll: 'Allt',
-    
-    uploadImage: 'Hlaða upp mynd'
-  }
-  // Add more languages as needed
-};
-
-// Current language (should match BC user's language)
-let currentLanguage = 'en-US';
-
-// Get translated text
-function t(key, ...args) {
-  const translation = TRANSLATIONS[currentLanguage]?.[key] || TRANSLATIONS['en-US']?.[key] || key;
+const UI_STRINGS = [
+  // ... existing strings ...
   
-  // Replace placeholders {0}, {1}, etc. with arguments
+  // Customer creation UI
+  '+ Create Customer', 'Create Customer', 'Create New Customer', 'Back to Customers',
+  'Identification', 'Address', 'Contact', 'Posting', 'Payment', 'Sales', 
+  'Credit Management', 'Media', 'Reset Form',
+  'Upload a customer logo or image (optional)',
+  
+  // Customer creation messages and validation
+  '-- Select --', '-- LCY --', 'Loading form data...', 'Creating customer...',
+  'Customer {0} created successfully!', 
+  'An error occurred while creating the customer.',
+  'Failed to create customer: {0}',
+  'Failed to load form data. Please refresh the page.',
+  '{0} is required', 'Invalid email format', 
+  'Invalid Registration No. check digit', 'Must be 10 digits',
+  'Must be a non-negative number', 'Please fix the following errors:',
+  'Error looking up post code',
+  
+  // Field caption fallbacks (will be replaced by BC captions)
+  'Registration No.', 'No.', 'Name', 'Name 2',
+  'Post Code', 'City', 'Country/Region Code', 'County',
+  'Phone No.', 'E-Mail',
+  'Customer Posting Group', 'Gen. Bus. Posting Group', 'VAT Bus. Posting Group',
+  'Payment Terms Code', 'Payment Method Code',
+  'Currency Code', 'Language Code', 'Salesperson Code', 'Location Code',
+  'Credit Limit (LCY)', 'Image'
+];
+```
+
+### HTML Translation Attributes
+All static UI elements use `data-t` or `data-tp` attributes:
+
+**`data-t` - Text Content Translation**
+```html
+<span data-t="Create New Customer">Create New Customer</span>
+<button data-t="Create Customer">Create Customer</button>
+<legend data-t="Identification">Identification</legend>
+```
+
+**`data-tp` - Placeholder Translation**
+```html
+<input data-tp="Search customers..." placeholder="Search customers..." />
+```
+
+### Translation Functions
+
+#### Global Translation Function
+```javascript
+// t(): translate a UI constant; falls back to the English text when no translation is available
+function t(s) { 
+  return uiTranslations[s] || s; 
+}
+
+// Support for placeholders: {0}, {1}, etc.
+function tCustomer(key, ...args) {
+  const translation = (typeof t === 'function') ? t(key) : key;
   return translation.replace(/\{(\d+)\}/g, (match, index) => {
     return args[index] !== undefined ? args[index] : match;
   });
 }
+```
 
-// Apply UI translations to the form
-function applyUITranslations() {
-  // Section legends
+#### Apply Translations
+```javascript
+// Global translation application (called automatically when language changes)
+function applyUiTranslations() {
+  document.querySelectorAll('[data-t]').forEach(el => { 
+    el.textContent = t(el.dataset.t); 
+  });
+  document.querySelectorAll('[data-tp]').forEach(el => { 
+    el.placeholder = t(el.dataset.tp); 
+  });
+}
+
+// Customer-specific translations (section numbering and dropdown placeholders)
+function applyCustomerUITranslations() {
+  // Add section numbering to legends
   const sections = [
-    { selector: '#customerCreateForm fieldset:nth-of-type(1) legend', key: 'sectionIdentification', prefix: '1. ' },
-    { selector: '#customerCreateForm fieldset:nth-of-type(2) legend', key: 'sectionAddress', prefix: '2. ' },
-    { selector: '#customerCreateForm fieldset:nth-of-type(3) legend', key: 'sectionContact', prefix: '3. ' },
-    { selector: '#customerCreateForm fieldset:nth-of-type(4) legend', key: 'sectionPosting', prefix: '4. ' },
-    { selector: '#customerCreateForm fieldset:nth-of-type(5) legend', key: 'sectionPayment', prefix: '5. ' },
-    { selector: '#customerCreateForm fieldset:nth-of-type(6) legend', key: 'sectionSales', prefix: '6. ' },
-    { selector: '#customerCreateForm fieldset:nth-of-type(7) legend', key: 'sectionCredit', prefix: '7. ' },
-    { selector: '#customerCreateForm fieldset:nth-of-type(8) legend', key: 'sectionTax', prefix: '8. ' },
-    { selector: '#customerCreateForm fieldset:nth-of-type(9) legend', key: 'sectionMedia', prefix: '9. ' }
+    { selector: '#customer-create-form fieldset:nth-of-type(1) legend', key: 'Identification', prefix: '1. ' },
+    { selector: '#customer-create-form fieldset:nth-of-type(2) legend', key: 'Address', prefix: '2. ' },
+    // ... etc
   ];
   
   sections.forEach(section => {
     const element = document.querySelector(section.selector);
     if (element) {
-      element.textContent = section.prefix + t(section.key);
+      element.textContent = section.prefix + tCustomer(section.key);
     }
   });
   
-  // Form heading
-  const heading = document.querySelector('#customerCreateForm h2');
-  if (heading) {
-    heading.textContent = t('formTitle');
-  }
-  
-  // Buttons
-  const btnCreate = document.getElementById('btnCreateCustomer');
-  if (btnCreate) btnCreate.textContent = t('btnCreate');
-  
-  const btnCancel = document.getElementById('btnCancel');
-  if (btnCancel) btnCancel.textContent = t('btnCancel');
-  
-  // Dropdown placeholders
-  updateDropdownPlaceholder('customerPostingGroup', 'dropdownSelect');
-  updateDropdownPlaceholder('genBusPostingGroup', 'dropdownSelect');
-  updateDropdownPlaceholder('vatBusPostingGroup', 'dropdownSelect');
-  updateDropdownPlaceholder('paymentTerms', 'dropdownSelect');
-  updateDropdownPlaceholder('currency', 'dropdownLCY');
-  updateDropdownPlaceholder('paymentMethod', 'dropdownSelect');
-  updateDropdownPlaceholder('salesperson', 'dropdownSelect');
-  updateDropdownPlaceholder('location', 'dropdownSelect');
-  updateDropdownPlaceholder('language', 'dropdownSelect');
-  
-  // Blocked dropdown options
-  const blockedDropdown = document.getElementById('blocked');
-  if (blockedDropdown && blockedDropdown.options.length > 0) {
-    blockedDropdown.options[0].text = t('dropdownNotBlocked');
-    blockedDropdown.options[1].text = t('blockedShip');
-    blockedDropdown.options[2].text = t('blockedInvoice');
-    blockedDropdown.options[3].text = t('blockedAll');
-  }
-  
-  // Image upload label
-  const imageLabel = document.querySelector('label[for="customerImage"]');
-  if (imageLabel) {
-    imageLabel.textContent = t('uploadImage');
-  }
+  // Update dropdown placeholders (options aren't covered by data-t)
+  updateDropdownPlaceholder('customer-posting-group', '-- Select --');
+  // ... etc
 }
 
 function updateDropdownPlaceholder(dropdownId, translationKey) {
   const dropdown = document.getElementById(dropdownId);
   if (dropdown && dropdown.options.length > 0) {
-    dropdown.options[0].text = t(translationKey);
+    dropdown.options[0].text = tCustomer(translationKey);
   }
-}
-
-// Detect language from BC or browser
-function detectLanguage() {
-  // Try to get language from BC session or user preferences
-  // For now, use browser language as fallback
-  const browserLang = navigator.language || navigator.userLanguage;
-  
-  // Map browser language to supported languages
-  if (browserLang.startsWith('is')) {
-    currentLanguage = 'is-IS';
-  } else {
-    currentLanguage = 'en-US';
-  }
-  
-  // TODO: Override with BC user's language setting if available
 }
 ```
+
+### Language Change Workflow
+When a user selects a different language:
+
+1. **Update Global State**
+   ```javascript
+   selectedLcid = newLcid;  // e.g., 1033 = English, 1039 = Icelandic
+   ```
+
+2. **Clear Field Metadata Cache**
+   ```javascript
+   fieldMetaCache = {};  // Force reload of field captions in new language
+   ```
+
+3. **Reload UI Translations**
+   ```javascript
+   await loadUiTranslations();  // Fetch from Cloud Event Translation table
+   ```
+
+4. **Apply Translations**
+   ```javascript
+   applyUiTranslations();           // Global UI elements with data-t/data-tp
+   applyCustomerUITranslations();   // Customer form specific elements
+   ```
+
+5. **Reload Field Captions**
+   ```javascript
+   await loadCustomerFieldCaptions();  // Refresh BC field labels
+   ```
+
+6. **Reload Lookup Data** (if needed)
+   ```javascript
+   // Reload dropdowns to get localized descriptions
+   await loadCustomerPostingGroups();
+   // ... etc
+   ```
+
+### Managing Translations in Business Central
+
+**For Administrators:**
+
+1. Open **Cloud Event Translation** table in Business Central
+2. Filter by:
+   - **Source**: "BC Portal"
+   - **Windows Language ID**: Your language LCID (e.g., 1039 for Icelandic)
+3. Find records where **Target Text** is blank
+4. Fill in the translations
+5. Portal will immediately use the new translations when users change language
+
+**Auto-Creation of Placeholders:**
+- When users select a language without translations, the portal automatically creates blank translation records
+- This makes it easy for admins to see which strings need translation
+- No code changes needed to add new languages
 
 ## JavaScript Implementation
 
@@ -1216,6 +1199,17 @@ function convertImageToBase64(file) {
 ```
 
 ## Testing Checklist
+
+### Translation Testing
+- [ ] Language dropdown changes update all UI text immediately
+- [ ] Create Customer button text translates correctly
+- [ ] All section headers (Identification, Address, etc.) translate
+- [ ] All validation messages appear in selected language
+- [ ] Dropdown placeholders ("-- Select --", "-- LCY --") translate
+- [ ] Field labels update from BC field captions in selected language
+- [ ] Missing translations auto-create blank records in Cloud Event Translation table
+- [ ] Error messages use translated text
+- [ ] Success messages use translated text with parameter substitution (e.g., "Customer {0} created successfully!")
 
 ### Functional Testing
 - [ ] Form loads with all dropdowns populated

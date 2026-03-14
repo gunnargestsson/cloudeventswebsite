@@ -604,7 +604,11 @@ async function loadPostCodes() {
 // =============================
 
 function applyCustomerUITranslations() {
-  // Section legends
+  // Apply translations to all elements with data-t attributes in the customer form
+  // This uses the global applyUiTranslations() which handles all [data-t] and [data-tp] elements
+  // No need for custom logic - the global translation system handles everything
+  
+  // Only update section legends with numbering prefix
   const sections = [
     { selector: '#customer-create-form fieldset:nth-of-type(1) legend', key: 'Identification', prefix: '1. ' },
     { selector: '#customer-create-form fieldset:nth-of-type(2) legend', key: 'Address', prefix: '2. ' },
@@ -623,13 +627,7 @@ function applyCustomerUITranslations() {
     }
   });
   
-  // Form heading
-  const heading = document.querySelector('#view-create-customer .section-title span');
-  if (heading) {
-    heading.textContent = tCustomer('Create New Customer');
-  }
-  
-  // Dropdown placeholders
+  // Dropdown placeholders - these need special handling because they're option elements
   updateDropdownPlaceholder('customer-posting-group', '-- Select --');
   updateDropdownPlaceholder('customer-gen-bus-posting-group', '-- Select --');
   updateDropdownPlaceholder('customer-vat-bus-posting-group', '-- Select --');
@@ -639,6 +637,7 @@ function applyCustomerUITranslations() {
   updateDropdownPlaceholder('customer-salesperson', '-- Select --');
   updateDropdownPlaceholder('customer-location', '-- Select --');
   updateDropdownPlaceholder('customer-language', '-- Select --');
+  updateDropdownPlaceholder('customer-post-code', '-- Select --');
 }
 
 // =============================
