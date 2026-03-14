@@ -570,7 +570,13 @@ async function loadPostCodes() {
       if (postCodeRecords.length > 0) {
         console.log('Sample post code record:', postCodeRecords[0]);
       }
-      populateCustomerDropdown('customer-post-code', result.result, 'code', 'city');
+      
+      // Use actual field names from metadata (convert to lowercase for capitalize function)
+      const codeFieldName = (postCodeFieldNames[1] || 'Code').toLowerCase();
+      const cityFieldName = (postCodeFieldNames[2] || 'City').toLowerCase();
+      
+      console.log('Populating dropdown with fields:', codeFieldName, cityFieldName);
+      populateCustomerDropdown('customer-post-code', result.result, codeFieldName, cityFieldName);
     }
   } catch (error) {
     console.error('Error loading post codes:', error);
