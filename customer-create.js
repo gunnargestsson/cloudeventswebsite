@@ -569,11 +569,13 @@ async function loadPostCodes() {
         result.result.forEach(record => {
           const option = document.createElement('option');
           
-          // Field 1 (Code) is in primaryKey, Field 2 (city) is in fields
+          // Field 1 (Code) is in primaryKey
           const code = (record.primaryKey && record.primaryKey[POST_CODE_FIELDS.code]) || 
                        (record.fields && record.fields[POST_CODE_FIELDS.code]);
-          const city = (record.fields && record.fields[POST_CODE_FIELDS.city]) || 
-                       (record.primaryKey && record.primaryKey[POST_CODE_FIELDS.city]);
+          
+          // Field 2 (city) - try both lowercase and capitalized
+          const city = (record.fields && (record.fields[POST_CODE_FIELDS.city] || record.fields['City'])) || 
+                       (record.primaryKey && (record.primaryKey[POST_CODE_FIELDS.city] || record.primaryKey['City']));
           
           option.value = code || '';
           
@@ -581,6 +583,7 @@ async function loadPostCodes() {
             option.textContent = `${code} - ${city}`;
           } else if (code) {
             option.textContent = code;
+            console.log('Post code missing city:', code, 'Record:', record);
           } else {
             option.textContent = '(No value)';
           }
@@ -693,19 +696,19 @@ function setupCustomerEventListeners() {
       console.log('Found post code record:', postCodeRecord);
       
       if (postCodeRecord) {
-        // Auto-populate City (field 2) - jsonName = "city" (lowercase)
-        const city = (postCodeRecord.fields && postCodeRecord.fields[POST_CODE_FIELDS.city]) || 
-                     (postCodeRecord.primaryKey && postCodeRecord.primaryKey[POST_CODE_FIELDS.city]) || '';
-        console.log('City value (from field "' + POST_CODE_FIELDS.city + '"):', city);
+        // Auto-populate City (field 2) - try both lowercase "city" and capitalized "City"
+        const city = (postCodeRecord.fields && (postCodeRecord.fields[POST_CODE_FIELDS.city] || postCodeRecord.fields['City'])) || 
+                     (postCodeRecord.primaryKey && (postCodeRecord.primaryKey[POST_CODE_FIELDS.city] || postCodeRecord.primaryKey['City'])) || '';
+        console.log('City value (from field "' + POST_CODE_FIELDS.city + '" or "City"):', city);
         document.getElementById('customer-city').value = city;
         
-        // Auto-populate Country/Region Code (field 4) - jsonName = "CountryRegionCode"
-        const countryCode = (postCodeRecord.fields && postCodeRecord.fields[POST_CODE_FIELDS.countryRegion]) || 
-                            (postCodeRecord.primaryKey && postCodeRecord.primaryKey[POST_CODE_FIELDS.countryRegion]) || '';
-        console.log('Country code value (from field "' + POST_CODE_FIELDS.countryRegion + '"):', countryCode);
+        // Auto-populate Country/Region Code (field 4) - try multiple variations
+        const countryCode = (postCodeRecord.fields && (postCodeRecord.fields[POST_CODE_FIELDS.countryRegion] || postCodeRecord.fields['Country_RegionCode'])) || 
+                            (postCodeRecord.primaryKey && (postCodeRecord.primaryKey[POST_CODE_FIELDS.countryRegion] || postCodeRecord.primaryKey['Country_RegionCode'])) || '';
+        console.log('Country code value (from field "' + POST_CODE_FIELDS.countryRegion + '" or "Country_RegionCode"):', countryCode);
         document.getElementById('customer-country-code').value = countryCode;
         
-        // Auto-populate County (field 5) - jsonName = "County"
+        // Auto-populate County (field 5)
         const county = (postCodeRecord.fields && postCodeRecord.fields[POST_CODE_FIELDS.county]) || 
                        (postCodeRecord.primaryKey && postCodeRecord.primaryKey[POST_CODE_FIELDS.county]) || '';
         console.log('County value (from field "' + POST_CODE_FIELDS.county + '"):', county);
