@@ -866,8 +866,8 @@ async function handleCreateCustomer() {
     if (imageFile) {
       const imageData = await convertImageToBase64(imageFile);
       fields.Image = {
-        id: generateGuid(),
-        value: imageData
+        Id: generateGuid(),
+        Value: imageData
       };
     }
     

@@ -96,7 +96,7 @@ All API calls must be made using the `cePost()` function with proper authenticat
 {
   "Image": {
     "Id": "generated-guid",
-    "value": "base64-encoded-image-data"
+    "Value": "base64-encoded-image-data"
   }
 }
 ```
