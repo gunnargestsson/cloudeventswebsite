@@ -304,6 +304,22 @@
   .loader-label { font-size: 0.76rem; color: var(--text-dim); }
   .empty-state { text-align: center; padding: 56px 20px; color: var(--text-dim); font-size: 0.84rem; }
   .empty-icon { font-size: 2.4rem; margin-bottom: 12px; opacity: 0.4; }
+  .empty-sub { font-size: 0.78rem; margin-top: 4px; }
+
+  /* SALES HISTORY */
+  .sales-history-filters { display: flex; gap: 16px; padding: 14px 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 14px; align-items: flex-end; flex-wrap: wrap; }
+  .date-filter-group { display: flex; flex-direction: column; gap: 4px; }
+  .date-filter-label { font-size: 0.72rem; color: var(--text-dim); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; }
+  .date-filter-input { padding: 7px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--input-bg,var(--surface)); color: var(--text); font-family: inherit; font-size: 0.85rem; }
+  .btn-refresh { padding: 7px 16px; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; font-size: 0.85rem; }
+  .btn-refresh:hover { opacity: 0.85; }
+  .sales-history-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 0 12px; border-bottom: 1px solid var(--border); margin-bottom: 14px; flex-wrap: wrap; gap: 6px; }
+  .sales-history-title { font-size: 0.85rem; color: var(--text); font-weight: 500; }
+  .sales-history-summary { font-size: 0.75rem; color: var(--text-dim); }
+  .sh-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+  .sh-sortable:hover { color: var(--text); }
+  .sort-arrow { opacity: 0.3; font-size: 0.7em; }
+  .sort-arrow.active { opacity: 1; color: var(--accent); }
 
   /* TOAST */
   #toast { position: fixed; bottom: 28px; right: 28px; background: var(--surface); border: 1px solid var(--border-bright); border-radius: var(--radius); padding: 13px 18px; font-size: 0.8rem; color: var(--text); box-shadow: 0 8px 32px rgba(0,0,0,0.5); transform: translateY(16px); opacity: 0; transition: all 0.3s; z-index: 999; max-width: 320px; display: flex; align-items: center; gap: 10px; }
@@ -817,6 +833,13 @@ const UI_STRINGS = [
   'Credit information', 'Remaining with tolerance', 'Details', 'Tolerance', 'Due this period',
   'Authenticating...', 'Loading...',
   'No ledger entries', 'No sales history', 'No items added yet',
+  'This customer has no invoiced items in the selected period.',
+  'Item No.', 'Description', 'Variant', '# Orders',
+  'From', 'To', 'Refresh', 'Period', 'items',
+  'Invalid date range', 'From date cannot be after to date',
+  'From date is required', 'To date cannot be in the future',
+  'Sales History:', 'Failed to load sales history: {0}',
+  'Error loading sales history',
   'Statistics', 'Download PDF',
   'Add at least one item', 'Creating...', 'Sales order created!',
   'Failed to create sales order', 'Failed to add line for', 'Failed: ',
@@ -1276,34 +1299,144 @@ function switchTab(tab) {
 }
 
 // ---- SALES HISTORY ----
-async function loadSalesHistory(skip = 0) {
-  const take = pageSize();
+let salesHistoryData = null;
+let salesHistorySortCol = 'quantity';
+let salesHistorySortDir = -1; // -1 = desc, 1 = asc
+
+function shGetDefaultDates() {
+  const to = new Date();
+  const from = new Date();
+  from.setFullYear(from.getFullYear() - 1);
+  return { from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] };
+}
+
+function shValidateDates(fromDate, toDate) {
+  if (!fromDate) return { valid: false, error: t('From date is required') };
+  const today = new Date().toISOString().split('T')[0];
+  if (toDate && toDate > today) return { valid: false, error: t('To date cannot be in the future') };
+  if (toDate && fromDate > toDate) return { valid: false, error: t('From date cannot be after to date') };
+  return { valid: true };
+}
+
+function shSortData(data) {
+  return [...data].sort((a, b) => {
+    let av = a[salesHistorySortCol], bv = b[salesHistorySortCol];
+    if (salesHistorySortCol === 'quantity' || salesHistorySortCol === 'noOfOrders') {
+      av = parseFloat(av) || 0; bv = parseFloat(bv) || 0;
+    } else {
+      av = String(av || '').toLowerCase(); bv = String(bv || '').toLowerCase();
+    }
+    if (av < bv) return -1 * salesHistorySortDir;
+    if (av > bv) return 1 * salesHistorySortDir;
+    return 0;
+  });
+}
+
+function shSort(col) {
+  if (salesHistorySortCol === col) {
+    salesHistorySortDir *= -1;
+  } else {
+    salesHistorySortCol = col;
+    salesHistorySortDir = (col === 'quantity' || col === 'noOfOrders') ? -1 : 1;
+  }
+  if (salesHistoryData) {
+    const from = document.getElementById('sh-from-date')?.value || '';
+    const to = document.getElementById('sh-to-date')?.value || '';
+    shRenderTable(salesHistoryData, from, to);
+  }
+}
+
+function shArrow(col) {
+  if (col !== salesHistorySortCol) return ' <span class="sort-arrow">↕</span>';
+  return salesHistorySortDir === 1
+    ? ' <span class="sort-arrow active">↑</span>'
+    : ' <span class="sort-arrow active">↓</span>';
+}
+
+function shRenderTable(result, fromDate, toDate) {
+  const el = document.getElementById('sales-history-content');
+  const rows = shSortData(result.salesHistory || []);
+
+  const filterBar = `<div class="sales-history-filters">
+    <div class="date-filter-group">
+      <span class="date-filter-label">${t('From')}</span>
+      <input class="date-filter-input" type="date" id="sh-from-date" value="${fromDate}">
+    </div>
+    <div class="date-filter-group">
+      <span class="date-filter-label">${t('To')}</span>
+      <input class="date-filter-input" type="date" id="sh-to-date" value="${toDate}">
+    </div>
+    <button class="btn-refresh" onclick="shRefresh()">${t('Refresh')}</button>
+  </div>`;
+
+  if (!rows.length) {
+    el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">📊</div><p>${t('No sales history')}</p><p class="empty-sub">${t('This customer has no invoiced items in the selected period.')}</p></div>`;
+    return;
+  }
+
+  const header = `<div class="sales-history-header">
+    <span class="sales-history-title">${t('Sales History:')} ${result.customerNo || ''} — ${result.customerName || ''}</span>
+    <span class="sales-history-summary">${t('Period')}: ${fmtDate(result.fromDate)} – ${fmtDate(result.toDate)} &nbsp;|&nbsp; ${result.noOfRecords ?? rows.length} ${t('items')}</span>
+  </div>`;
+
+  el.innerHTML = filterBar + header + `<div class="table-wrap"><table>
+    <thead><tr>
+      <th class="sh-sortable" onclick="shSort('itemNo')">${t('Item No.')}${shArrow('itemNo')}</th>
+      <th class="sh-sortable" onclick="shSort('description')">${t('Description')}${shArrow('description')}</th>
+      <th class="sh-sortable" style="text-align:center" onclick="shSort('variantCode')">${t('Variant')}${shArrow('variantCode')}</th>
+      <th class="sh-sortable num" onclick="shSort('quantity')">${t('Quantity')}${shArrow('quantity')}</th>
+      <th class="sh-sortable num" onclick="shSort('noOfOrders')">${t('# Orders')}${shArrow('noOfOrders')}</th>
+    </tr></thead>
+    <tbody>${rows.map(row => `<tr>
+      <td><strong>${row.itemNo || '—'}</strong></td>
+      <td>${row.description || '—'}</td>
+      <td style="text-align:center">${row.variantCode || '<span style="opacity:0.35">—</span>'}</td>
+      <td class="num">${fmt(row.quantity)} ${row.unitOfMeasureCode || ''}</td>
+      <td class="num">${row.noOfOrders ?? 0}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function shRefresh() {
+  const fromDate = document.getElementById('sh-from-date')?.value;
+  const toDate = document.getElementById('sh-to-date')?.value;
+  const v = shValidateDates(fromDate, toDate);
+  if (!v.valid) { toast(v.error, 'error'); return; }
+  document.getElementById('sales-history-content').dataset.loaded = '';
+  loadSalesHistory(fromDate, toDate);
+}
+
+async function loadSalesHistory(fromDate = null, toDate = null) {
+  const defaults = shGetDefaultDates();
+  fromDate = fromDate || document.getElementById('sh-from-date')?.value || defaults.from;
+  toDate   = toDate   || document.getElementById('sh-to-date')?.value   || defaults.to;
+
   const el = document.getElementById('sales-history-content');
   el.innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading sales history...')}</span></div>`;
   el.dataset.loaded = 'true';
-  
+
   try {
-    // TODO: Implement sales history loading based on requirements
-    // Placeholder for now - will be implemented with user requirements
-    
-    // const result = await cePost(selectedCompany.id, {
-    //   specversion: '1.0',
-    //   type: 'Data.Records.Get',
-    //   source: 'BC Portal',
-    //   data: JSON.stringify({
-    //     tableName: 'Sales Invoice Header',  // or relevant table
-    //     filters: [{ fieldName: 'Sell-to Customer No.', value: activeCustomer.no }],
-    //     skip,
-    //     take
-    //   })
-    // });
-    
-    // For now, show empty state
-    el.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><p>' + t('No sales history') + '</p></div>';
+    const result = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Customer.SalesHistory.Get',
+      source: 'BC Portal',
+      subject: selectedCustomer.number,
+      data: JSON.stringify({ fromDate, toDate })
+    });
+
+    if (result.status === 'Error') {
+      const msg = result.error || 'Unknown error';
+      el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${t('Error loading sales history')}</p></div>`;
+      toast(t('Failed to load sales history: {0}').replace('{0}', msg), 'error');
+      return;
+    }
+
+    salesHistoryData = result;
+    shRenderTable(result, fromDate, toDate);
   } catch (error) {
     console.error('Error loading sales history:', error);
     const errorDetails = error.stack || error.message;
-    el.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠</div><p>Error loading sales history</p></div>';
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space:pre-wrap;text-align:left;font-size:0.75rem">${errorDetails}</p></div>`;
     toast('Failed to load sales history:\n' + errorDetails, 'error');
   }
 }
