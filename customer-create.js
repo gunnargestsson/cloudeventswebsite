@@ -667,6 +667,34 @@ function setupCustomerEventListeners() {
         indicator.title = '';
       }
     });
+
+    // After local validation passes, check BC for an existing customer on blur
+    regNoInput.addEventListener('blur', async function() {
+      const regNo = this.value;
+      const indicator = document.getElementById('kennitala-indicator');
+
+      // Only run if local check-digit validation already passed
+      if (regNo.length !== 10 || !validateIcelandicKennitala(regNo).valid) return;
+
+      indicator.className = 'validation-indicator checking';
+      indicator.title = tCustomer('Checking...');
+
+      const duplicateCheck = await checkCustomerExists(regNo);
+      if (duplicateCheck.exists) {
+        indicator.className = 'validation-indicator invalid';
+        indicator.title = tCustomer(
+          'A customer with Registration No. {0} already exists (Customer No. {1}: {2})',
+          regNo, duplicateCheck.customerNo, duplicateCheck.customerName
+        );
+        toast(tCustomer(
+          'A customer with Registration No. {0} already exists (Customer No. {1}: {2})',
+          regNo, duplicateCheck.customerNo, duplicateCheck.customerName
+        ), 'error');
+      } else {
+        indicator.className = 'validation-indicator valid';
+        indicator.title = '';
+      }
+    });
   }
   
   // Post Code auto-population

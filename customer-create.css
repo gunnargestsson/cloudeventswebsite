@@ -140,6 +140,20 @@
   content: '✗';
 }
 
+.validation-indicator.checking {
+  color: var(--text-dim);
+}
+
+.validation-indicator.checking::after {
+  content: '…';
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 .validation-indicator.invalid[title]:hover::before {
   content: attr(title);
   position: absolute;

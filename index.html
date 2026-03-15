@@ -867,7 +867,9 @@ const UI_STRINGS = [
   'Customer Posting Group', 'Gen. Bus. Posting Group', 'VAT Bus. Posting Group',
   'Payment Terms Code', 'Payment Method Code',
   'Currency Code', 'Language Code', 'Salesperson Code', 'Location Code',
-  'Credit Limit (LCY)', 'Image'
+  'Credit Limit (LCY)', 'Image',
+  'No ledger entries in the selected period.',
+  'No documents in the selected period.'
 ];
 
 // Fallback names used only when the Language table lookup fails
@@ -1271,6 +1273,9 @@ async function selectCustomer(id) {
       else if (selectedCustomer.locationCode) { locEl.textContent = selectedCustomer.locationCode; locWrap.style.display = ''; }
     }).catch(() => { locEl.textContent = selectedCustomer.locationCode; locWrap.style.display = ''; });
   }
+  const _dd = shGetDefaultDates();
+  ledgerFromDate = _dd.from; ledgerToDate = _dd.to;
+  docsFromDate   = _dd.from; docsToDate   = _dd.to;
   show('view-detail');
   switchTab('ledger');
   loadLedger();
@@ -1302,6 +1307,11 @@ function switchTab(tab) {
 let salesHistoryData = null;
 let salesHistorySortCol = 'quantity';
 let salesHistorySortDir = -1; // -1 = desc, 1 = asc
+// Date filter state for Ledger Entries and Documents — reset per customer
+let ledgerFromDate = null;
+let ledgerToDate   = null;
+let docsFromDate   = null;
+let docsToDate     = null;
 
 function shGetDefaultDates() {
   const to = new Date();
@@ -1442,23 +1452,50 @@ async function loadSalesHistory(fromDate = null, toDate = null) {
 }
 
 // ---- LEDGER ----
+function buildLedgerFilterBar() {
+  return `<div class="sales-history-filters">
+    <div class="date-filter-group">
+      <span class="date-filter-label">${t('From')}</span>
+      <input class="date-filter-input" type="date" id="ledger-from-date" value="${ledgerFromDate || ''}">
+    </div>
+    <div class="date-filter-group">
+      <span class="date-filter-label">${t('To')}</span>
+      <input class="date-filter-input" type="date" id="ledger-to-date" value="${ledgerToDate || ''}">
+    </div>
+    <button class="btn-refresh" onclick="ledgerRefresh()">${t('Refresh')}</button>
+  </div>`;
+}
+
+function ledgerRefresh() {
+  const fromDate = document.getElementById('ledger-from-date')?.value || null;
+  const toDate   = document.getElementById('ledger-to-date')?.value   || null;
+  const v = shValidateDates(fromDate, toDate);
+  if (!v.valid) { toast(v.error, 'error'); return; }
+  ledgerFromDate = fromDate;
+  ledgerToDate   = toDate;
+  loadLedger(0);
+}
+
 async function loadLedger(skip = 0) {
   const take = pageSize();
   const el = document.getElementById('ledger-content');
+  const filterBar = buildLedgerFilterBar();
   el.innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading ledger entries...')}</span></div>`;
   try {
+    const startDateTime = ledgerFromDate ? `${ledgerFromDate}T00:00:00Z` : null;
+    const endDateTime   = ledgerToDate   ? `${ledgerToDate}T23:59:59Z`   : null;
+    const payload = {
+      tableName: 'Cust. Ledger Entry',
+      fieldNumbers: [4, 5, 6, 7, 13, 14, 36],
+      tableView: `WHERE(Customer No.=CONST(${selectedCustomer.number}))`,
+      skip, take
+    };
+    if (startDateTime) payload.startDateTime = startDateTime;
+    if (endDateTime)   payload.endDateTime   = endDateTime;
     const [res, meta] = await Promise.all([
       cePost(selectedCompany.id, {
-        specversion: '1.0',
-        type: 'Data.Records.Get',
-        source: 'BC Portal',
-        data: JSON.stringify({
-          tableName: 'Cust. Ledger Entry',
-          fieldNumbers: [4, 5, 6, 7, 13, 14, 36],
-          tableView: `WHERE(Customer No.=CONST(${selectedCustomer.number}))`,
-          skip,
-          take
-        })
+        specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+        data: JSON.stringify(payload)
       }),
       getFieldMeta('Cust. Ledger Entry', [1, 4, 5, 6, 7, 13, 14, 36])
     ]);
@@ -1466,9 +1503,12 @@ async function loadLedger(skip = 0) {
     meta.forEach(f => { cap[f.id] = f.caption; });
     const rows = res.result || [];
     const total = res.noOfRecords || 0;
-    if (!rows.length) { el.innerHTML='<div class="empty-state"><div class="empty-icon">📒</div><p>' + t('No ledger entries') + '</p></div>'; return; }
+    if (!rows.length) {
+      el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">📒</div><p>${t('No ledger entries')}</p><p class="empty-sub">${t('No ledger entries in the selected period.')}</p></div>`;
+      return;
+    }
     rows.sort((a,b) => parseInt((b.primaryKey||{}).EntryNo_||0) - parseInt((a.primaryKey||{}).EntryNo_||0));
-    el.innerHTML = `<div class="table-wrap"><table>
+    el.innerHTML = filterBar + `<div class="table-wrap"><table>
       <thead><tr><th>${cap[1]||'Entry No.'}</th><th>${cap[4]||'Date'}</th><th>${cap[5]||'Doc Type'}</th><th>${cap[6]||'Doc No.'}</th><th>${cap[7]||'Description'}</th><th class="num">${cap[13]||'Amount'}</th><th class="num">${cap[14]||'Remaining'}</th><th>${cap[36]||'Status'}</th></tr></thead>
       <tbody>${rows.map(rec => {
         const f = rec.fields || {}; const pk = rec.primaryKey || {};
@@ -1486,31 +1526,63 @@ async function loadLedger(skip = 0) {
     </table></div>
     <div id="ledger-pagination"></div>`;
     paginate('ledger-pagination', total, skip, take, 'loadLedger');
-  } catch(e) { 
+  } catch(e) {
     const errorDetails = e.stack || e.message;
-    el.innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`; 
-    toast(errorDetails,'error'); 
+    el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`;
+    toast(errorDetails,'error');
   }
 }
 
 // ---- DOCUMENTS ----
+function buildDocsFilterBar() {
+  return `<div class="sales-history-filters">
+    <div class="date-filter-group">
+      <span class="date-filter-label">${t('From')}</span>
+      <input class="date-filter-input" type="date" id="docs-from-date" value="${docsFromDate || ''}">
+    </div>
+    <div class="date-filter-group">
+      <span class="date-filter-label">${t('To')}</span>
+      <input class="date-filter-input" type="date" id="docs-to-date" value="${docsToDate || ''}">
+    </div>
+    <button class="btn-refresh" onclick="docsRefresh()">${t('Refresh')}</button>
+  </div>`;
+}
+
+function docsRefresh() {
+  const fromDate = document.getElementById('docs-from-date')?.value || null;
+  const toDate   = document.getElementById('docs-to-date')?.value   || null;
+  const v = shValidateDates(fromDate, toDate);
+  if (!v.valid) { toast(v.error, 'error'); return; }
+  docsFromDate = fromDate;
+  docsToDate   = toDate;
+  loadDocuments();
+}
+
 async function loadDocuments() {
   const take = pageSize();
   const el = document.getElementById('documents-content');
+  const filterBar = buildDocsFilterBar();
   el.innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading documents...')}</span></div>`;
   try {
+    const startDateTime = docsFromDate ? `${docsFromDate}T00:00:00Z` : null;
+    const endDateTime   = docsToDate   ? `${docsToDate}T23:59:59Z`   : null;
+    const addDates = (payload) => {
+      if (startDateTime) payload.startDateTime = startDateTime;
+      if (endDateTime)   payload.endDateTime   = endDateTime;
+      return payload;
+    };
     const [ordRes, invRes, crmRes, metaOrd, metaInv] = await Promise.all([
       cePost(selectedCompany.id, {
         specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
-        data: JSON.stringify({ tableName: 'Sales Header', fieldNumbers: [19, 20, 61, 120, 5790], tableView: `WHERE(Document Type=CONST(Order),Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
+        data: JSON.stringify(addDates({ tableName: 'Sales Header', fieldNumbers: [19, 20, 61, 120, 5790], tableView: `WHERE(Document Type=CONST(Order),Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take }))
       }).catch(() => ({ result: [] })),
       cePost(selectedCompany.id, {
         specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
-        data: JSON.stringify({ tableName: 'Sales Invoice Header', fieldNumbers: [20, 24, 61], tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
+        data: JSON.stringify(addDates({ tableName: 'Sales Invoice Header', fieldNumbers: [20, 24, 61], tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take }))
       }).catch(() => ({ result: [] })),
       cePost(selectedCompany.id, {
         specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
-        data: JSON.stringify({ tableName: 'Sales Cr.Memo Header', fieldNumbers: [20, 24, 61], tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take })
+        data: JSON.stringify(addDates({ tableName: 'Sales Cr.Memo Header', fieldNumbers: [20, 24, 61], tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take }))
       }).catch(() => ({ result: [] })),
       getFieldMeta('Sales Header', [19, 20, 61, 120, 5790]),
       getFieldMeta('Sales Invoice Header', [20, 24, 61])
@@ -1543,9 +1615,12 @@ async function loadDocuments() {
     }));
     const docs = [...orders, ...invoices, ...creditMemos]
       .sort((a,b) => new Date(b._postingDate||b._orderDate||0) - new Date(a._postingDate||a._orderDate||0));
-    if (!docs.length) { el.innerHTML=`<div class="empty-state"><div class="empty-icon">📄</div><p>${t('No documents found')}</p></div>`; return; }
+    if (!docs.length) {
+      el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">📄</div><p>${t('No documents found')}</p><p class="empty-sub">${t('No documents in the selected period.')}</p></div>`;
+      return;
+    }
     const typeIcon = { Order: '📦', Invoice: '🧾', 'Credit Memo': '📝' };
-    el.innerHTML = `<div class="table-wrap"><table>
+    el.innerHTML = filterBar + `<div class="table-wrap"><table>
       <thead><tr><th>${t('Type')}</th><th>${t('No.')}</th><th>${capOrd[19]||'Order Date'}</th><th>${capInv[20]||'Posting Date'}</th><th>${capInv[24]||'Due Date'}</th><th class="num">${capInv[61]||'Total incl. VAT'}</th><th>${capOrd[120]||'Status'}</th><th class="action-col"></th></tr></thead>
       <tbody>${docs.map(d=>{
         let actionBtn = '';
@@ -1568,9 +1643,9 @@ async function loadDocuments() {
       </tr>`;
       }).join('')}</tbody>
     </table></div>`;
-  } catch(e) { 
+  } catch(e) {
     const errorDetails = e.stack || e.message;
-    el.innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`; 
+    el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`;
     toast(errorDetails,'error');
   }
 }
