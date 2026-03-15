@@ -1055,9 +1055,12 @@ async function onLangChange(value) {
   applyUiTranslations();
   const detail = document.getElementById('view-detail');
   if (detail.style.display !== 'none') {
-    // Reload both data tabs (captions are LCID-keyed in fieldMetaCache)
+    // Reload all data tabs (captions are LCID-keyed in fieldMetaCache)
     loadLedger();
     loadDocuments();
+    if (document.getElementById('sales-history-content')?.dataset.loaded) {
+      loadSalesHistory();
+    }
     // Re-render items in place — no API needed, and avoids clearing the cart
     filterItems();
     updateSummary();
