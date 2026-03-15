@@ -339,10 +339,10 @@ async function loadCustomerFieldCaptions() {
     });
     
     if (result.result) {
-      // Store captions for each field
+      // Store captions keyed by jsonName (matches CUSTOMER_FIELD_MAPPING values)
       const fieldCaptions = {};
       result.result.forEach(field => {
-        fieldCaptions[field.fieldName] = field.fieldCaption || field.fieldName;
+        fieldCaptions[field.jsonName] = field.caption || field.name;
       });
       
       // Apply captions to form labels

@@ -645,55 +645,69 @@ All UI text (buttons, messages, section headers, placeholders) is translated via
 - **Auto-Creation**: Missing translations are automatically created as blank records for users to fill in BC
 
 ### Field Caption Mapping
+
+The map values must be the **`jsonName`** from the `Help.Fields.Get` response — the normalized JSON key used in all API payloads. Do **not** use the original BC field `name` (which may contain spaces/punctuation).
+
 ```javascript
-// Map HTML element IDs to BC field numbers for Customer table (18)
+// Map HTML element IDs to BC field jsonNames for Customer table (18)
+// Values are jsonName from Help.Fields.Get (field.jsonName), NOT field.name
 const FIELD_MAPPING = {
-  'registrationNumber': 'RegistrationNumber',
-  'customerNo': 'No.',
-  'name': 'Name',
-  'searchName': 'Search Name',
-  'address': 'Address',
-  'address2': 'Address 2',
-  'postCode': 'Post Code',
-  'city': 'City',
-  'countryRegion': 'Country/Region Code',
-  'mobilePhone': 'Mobile Phone No.',  // BC field: MobilePhoneNo_
-  'email': 'E-Mail',
-  'homePage': 'Home Page',
-  'customerPostingGroup': 'Customer Posting Group',
-  'genBusPostingGroup': 'Gen. Bus. Posting Group',  // BC field: Gen_Bus_PostingGroup
-  'vatBusPostingGroup': 'VAT Bus. Posting Group',  // BC field: VATBus_PostingGroup
-  'paymentTerms': 'Payment Terms Code',
-  'currency': 'Currency Code',
-  'paymentMethod': 'Payment Method Code',
-  'salesperson': 'Salesperson Code',
-  'location': 'Location Code',
-  'language': 'Language Code',
-  'creditLimit': 'Credit Limit (LCY)',  // BC field: CreditLimitLCY
-  'blocked': 'Blocked',
-  'vatRegistrationNo': 'VAT Registration No.'
+  'registrationNumber': 'RegistrationNumber',  // name: "Registration Number"
+  'customerNo':         'No_',                 // name: "No."
+  'name':               'Name',
+  'searchName':         'SearchName',          // name: "Search Name"
+  'address':            'Address',
+  'address2':           'Address2',            // name: "Address 2"
+  'postCode':           'PostCode',            // name: "Post Code"
+  'city':               'City',
+  'countryRegion':      'Country_RegionCode',  // name: "Country/Region Code"
+  'mobilePhone':        'MobilePhoneNo_',      // name: "Mobile Phone No."
+  'email':              'EMail',               // name: "E-Mail"
+  'homePage':           'HomePage',            // name: "Home Page"
+  'customerPostingGroup': 'CustomerPostingGroup', // name: "Customer Posting Group"
+  'genBusPostingGroup': 'Gen_Bus_PostingGroup',   // name: "Gen. Bus. Posting Group"
+  'vatBusPostingGroup': 'VATBus_PostingGroup',    // name: "VAT Bus. Posting Group"
+  'paymentTerms':       'PaymentTermsCode',    // name: "Payment Terms Code"
+  'currency':           'CurrencyCode',        // name: "Currency Code"
+  'paymentMethod':      'PaymentMethodCode',   // name: "Payment Method Code"
+  'salesperson':        'SalespersonCode',     // name: "Salesperson Code"
+  'location':           'LocationCode',        // name: "Location Code"
+  'language':           'LanguageCode',        // name: "Language Code"
+  'creditLimit':        'CreditLimitLCY',      // name: "Credit Limit (LCY)"
+  'blocked':            'Blocked',
+  'vatRegistrationNo':  'VATRegistrationNo_'   // name: "VAT Registration No."
 };
 ```
 
 ### Load Field Captions
+
+`Help.Fields.Get` returns an array under `result`. Each element has:
+- `jsonName` — the normalized JSON key (matches `FIELD_MAPPING` values and all `Data.Records.*` payloads)
+- `caption` — the localized display label (translated to the requested `lcid`)
+- `name` — the original BC field name with spaces/punctuation (used only in `tableView` WHERE clauses)
+
 ```javascript
 async function loadFieldCaptions() {
   try {
-    const result = await cePost('Help.Fields.Get', {
-      TableNo: 18
+    const result = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Help.Fields.Get',
+      source: 'BC Portal',
+      data: JSON.stringify({ tableName: 'Customer' })
+      // lcid is added automatically by cePost() from selectedLcid
     });
-    
-    if (result.Fields) {
-      // Store captions for each field
+
+    if (result.result) {
+      // Key captions by jsonName — matches FIELD_MAPPING values
       const fieldCaptions = {};
-      result.Fields.forEach(field => {
-        fieldCaptions[field.FieldName] = field.FieldCaption || field.FieldName;
+      result.result.forEach(field => {
+        fieldCaptions[field.jsonName] = field.caption || field.name;
       });
-      
+
       // Apply captions to form labels
       Object.keys(FIELD_MAPPING).forEach(elementId => {
-        const fieldName = FIELD_MAPPING[elementId];
-        const caption = fieldCaptions[fieldName];
+        const jsonName = FIELD_MAPPING[elementId];
+        const caption = fieldCaptions[jsonName];
         if (caption) {
           const label = document.querySelector(`label[for="${elementId}"]`);
           if (label) {
@@ -703,13 +717,6 @@ async function loadFieldCaptions() {
           }
         }
       });
-      
-      // Update form heading if "Customer" caption is available
-      const customerCaption = fieldCaptions['Name'] || 'Customer';
-      const heading = document.querySelector('#customerCreateForm h2');
-      if (heading) {
-        heading.textContent = `Create New ${customerCaption.replace(' Name', '')}`;
-      }
     }
   } catch (error) {
     console.error('Error loading field captions:', error);
