@@ -6,13 +6,16 @@ description: >
   Cloud Events, call any Data / Help / Customer / Item / Sales message type, implement
   sync or async task submission, handle pagination, read/write record data, handle
   field name normalization, or convert enum values. Also covers: dynamic schema
-  discovery with Help.Tables.Get and Help.Fields.Get, selecting only needed fields
-  with fieldNumbers, tableView filtering and sorting in BC AL syntax (WHERE/FILTER/
-  CONST/SORTING), UI translations via the Cloud Event Translation table, field metadata
-  caching, lookup table patterns, duplicate checking, webhooks, special field
-  conversions (BLOB, Media, Dimension Set, Currency Code), creating sales orders
-  via the generic Data.Records.Set workflow, and using the BC Metadata MCP server
-  at https://dynamics.is/api/mcp to look up tables, fields, and permissions.
+  discovery via the BC Metadata MCP server at https://dynamics.is/api/mcp (tools:
+  list_tables, get_table_fields, get_table_info, list_companies, list_message_types,
+  get_records, search_customers, search_items, list_translations, set_translations;
+  resources: bc://tables, bc://tables/{name}, bc://message-types, bc://companies;
+  prompts: customer_lookup_pattern, item_lookup_pattern, sales_order_creation_workflow,
+  describe_table, find_tables_for_entity, data_model_overview), selecting only needed
+  fields with fieldNumbers, tableView filtering and sorting in BC AL syntax (WHERE/
+  FILTER/CONST/SORTING), UI translations via the Cloud Event Translation table, field
+  metadata caching, webhooks, special field conversions (BLOB, Media, Dimension Set,
+  Currency Code), and creating sales orders via the generic Data.Records.Set workflow.
 ---
 
 # Cloud Events BC Integration Skill
@@ -1097,96 +1100,19 @@ Operators: `CONST` (exact), `FILTER` (pattern/range), `>` `<` `>=` `<=`, `&` (AN
 
 ---
 
-## 11a. Searching for Customers and Items (Lookup Pattern)
+### 11a. Customer and item lookup patterns
 
-> **CRITICAL — always use the BC AL field name in `tableView`, never the JSON key.**
-> `tableView` is parsed by BC using the original AL field names (e.g. `No.`, `Description`).
-> JSON keys (e.g. `No_`, `Description`) are only used inside the `fields` and `primaryKey` objects
-> of `Data.Records.Get` / `Data.Records.Set` responses and requests.
-> Obtain the correct AL name from `Help.Fields.Get` → `name` property.
+To look up a customer by number or name, send `Data.Records.Get` with `tableName: "Customer"`
+and a `tableView` filter. To look up an item, use `tableName: "Item"`.
 
-When searching for a customer or item by a free-text query, **never combine multiple fields in one `FILTER` with `|`**. BC evaluates `WHERE(A=FILTER(...)|B=FILTER(...))` as an OR on field A's values, not across fields. Search one field at a time and fall back progressively:
+For a ready-to-use, instance-accurate guide with live field names for *this* BC instance,
+invoke the MCP prompts:
 
-### Customer lookup — three-step pattern
+- `customer_lookup_pattern` — returns filter examples and the full Customer field table
+- `item_lookup_pattern` — returns filter examples and the full Item field table
 
-BC AL field names for Customer: `No.` · `Name` · `Address` · `City` · `Blocked`
-
-```javascript
-async function lookupCustomer(companyId, query, token) {
-  const q = sanitizedQuery; // strip injection chars
-  const FIELDS = [1, 2, 5, 7, 21, 22]; // No., Name, Address, City, ...
-
-  // Step 1: case-insensitive name search  — use BC field name "Name"
-  let res = await cePost(companyId, {
-    type: 'Data.Records.Get', subject: 'Customer',
-    data: JSON.stringify({ tableView: `WHERE(Name=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
-  }, token);
-  if (res.result?.length) return res.result;
-
-  // Step 2: customer No. search  — BC field name is "No." (with period)
-  res = await cePost(companyId, {
-    type: 'Data.Records.Get', subject: 'Customer',
-    data: JSON.stringify({ tableView: `WHERE(No.=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
-  }, token);
-  if (res.result?.length) return res.result;
-
-  // Step 3: client-side fallback — all non-blocked customers
-  //   BC field name for blocked status is "Blocked"; blank CONST = not blocked
-  const all = await cePost(companyId, {
-    type: 'Data.Records.Get', subject: 'Customer',
-    data: JSON.stringify({ tableView: 'WHERE(Blocked=CONST( ))', fieldNumbers: FIELDS, take: 200 })
-  }, token);
-  const lq = q.toLowerCase();
-  return (all.result || [])
-    .filter(r => Object.values(r.fields || {}).some(v => String(v).toLowerCase().includes(lq)))
-    .slice(0, 5);
-}
-```
-
-### Item lookup — same three-step pattern
-
-BC AL field names for Item: `No.` · `Description` · `Base Unit of Measure` · `Unit Price` · `Blocked`
-
-```javascript
-async function lookupItem(companyId, query, token) {
-  const q = sanitizedQuery;
-  const FIELDS = [1, 3, 30, 8]; // No., Description, Unit of Measure, Unit Price
-
-  // Step 1: description search  — BC field name is "Description"
-  let res = await cePost(companyId, {
-    type: 'Data.Records.Get', subject: 'Item',
-    data: JSON.stringify({ tableView: `WHERE(Description=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
-  }, token);
-  if (res.result?.length) return res.result;
-
-  // Step 2: item No. search  — BC field name is "No." (with period)
-  res = await cePost(companyId, {
-    type: 'Data.Records.Get', subject: 'Item',
-    data: JSON.stringify({ tableView: `WHERE(No.=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
-  }, token);
-  if (res.result?.length) return res.result;
-
-  // Step 3: client-side fallback — all non-blocked items
-  //   BC field name is "Blocked"; false = not blocked
-  const all = await cePost(companyId, {
-    type: 'Data.Records.Get', subject: 'Item',
-    data: JSON.stringify({ tableView: 'WHERE(Blocked=CONST(false))', fieldNumbers: FIELDS, take: 200 })
-  }, token);
-  const lq = q.toLowerCase();
-  return (all.result || [])
-    .filter(r => Object.values(r.fields || {}).some(v => String(v).toLowerCase().includes(lq)))
-    .slice(0, 5);
-}
-```
-
-**Key rules:**
-- **`tableView` always uses BC AL field names** (from `Help.Fields.Get` → `name`). Never use JSON keys here.
-- Always use `FILTER(@*query*)` (with `@` prefix) for case-insensitive substring matching.
-- Search **one field per request** — do not combine multiple fields with `|` across fields in one `WHERE`.
-- The `|` operator in `WHERE(A=FILTER(x|y))` means OR on values of field A, not OR across different fields.
-- The client-side fallback catches partial matches and alternate spellings that the BC filter misses.
-- For customers, `WHERE(Blocked=CONST( ))` filters out blocked customers (blank enum = not blocked).
-- For items, `WHERE(Blocked=CONST(false))` filters out blocked items.
+Both prompts fetch live field metadata and substitute it into the guide, so the field
+numbers and `jsonName` values are guaranteed accurate for the connected BC instance.
 
 ---
 
@@ -1196,47 +1122,16 @@ There is no dedicated "create order" message type. Use `Data.Records.Set` for al
 
 ### Step 1 — Create Sales Header
 
-```json
-{
-  "type": "Data.Records.Set",
-  "subject": "Sales Header",
-  "data": "{\"data\":[{\"primaryKey\":{\"DocumentType\":\"Order\",\"No_\":\"SO-12345\"},\"fields\":{\"SelltoCustomerNo_\":\"C00010\",\"OrderDate\":\"2026-03-09\"}}]}"
-}
-```
-
 ### Step 2 — Add Sales Lines (one call per line)
-
-```json
-{
-  "type": "Data.Records.Set",
-  "subject": "Sales Line",
-  "data": "{\"data\":[{\"primaryKey\":{\"DocumentType\":\"Order\",\"DocumentNo_\":\"SO-12345\",\"LineNo_\":10000},\"fields\":{\"Type\":\"Item\",\"No_\":\"ITEM-001\",\"Quantity\":\"5\",\"UnitPrice\":\"100.00\"}}]}"
-}
-```
 
 Increment `LineNo_` by 10000 for each additional line.
 
 ### Step 3 — Release
 
-```json
-{ "type": "Sales.Order.Release", "subject": "SO-12345" }
-```
-
-Key field name reference:
-
-| BC field | JSON key |
-|---|---|
-| `Document Type` | `DocumentType` |
-| `No.` | `No_` |
-| `Sell-to Customer No.` | `SelltoCustomerNo_` |
-| `Order Date` | `OrderDate` |
-| `External Document No.` | `ExternalDocumentNo_` |
-| `Document No.` (line) | `DocumentNo_` |
-| `Line No.` (line) | `LineNo_` |
-| `Type` (line) | `Type` |
-| `No.` (line) | `No_` |
-| `Quantity` (line) | `Quantity` |
-| `Unit Price` (line) | `UnitPrice` |
+For a ready-to-use workflow description pre-populated with the live `jsonName` values and
+field table for *this* BC instance, invoke the MCP prompt `sales_order_creation_workflow`.
+It calls `get_table_fields` for both `Sales Header` and `Sales Line` and injects the results
+into a step-by-step guide.
 
 ---
 
@@ -1355,109 +1250,44 @@ const fields = await cePost(companyId, {
 
 ---
 
-## 17. Dynamic Schema Discovery — Know Before You Code
+## 17. Dynamic Schema Discovery
 
-Before hard-coding field numbers or table names, use the metadata message types to
-discover exactly what is available in the target BC environment. This pattern is
-especially important for multi-tenant integrations where different BC deployments may
-have extensions that add extra fields or tables.
+The preferred discovery path is the **MCP server** (see Requirement 8), which wraps these
+calls and exposes results as Tools and Resources. The raw `Help.*` Cloud Events calls
+documented here remain valid for production integrations where MCP is not available.
 
-### 17.1 Discover Tables
+### 17.1 Listing all tables
 
-Call `Help.Tables.Get` once at startup (or on company switch) to build a local table
-index. Cache the result — it rarely changes.
+Use the MCP server tool `list_tables` or read the `bc://tables` resource for a live,
+instance-accurate table catalogue. Both return `{ id, name, caption }` for every table in
+the targeted BC company.
 
-```javascript
-// Fetch all tables, captions in user's language
-const tablesRes = await cePost(companyId, {
-  type: 'Help.Tables.Get',
-  lcid: userLcid   // e.g. 1033
-});
-// tablesRes.result = [{ id: 18, name: "Customer", caption: "Customer" }, ...]
+To narrow the result:
+- Pass `filter` (substring match on name/caption) to reduce response size.
+- Pass `take` / `skip` for paging (default: first 200 tables).
 
-// Build lookup maps
-const tableByName   = Object.fromEntries(tablesRes.result.map(t => [t.name, t]));
-const tableById     = Object.fromEntries(tablesRes.result.map(t => [t.id,   t]));
-const tableByCaption = Object.fromEntries(tablesRes.result.map(t => [t.caption, t]));
+> The static snapshot file `bc-metadata-all-tables-is.md` previously referenced here is
+> superseded by the MCP server and should not be consulted for field numbers or table IDs.
 
-// Resolve a user-chosen table
-const customerTable = tableByName['Customer'];   // { id: 18, name: "Customer", caption: "Customer" }
-const tableNumber   = customerTable.id;          // 18 — use as tableNumber in Data.Records.Get
-```
+### 17.2 Fields for a specific table
 
-`bc-metadata-all-tables-is.md` (in the same folder as this SKILL.md) is a **complete reference** of all BC tables and their fields for this environment, including BC AL field names (`name`), JSON keys (`jsonName`), types, and captions. Consult it to look up exact field names and JSON keys before writing any `tableView`, `fieldNumbers`, `primaryKey`, or `fields` values. Always prefer a live `Help.Tables.Get` / `Help.Fields.Get` call at runtime, but use the reference file during development and code generation.
+Use the MCP tool `get_table_fields` (or resource `bc://tables/{tableName}`) to retrieve all
+fields for a table. Each field entry includes:
 
-**Key tables for common integration work:**
+| Property | Description |
+|---|---|
+| `number` | BC field number (use in `fieldNumbers` arrays) |
+| `name` | AL field name |
+| `jsonName` | The JSON key used in Cloud Events `fields` payloads |
+| `type` | BC data type |
+| `isPartOfPrimaryKey` | Boolean |
+| `enum` | Present for Option/Enum fields; lists all captions and values |
 
-| Table No. | Name | Common Use |
-|---|---|---|
-| 3 | Payment Terms | Lookup dropdown |
-| 4 | Currency | Lookup dropdown |
-| 8 | Language | UI language picker + customer language field |
-| 9 | Country/Region | Address lookups |
-| 13 | Salesperson/Purchaser | Dropdown |
-| 14 | Location | Dropdown |
-| 18 | Customer | Master data |
-| 21 | Cust. Ledger Entry | Customer ledger |
-| 23 | Vendor | Master data |
-| 27 | Item | Product catalog |
-| 32 | Item Ledger Entry | Inventory movements |
-| 36 | Sales Header | Sales orders, invoices |
-| 37 | Sales Line | Sales order lines |
-| 92 | Customer Posting Group | Posting setup |
-| 110 | Sales Shipment Header | Posted shipments |
-| 112 | Sales Invoice Header | Posted invoices |
-| 114 | Sales Cr.Memo Header | Posted credit memos |
-| 225 | Post Code | Address auto-fill |
-| 250 | Gen. Business Posting Group | Posting setup |
-| 289 | Payment Method | Lookup dropdown |
-| 323 | VAT Business Posting Group | Tax setup |
+To get field numbers for the most commonly needed fields, call:
+`get_table_fields({ table: "Customer" })` (or "Item", "Sales Header", etc.)
 
-### 17.2 Discover Fields
-
-Call `Help.Fields.Get` to get the complete field catalogue for a table including:
-- Field number (`id`) — use as entries in the `fieldNumbers` array
-- `name` — original BC field name — use in `tableView` WHERE clauses
-- `jsonName` — normalized JSON key — use in `Data.Records.Set` `fields` objects and to read from `Data.Records.Get` responses
-- `caption` — localised display label — use in UI only
-- `type` — `Text`, `Code`, `Decimal`, `Integer`, `Boolean`, `Date`, `DateTime`, `Option`, `GUID`, `Blob`, `Media`, `MediaSet`, etc.
-- `class` — `Normal` or `FlowField`
-- `isPartOfPrimaryKey` — PK fields go in `primaryKey`, not `fields`
-- `enum[]` — present when type is Option; lists AL names, captions, and ordinals
-
-```javascript
-// Get all fields for Customer table in user's language
-const fieldsRes = await cePost(companyId, {
-  type: 'Help.Fields.Get',
-  data: JSON.stringify({ tableName: 'Customer' }),
-  lcid: userLcid
-});
-
-// Build lookup: fieldNumber → field metadata
-const fieldMeta = Object.fromEntries(fieldsRes.result.map(f => [f.id, f]));
-
-// Look up a specific field
-const blockedField = fieldsRes.result.find(f => f.name === 'Blocked');
-// blockedField.jsonName  = "Blocked"
-// blockedField.enum      = [{ value: " ", caption: "…", ordinal: 0 }, …]
-
-// Build a list of only the fields you care about
-const CUSTOMER_FIELDS = [
-  2,   // Name
-  7,   // City
-  35,  // Country/Region Code
-  39,  // Blocked
-  59,  // Balance (LCY)  ← FlowField — only returned when fieldNumbers specified
-  102, // E-Mail
-  140, // Image
-];
-```
-
-**Never guess a `jsonName`** — always derive it from `Help.Fields.Get`. For example:
-- `"Credit Limit (LCY)"` → `jsonName: "CreditLimitLCY"`  (parentheses stripped)
-- `"No."` → `jsonName: "No_"`  (period replaced with underscore)
-- `"Country/Region Code"` → `jsonName: "Country_RegionCode"` (slash replaced, space stripped)
-- `"G/L Account No."` → `jsonName: "G_LAccountNo_"`
+There is no need to hard-code field number constants — the MCP server provides live,
+version-accurate values for the specific BC instance being integrated.
 
 ### 17.3 Field Metadata Caching Pattern
 
@@ -1490,16 +1320,9 @@ function clearFieldMetaCache() { Object.keys(fieldMetaCache).forEach(k => delete
 
 ### 17.4 Discover Available Message Types
 
-```javascript
-const typesRes = await cePost(companyId, { type: 'Help.MessageTypes.Get' });
-// typesRes.result = [
-//   { name: "Data.Records.Get", description: "…", messageDirection: "Outbound" },
-//   { name: "Customer.CreditLimit.Get", … },
-//   …
-// ]
-const typeNames = typesRes.result.map(t => t.name);
-const hasCustomType = typeNames.includes('MyExtension.Custom.Get');
-```
+Use the MCP tool `list_message_types` (or resource `bc://message-types`) to retrieve the
+full message catalogue for the targeted BC instance. Pass an optional `filter` string for
+substring matching. The underlying Cloud Events call is `Help.MessageTypes.Get`.
 
 ### 17.5 Check User Permissions Before Attempting Writes
 

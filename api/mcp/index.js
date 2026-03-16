@@ -16,6 +16,8 @@
  *   get_records        — Data.Records.Get — records from any table with filter/paging
  *   search_customers   — Data.Records.Get — customer lookup by name or number
  *   search_items       — Data.Records.Get — item lookup by description or number
+ *   list_translations  — Cloud Event Translation — list UI translations (filter by source/lcid)
+ *   set_translations   — Cloud Event Translation — upsert UI translation pairs
  *
  * Resources: bc://companies, bc://message-types, bc://tables, bc://tables/{name}
  * Prompts:   describe_table, find_tables_for_entity, data_model_overview,
