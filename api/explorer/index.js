@@ -100,7 +100,7 @@ module.exports = async function (context, req) {
     return;
   }
 
-  // ── Fetch original request payload (/requestdata) ────────────────────────
+  // ── Fetch original request payload (/requests) ────────────────────────────
   if (endpoint === "fetch-request") {
     const itemId = req.headers["x-bc-item-id"] || "";
     // Basic GUID-shape validation to prevent path injection
@@ -112,7 +112,7 @@ module.exports = async function (context, req) {
       const token = await getToken(tenantId, clientId, clientSecret);
       const auth  = `Bearer ${token}`;
       const basePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})`;
-      const result = await bcJson("GET", `${basePath}/requestdata(${itemId})`, auth, null);
+      const result = await bcJson("GET", `${basePath}/requests(${itemId})`, auth, null);
       context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) };
     } catch (e) {
       context.res = { status: 502, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: e.message }) };

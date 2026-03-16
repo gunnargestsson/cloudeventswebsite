@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BC Metadata Explorer · Origo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#080d14;--bg2:#0d1520;--bg3:#111c2a;--bg4:#162030;
+  --border:#1e2d3d;--border2:#243547;
+  --text:#e2eaf4;--text2:#8ba4bf;--text3:#4a6379;
+  --accent:#00d4ff;--accent2:#0096cc;
+  --green:#00ff88;--green2:#00cc6a;
+  --orange:#ff8c42;--red:#ff4d6d;--purple:#a78bfa;--yellow:#ffd60a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'JetBrains Mono',monospace;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.04) 2px,rgba(0,0,0,0.04) 4px);pointer-events:none;z-index:1000}
+header{padding:14px 26px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);background:var(--bg2);position:sticky;top:0;z-index:100}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;flex-shrink:0}
+.logo-icon{width:34px;height:34px;border-radius:9px;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.logo-icon img{width:100%;height:100%;object-fit:cover;display:block}
+.htitle{font-family:'Syne',sans-serif;font-weight:800;font-size:16px;color:#fff}
+.hsub{font-size:9px;color:var(--text3);letter-spacing:2px;text-transform:uppercase}
+.hsp{flex:1}
+.hpill{display:flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid var(--border2);background:var(--bg3);font-size:10px;color:var(--text2);text-decoration:none;transition:border-color .15s,color .15s;cursor:pointer}
+.hpill:hover{border-color:var(--accent2);color:var(--text)}
+.sd{width:6px;height:6px;border-radius:50%;background:var(--text3);transition:all .3s;flex-shrink:0}
+.sd.ok{background:var(--green);box-shadow:0 0 7px rgba(0,255,136,.6);animation:bk 2s infinite}
+.sd.err{background:var(--red);box-shadow:0 0 7px rgba(255,77,109,.6)}
+.sd.ld{background:var(--yellow);animation:bk .4s infinite}
+@keyframes bk{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* LAYOUT */
+.app{display:grid;grid-template-columns:280px 1fr;height:calc(100vh - 59px)}
+.sb{border-right:1px solid var(--border);background:var(--bg2);display:flex;flex-direction:column;overflow:hidden}
+.sb-cfg{padding:16px 14px;display:flex;flex-direction:column;gap:9px;border-bottom:1px solid var(--border)}
+.lbl{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);font-weight:600;margin-bottom:1px}
+.ci{background:var(--bg);border:1px solid var(--border);color:var(--text2);font-family:inherit;font-size:11px;padding:5px 9px;width:100%;outline:none;transition:all .15s}
+select.ci{cursor:pointer;appearance:auto}
+.ci:focus{border-color:var(--accent2);color:var(--text)}
+.ci::placeholder{color:var(--text3)}
+.btn-load{padding:8px;background:var(--accent);border:none;color:var(--bg);font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px;text-transform:uppercase;transition:all .15s;width:100%}
+.btn-load:hover:not(:disabled){background:#00eeff;box-shadow:0 0 18px rgba(0,212,255,.3)}
+.btn-load:disabled{background:var(--text3);cursor:not-allowed}
+
+/* TABLE LIST */
+.sb-search{padding:8px 10px;border-bottom:1px solid var(--border)}
+.sb-search input{background:var(--bg3);border:1px solid var(--border);color:var(--text2);font-family:inherit;font-size:11px;padding:5px 8px;width:100%;outline:none;transition:all .15s}
+.sb-search input:focus{border-color:var(--accent2)}
+.sb-search input::placeholder{color:var(--text3)}
+.sb-tables{flex:1;overflow-y:auto}
+.sb-tables::-webkit-scrollbar{width:3px}.sb-tables::-webkit-scrollbar-thumb{background:var(--border2)}
+.tbl-item{display:flex;align-items:center;gap:8px;width:100%;padding:7px 13px;background:none;border:none;cursor:pointer;color:var(--text2);font-family:inherit;font-size:11px;text-align:left;transition:all .15s;border-left:2px solid transparent}
+.tbl-item:hover{background:var(--bg3);color:var(--text);border-left-color:var(--border2)}
+.tbl-item.active{background:var(--bg4);color:var(--accent);border-left-color:var(--accent)}
+.tbl-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbl-no{font-size:9px;color:var(--text3);flex-shrink:0}
+.sb-count{padding:6px 13px;font-size:9px;color:var(--text3);border-bottom:1px solid var(--border)}
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:sp .6s linear infinite;flex-shrink:0}
+@keyframes sp{to{transform:rotate(360deg)}}
+.sb-load{padding:16px 14px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text3)}
+.sb-empty{padding:20px 14px;text-align:center;font-size:11px;color:var(--text3);line-height:1.7}
+
+/* MAIN */
+.main{display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+.mtop{padding:14px 20px 12px;border-bottom:1px solid var(--border);background:var(--bg2);display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.mtop-left{flex:1;min-width:0}
+.mtn{font-family:'Syne',sans-serif;font-size:19px;font-weight:700;color:#fff;letter-spacing:-.5px}
+.mtd{font-size:11px;color:var(--text2);margin-top:3px;line-height:1.5}
+.mtop-actions{display:flex;gap:7px;flex-shrink:0;align-items:center}
+.action-btn{padding:7px 13px;background:none;border:1px solid var(--border2);color:var(--text2);font-family:inherit;font-size:10px;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:5px;letter-spacing:.5px;text-transform:uppercase}
+.action-btn:hover:not(:disabled){border-color:var(--accent2);color:var(--accent)}
+.action-btn:disabled{opacity:.3;cursor:not-allowed}
+.action-btn.primary{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:700}
+.action-btn.primary:hover:not(:disabled){background:#00eeff}
+.mbody{flex:1;overflow-y:auto;padding:0}
+.mbody::-webkit-scrollbar{width:3px}.mbody::-webkit-scrollbar-thumb{background:var(--border2)}
+
+/* EMPTY STATE */
+.est{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text3);gap:9px;font-size:11px;text-align:center;line-height:1.6;padding:40px}
+.est svg{opacity:.1;margin-bottom:8px}
+
+/* STATS BAR */
+.stats-bar{display:flex;gap:16px;padding:8px 20px;border-bottom:1px solid var(--border);background:var(--bg2);flex-wrap:wrap}
+.stat{display:flex;align-items:center;gap:5px;font-size:9.5px}
+.stat .k{color:var(--text3)}.stat .v{color:var(--text);font-weight:600}
+.stat .v.ok{color:var(--green)}.stat .v.warn{color:var(--orange)}.stat .v.hi{color:var(--accent)}.stat .v.no{color:var(--red)}
+.stat-div{width:1px;background:var(--border2);align-self:stretch;margin:0 4px}
+
+/* FIELD TABLE */
+.field-section{padding:0}
+.section-lbl{padding:9px 20px 6px;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border);background:var(--bg2)}
+.ftable{width:100%;border-collapse:collapse;font-size:11px}
+.ftable thead{position:sticky;top:0;z-index:2}
+.ftable th{padding:7px 14px;text-align:left;font-size:8.5px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border);background:var(--bg3);white-space:nowrap}
+.ftable td{padding:6px 14px;border-bottom:1px solid rgba(30,45,61,.5);color:var(--text2);vertical-align:top}
+.ftable tr:hover td{background:var(--bg3)}
+.ftable .td-num{color:var(--text3);font-size:10px;width:48px}
+.ftable .td-name{color:var(--text);font-weight:500;width:180px}
+.ftable .td-json{color:var(--accent);width:180px;font-size:10.5px}
+.ftable .td-type{width:90px}.ftable .td-len{width:48px;text-align:right;color:var(--text3)}
+.ftable .td-class{width:72px}.ftable .td-pk{width:28px;text-align:center}
+.td-class .fc-flow{color:var(--purple);font-size:9.5px}.td-class .fc-norm{color:var(--text3);font-size:9.5px}
+.pk-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--orange)}
+.enum-wrap{display:flex;flex-wrap:wrap;gap:3px;max-width:260px}
+.enum-tag{font-size:8.5px;padding:1px 5px;background:var(--bg3);border:1px solid var(--border2);color:var(--text3)}
+.loading-row td{text-align:center;padding:20px;color:var(--text3)}
+
+/* DOWNLOAD MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.hidden{display:none}
+.modal-box{background:var(--bg2);border:1px solid var(--border2);width:100%;max-width:400px;padding:24px;display:flex;flex-direction:column;gap:14px}
+.modal-title{font-family:'Syne',sans-serif;font-size:15px;font-weight:700;color:#fff}
+.modal-sub{font-size:11px;color:var(--text2);line-height:1.6}
+.modal-opts{display:flex;flex-direction:column;gap:8px}
+.modal-opt{display:flex;align-items:flex-start;gap:9px;padding:10px 12px;border:1px solid var(--border2);cursor:pointer;transition:all .15s}
+.modal-opt:hover{border-color:var(--accent2);background:var(--bg3)}
+.modal-opt input{margin-top:1px;flex-shrink:0;accent-color:var(--accent)}
+.modal-opt-lbl{font-size:11px;color:var(--text);font-weight:600}
+.modal-opt-desc{font-size:9.5px;color:var(--text3);margin-top:2px;line-height:1.5}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end}
+.modal-btn{padding:8px 18px;border:1px solid var(--border2);color:var(--text2);background:none;font-family:inherit;font-size:11px;cursor:pointer;transition:all .15s}
+.modal-btn:hover{border-color:var(--accent2);color:var(--accent)}
+.modal-btn.ok{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:700}
+.modal-btn.ok:hover{background:#00eeff}
+.modal-progress{font-size:10px;color:var(--text3);display:flex;align-items:center;gap:6px}
+</style>
+</head>
+<body>
+<header>
+  <a class="logo" href="https://origo.is" target="_blank" rel="noopener noreferrer">
+    <div class="logo-icon"><img src="origo.jpeg" alt="Origo"></div>
+  </a>
+  <div>
+    <div class="htitle">Metadata Explorer</div>
+    <div class="hsub">Origo · Business Central · Tables &amp; Fields</div>
+  </div>
+  <div class="hsp"></div>
+  <a href="bc-cloud-events-explorer.html" class="hpill">CE Explorer</a>
+  <a href="index.html" class="hpill">← BC Portal</a>
+  <div class="hpill" style="cursor:default"><div class="sd" id="sd"></div><span id="st">Not connected</span></div>
+</header>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <aside class="sb">
+    <div class="sb-cfg">
+      <div><div class="lbl">Tenant</div><input class="ci" id="cfgTenant" placeholder="dynamics.is"></div>
+      <div><div class="lbl">Environment</div><input class="ci" id="cfgEnv" placeholder="UAT"></div>
+      <div><div class="lbl">Company GUID</div><input class="ci" id="cfgCompany" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+      <div><div class="lbl">Client ID</div><input class="ci" id="cfgClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+      <div><div class="lbl">Client Secret</div><input class="ci" id="cfgClientSecret" type="password" placeholder="your-client-secret"></div>
+      <div><div class="lbl">Language</div>
+        <select class="ci" id="cfgLcid" onchange="onLangChange()">
+          <option value="1033">English</option>
+          <option value="1039">Icelandic</option>
+          <option value="1030">Danish</option>
+          <option value="1031">German</option>
+          <option value="1036">French</option>
+          <option value="1034">Spanish</option>
+          <option value="1043">Dutch</option>
+          <option value="1053">Swedish</option>
+          <option value="1044">Norwegian</option>
+        </select>
+      </div>
+      <button class="btn-load" id="loadBtn" onclick="loadTables()">Load Tables</button>
+    </div>
+    <div class="sb-search" style="display:none" id="searchWrap">
+      <input id="tableSearch" placeholder="Filter tables…" oninput="filterTables(this.value)">
+    </div>
+    <div id="sbCount" class="sb-count" style="display:none"></div>
+    <div class="sb-tables" id="sbTables">
+      <div class="sb-empty">Enter credentials above and load<br>tables via <code style="color:var(--accent)">Help.Tables.Get</code></div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div class="mtop">
+      <div class="mtop-left">
+        <div class="mtn" id="mtn">Select a table</div>
+        <div class="mtd" id="mtd">Choose a table from the sidebar to explore its fields</div>
+      </div>
+      <div class="mtop-actions">
+        <button class="action-btn primary" id="dlAllBtn" onclick="openDownloadModal('all')" disabled title="Download full table+field catalogue">⬇ Download All</button>
+        <button class="action-btn" id="dlTblBtn" onclick="openDownloadModal('table')" disabled title="Download this table's fields">⬇ This Table</button>
+      </div>
+    </div>
+    <div id="statsBar" class="stats-bar" style="display:none"></div>
+    <div class="mbody" id="mbody">
+      <div class="est">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>
+        <div>Load tables, then select one to explore its field definitions</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- DOWNLOAD MODAL -->
+<div class="modal-overlay hidden" id="dlModal">
+  <div class="modal-box">
+    <div class="modal-title">Download Metadata</div>
+    <div class="modal-sub" id="dlModalSub"></div>
+    <div class="modal-opts">
+      <label class="modal-opt">
+        <input type="radio" name="dlFmt" value="yaml" checked>
+        <div>
+          <div class="modal-opt-lbl">YAML</div>
+          <div class="modal-opt-desc">Human-readable structured format. Easy to read and diff. Each table with all fields, types, enums.</div>
+        </div>
+      </label>
+      <label class="modal-opt">
+        <input type="radio" name="dlFmt" value="markdown">
+        <div>
+          <div class="modal-opt-lbl">Markdown</div>
+          <div class="modal-opt-desc">Documentation-style output. Tables as headings, fields in tables. Great for pasting into wikis or AI prompts.</div>
+        </div>
+      </label>
+      <label class="modal-opt">
+        <input type="radio" name="dlFmt" value="json">
+        <div>
+          <div class="modal-opt-lbl">JSON</div>
+          <div class="modal-opt-desc">Machine-readable full structure. Best for programmatic processing.</div>
+        </div>
+      </label>
+    </div>
+    <div class="modal-progress" id="dlProgress" style="display:none"><span class="spinner"></span><span id="dlProgressTxt"></span></div>
+    <div class="modal-actions">
+      <button class="modal-btn" onclick="closeDownloadModal()">Cancel</button>
+      <button class="modal-btn ok" id="dlConfirmBtn" onclick="startDownload()">Download</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let allTables = [];
+let filteredTables = [];
+let currentTable = null;
+let currentFields = null;
+let fieldsCache = {}; // tableName → fields array
+let permissionsCache = {}; // tableName → {readPermission, writePermission}
+let currentPermissions = null;
+let downloadScope = 'all';
+let selectedLcid = 1033;
+
+// ── HELPERS ──────────────────────────────────────────────────────────────────
+function g(id){ return (document.getElementById(id)||{}).value||''; }
+function getLcid(){ return parseInt(document.getElementById('cfgLcid')?.value||'1033', 10); }
+function onLangChange(){
+  selectedLcid = getLcid();
+  fieldsCache = {}; // invalidate — captions differ by language
+  if(allTables.length) loadTables();
+}
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function setStatus(s,label){
+  document.getElementById('sd').className=`sd ${s}`;
+  document.getElementById('st').textContent=label;
+}
+
+async function cePost(envelope){
+  const res = await fetch('/api/explorer', {
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'x-bc-tenant':       g('cfgTenant').trim(),
+      'x-bc-client-id':    g('cfgClientId').trim(),
+      'x-bc-client-secret':g('cfgClientSecret').trim(),
+      'x-bc-environment':  g('cfgEnv').trim(),
+      'x-bc-company':      g('cfgCompany').trim(),
+      'x-bc-endpoint':     'tasks',
+    },
+    body: JSON.stringify(envelope),
+  });
+  if(!res.ok){ const t=await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0,300)}`); }
+  const result = await res.json();
+  if(result.error && !result.status) throw new Error(result.error);
+  if(result.status==='Error') throw new Error(result.error||JSON.stringify(result));
+  return result;
+}
+
+// ── LOAD TABLES ───────────────────────────────────────────────────────────────
+async function loadTables(){
+  if(!g('cfgTenant')||!g('cfgEnv')||!g('cfgCompany')||!g('cfgClientId')||!g('cfgClientSecret')){
+    alert('Fill in all five connection fields.'); return;
+  }
+  const btn = document.getElementById('loadBtn');
+  btn.disabled=true; btn.textContent='Loading…';
+  setStatus('ld','Loading…');
+  document.getElementById('sbTables').innerHTML=`<div class="sb-load"><span class="spinner"></span>Calling Help.Tables.Get…</div>`;
+
+  try{
+    const res = await cePost({specversion:'1.0',type:'Help.Tables.Get',source:'Metadata-Explorer v1.0',lcid:getLcid()});
+    allTables = (res.result||[]).sort((a,b)=>a.name.localeCompare(b.name));
+    fieldsCache = {};
+    permissionsCache = {};
+    currentTable = null;
+    currentFields = null;
+    currentPermissions = null;
+    setStatus('ok',`${allTables.length} tables`);
+    document.getElementById('searchWrap').style.display='';
+    document.getElementById('sbCount').style.display='';
+    document.getElementById('dlAllBtn').disabled = false;
+    document.getElementById('tableSearch').value='';
+    filterTables('');
+    document.getElementById('mtn').textContent='Select a table';
+    document.getElementById('mtd').textContent=`${allTables.length} tables loaded — choose one from the sidebar`;
+    document.getElementById('mbody').innerHTML=`<div class="est"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg><div>${allTables.length} tables loaded.<br>Select one to view its fields.</div></div>`;
+    document.getElementById('statsBar').style.display='none';
+    btn.textContent='↺ Refresh';
+  } catch(e){
+    setStatus('err','Error');
+    document.getElementById('sbTables').innerHTML=`<div class="sb-empty"><span style="color:var(--red)">${esc(e.message)}</span></div>`;
+    btn.textContent='Retry';
+  } finally{ btn.disabled=false; }
+}
+
+// ── FILTER TABLES ─────────────────────────────────────────────────────────────
+function filterTables(q){
+  const lq = q.toLowerCase();
+  filteredTables = q ? allTables.filter(t=>t.name.toLowerCase().includes(lq)||(t.id+'').includes(lq)) : allTables;
+  const cnt = document.getElementById('sbCount');
+  cnt.textContent = q ? `${filteredTables.length} / ${allTables.length} tables` : `${allTables.length} tables`;
+  renderTableList();
+}
+
+function renderTableList(){
+  const cont = document.getElementById('sbTables');
+  if(!filteredTables.length){
+    cont.innerHTML=`<div class="sb-empty">No tables match</div>`; return;
+  }
+  cont.innerHTML = filteredTables.map(t=>`
+    <button class="tbl-item${currentTable&&currentTable.id===t.id?' active':''}" onclick="selectTable(${t.id})" data-tid="${t.id}">
+      <span class="tbl-name">${esc(t.name)}</span>
+      <span class="tbl-no">#${t.id}</span>
+    </button>`).join('');
+}
+
+// ── SELECT TABLE ──────────────────────────────────────────────────────────────
+async function selectTable(tableId){
+  currentTable = allTables.find(t=>t.id===tableId);
+  if(!currentTable) return;
+
+  document.querySelectorAll('.tbl-item').forEach(b=>b.classList.remove('active'));
+  const btn = document.querySelector(`.tbl-item[data-tid="${tableId}"]`);
+  if(btn) btn.classList.add('active');
+
+  document.getElementById('mtn').textContent = currentTable.name;
+  document.getElementById('mtd').textContent = `Table #${currentTable.id}${currentTable.caption&&currentTable.caption!==currentTable.name?' · '+currentTable.caption:''}`;
+  document.getElementById('dlTblBtn').disabled = false;
+  document.getElementById('statsBar').style.display='none';
+
+  // Use cache if available
+  if(fieldsCache[currentTable.name] && permissionsCache[currentTable.name]){
+    currentFields = fieldsCache[currentTable.name];
+    currentPermissions = permissionsCache[currentTable.name];
+    renderFields();
+    return;
+  }
+
+  document.getElementById('mbody').innerHTML=`<div class="est"><span class="spinner" style="width:20px;height:20px;border-width:2px"></span><div>Loading fields for <strong style="color:var(--accent)">${esc(currentTable.name)}</strong>…</div></div>`;
+
+  try{
+    setStatus('ld','Loading fields…');
+    const [fieldsRes, permRes] = await Promise.all([
+      cePost({
+        specversion:'1.0', type:'Help.Fields.Get', source:'Metadata-Explorer v1.0', lcid:getLcid(),
+        data: JSON.stringify({tableName: currentTable.name}),
+      }),
+      cePost({
+        specversion:'1.0', type:'Help.Permissions.Get', source:'Metadata-Explorer v1.0',
+        subject: currentTable.name,
+      }),
+    ]);
+    currentFields = fieldsRes.result||[];
+    fieldsCache[currentTable.name] = currentFields;
+    currentPermissions = permRes;
+    permissionsCache[currentTable.name] = currentPermissions;
+    setStatus('ok',`${allTables.length} tables`);
+    renderFields();
+  } catch(e){
+    setStatus('err','Error');
+    document.getElementById('mbody').innerHTML=`<div class="est"><div style="color:var(--red)">${esc(e.message)}</div></div>`;
+  }
+}
+
+// ── RENDER FIELDS ─────────────────────────────────────────────────────────────
+function renderFields(){
+  if(!currentFields) return;
+  const fields = currentFields;
+  const pkFields = fields.filter(f=>f.isPartOfPrimaryKey);
+  const flowFields = fields.filter(f=>f.class==='FlowField');
+
+  const statsBar = document.getElementById('statsBar');
+  statsBar.style.display='flex';
+  const perm = currentPermissions;
+  const permHtml = perm != null ? `
+    <div class="stat-div"></div>
+    <div class="stat"><span class="k">Read</span><span class="v ${perm.readPermission?'ok':'no'}">${perm.readPermission?'✓':'✗'}</span></div>
+    <div class="stat"><span class="k">Write</span><span class="v ${perm.writePermission?'ok':'no'}">${perm.writePermission?'✓':'✗'}</span></div>` : '';
+  statsBar.innerHTML=`
+    <div class="stat"><span class="k">Fields</span><span class="v hi">${fields.length}</span></div>
+    <div class="stat"><span class="k">PK fields</span><span class="v ok">${pkFields.length}</span></div>
+    <div class="stat"><span class="k">FlowFields</span><span class="v" style="color:var(--purple)">${flowFields.length}</span></div>
+    <div class="stat"><span class="k">Normal</span><span class="v">${fields.length-flowFields.length}</span></div>
+    ${pkFields.length?`<div class="stat"><span class="k">Primary key</span><span class="v ok">${pkFields.map(f=>esc(f.name)).join(', ')}</span></div>`:''}
+    ${permHtml}
+  `;
+  if(perm != null){
+    const captionPart = currentTable.caption&&currentTable.caption!==currentTable.name?` · ${esc(currentTable.caption)}`:'';
+    const readBadge  = `<span style="color:${perm.readPermission ?'var(--green)':'var(--red)'};font-weight:600">${perm.readPermission ?'✓':'✗'} Read</span>`;
+    const writeBadge = `<span style="color:${perm.writePermission?'var(--green)':'var(--red)'};font-weight:600">${perm.writePermission?'✓':'✗'} Write</span>`;
+    document.getElementById('mtd').innerHTML = `Table #${currentTable.id}${captionPart} &nbsp;·&nbsp; ${readBadge} &nbsp; ${writeBadge}`;
+  }
+
+  const pkSection = fields.filter(f=>f.isPartOfPrimaryKey);
+  const normalSection = fields.filter(f=>!f.isPartOfPrimaryKey&&f.class!=='FlowField');
+  const flowSection = fields.filter(f=>f.class==='FlowField');
+
+  let html = '';
+  if(pkSection.length){
+    html += `<div class="section-lbl">Primary Key Fields</div>${fieldsTable(pkSection)}`;
+  }
+  if(normalSection.length){
+    html += `<div class="section-lbl">Fields</div>${fieldsTable(normalSection)}`;
+  }
+  if(flowSection.length){
+    html += `<div class="section-lbl">FlowFields</div>${fieldsTable(flowSection)}`;
+  }
+  document.getElementById('mbody').innerHTML = html;
+}
+
+function fieldsTable(fields){
+  const rows = fields.map(f=>{
+    const enumHtml = f.enum&&f.enum.length
+      ? `<div class="enum-wrap">${f.enum.map(e=>`<span class="enum-tag" title="${esc(e.caption)}">${esc(e.value||'·')}</span>`).join('')}</div>`
+      : '';
+    return `<tr>
+      <td class="td-num">${f.id}</td>
+      <td class="td-name">${esc(f.name)}</td>
+      <td class="td-json">${esc(f.jsonName||f.name)}</td>
+      <td class="td-type">${esc(f.type||'')}</td>
+      <td class="td-len">${f.len!=null?f.len:''}</td>
+      <td class="td-class"><span class="${f.class==='FlowField'?'fc-flow':'fc-norm'}">${esc(f.class||'Normal')}</span></td>
+      <td class="td-pk">${f.isPartOfPrimaryKey?'<span class="pk-dot" title="Primary key"></span>':''}</td>
+      <td>${enumHtml}</td>
+    </tr>`;
+  }).join('');
+  return `<table class="ftable">
+    <thead><tr>
+      <th class="td-num">#</th><th>Name (AL)</th><th>JSON Key</th><th>Type</th>
+      <th class="td-len">Len</th><th>Class</th><th class="td-pk">PK</th><th>Enum values</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+// ── DOWNLOAD MODAL ────────────────────────────────────────────────────────────
+function openDownloadModal(scope){
+  downloadScope = scope;
+  const sub = scope==='all'
+    ? `Export all <strong style="color:var(--accent)">${allTables.length} tables</strong>. Fields for tables not yet loaded will be fetched now.`
+    : `Export fields for table <strong style="color:var(--accent)">${esc(currentTable?.name||'')}</strong>.`;
+  document.getElementById('dlModalSub').innerHTML = sub;
+  document.getElementById('dlProgress').style.display='none';
+  document.getElementById('dlConfirmBtn').disabled=false;
+  document.getElementById('dlModal').classList.remove('hidden');
+}
+function closeDownloadModal(){ document.getElementById('dlModal').classList.add('hidden'); }
+
+async function startDownload(){
+  const fmt = document.querySelector('input[name="dlFmt"]:checked')?.value || 'yaml';
+  document.getElementById('dlConfirmBtn').disabled=true;
+  const prog = document.getElementById('dlProgress');
+  const progTxt = document.getElementById('dlProgressTxt');
+  prog.style.display='flex';
+
+  try{
+    let tables;
+    if(downloadScope==='table'){
+      tables = [currentTable];
+    } else {
+      tables = [...allTables];
+    }
+
+    // Fetch fields for any table not yet cached
+    const missing = tables.filter(t=>!fieldsCache[t.name]);
+    if(missing.length){
+      progTxt.textContent=`Fetching fields for ${missing.length} tables…`;
+      for(let i=0;i<missing.length;i++){
+        const t=missing[i];
+        progTxt.textContent=`Fetching fields (${i+1}/${missing.length}): ${t.name}…`;
+        try{
+          const res = await cePost({
+            specversion:'1.0', type:'Help.Fields.Get', source:'Metadata-Explorer v1.0', lcid:getLcid(),
+            data: JSON.stringify({tableName:t.name}),
+          });
+          fieldsCache[t.name]=res.result||[];
+        } catch(e){
+          fieldsCache[t.name]=[];
+        }
+      }
+    }
+
+    progTxt.textContent=`Generating ${fmt.toUpperCase()}…`;
+    const content = fmt==='yaml' ? buildYaml(tables)
+                  : fmt==='markdown' ? buildMarkdown(tables)
+                  : buildJson(tables);
+
+    const ext = fmt==='yaml'?'yaml':fmt==='markdown'?'md':'json';
+    const lcidTag = {1033:'en',1039:'is',1030:'da',1031:'de',1036:'fr',1034:'es',1043:'nl',1053:'sv',1044:'no'}[getLcid()]||(getLcid()+'');
+    const filename = downloadScope==='table'
+      ? `bc-table-${(currentTable?.name||'metadata').replace(/[^a-zA-Z0-9]/g,'-').toLowerCase()}-${lcidTag}.${ext}`
+      : `bc-metadata-all-tables-${lcidTag}.${ext}`;
+
+    const blob = new Blob([content], {type:'text/plain;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download=filename; a.click();
+    URL.revokeObjectURL(url);
+    closeDownloadModal();
+  } catch(e){
+    progTxt.textContent=`Error: ${e.message}`;
+    document.getElementById('dlConfirmBtn').disabled=false;
+  }
+}
+
+// ── FORMAT: YAML ──────────────────────────────────────────────────────────────
+function buildYaml(tables){
+  const lines = [];
+  lines.push('# Business Central Table & Field Metadata');
+  lines.push(`# Generated: ${new Date().toISOString()}`);
+  lines.push(`# Tenant: ${g('cfgTenant')}  Environment: ${g('cfgEnv')}`);
+  lines.push(`# Tables: ${tables.length}`);
+  lines.push('');
+  lines.push('tables:');
+  for(const t of tables){
+    const fields = fieldsCache[t.name]||[];
+    lines.push(`  - id: ${t.id}`);
+    lines.push(`    name: "${yamlStr(t.name)}"`);
+    if(t.caption&&t.caption!==t.name) lines.push(`    caption: "${yamlStr(t.caption)}"`);
+    lines.push(`    fields:`);
+    for(const f of fields){
+      lines.push(`      - id: ${f.id}`);
+      lines.push(`        name: "${yamlStr(f.name)}"`);
+      if((f.jsonName||f.name)!==f.name) lines.push(`        jsonName: "${yamlStr(f.jsonName)}"`);
+      if(f.caption&&f.caption!==f.name) lines.push(`        caption: "${yamlStr(f.caption)}"`);
+      lines.push(`        type: ${f.type||'Unknown'}`);
+      if(f.len!=null) lines.push(`        len: ${f.len}`);
+      lines.push(`        class: ${f.class||'Normal'}`);
+      lines.push(`        primaryKey: ${!!f.isPartOfPrimaryKey}`);
+      if(f.enum&&f.enum.length){
+        lines.push(`        enum:`);
+        for(const e of f.enum){
+          lines.push(`          - value: "${yamlStr(e.value||'')}"${e.caption&&e.caption!==e.value?`  # ${yamlStr(e.caption)}`:''}`);
+        }
+      }
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+function yamlStr(s){ return String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"'); }
+
+// ── FORMAT: MARKDOWN ──────────────────────────────────────────────────────────
+function buildMarkdown(tables){
+  const lines = [];
+  lines.push('# Business Central Table & Field Metadata');
+  lines.push('');
+  lines.push(`Generated: ${new Date().toISOString()}  `);
+  lines.push(`Tenant: \`${g('cfgTenant')}\`  Environment: \`${g('cfgEnv')}\`  Tables: ${tables.length}`);
+  lines.push('');
+  lines.push('---');
+  lines.push('');
+  for(const t of tables){
+    const fields = fieldsCache[t.name]||[];
+    lines.push(`## ${t.name} (Table #${t.id})`);
+    if(t.caption&&t.caption!==t.name) lines.push('');
+    lines.push('');
+    const pkFields = fields.filter(f=>f.isPartOfPrimaryKey).map(f=>f.name).join(', ');
+    if(pkFields) lines.push(`**Primary key:** ${pkFields}  `);
+    lines.push(`**Fields:** ${fields.length}`);
+    lines.push('');
+    if(fields.length){
+      lines.push('| # | Name (AL) | JSON Key | Type | Len | Class | PK | Enum values |');
+      lines.push('|---|-----------|----------|------|-----|-------|----|-------------|');
+      for(const f of fields){
+        const enumStr = f.enum&&f.enum.length ? f.enum.map(e=>e.value||'·').join(', ') : '';
+        const jsonKey = (f.jsonName||f.name)!==f.name ? `\`${f.jsonName||f.name}\`` : '';
+        lines.push(`| ${f.id} | ${f.name} | ${jsonKey} | ${f.type||''} | ${f.len!=null?f.len:''} | ${f.class||'Normal'} | ${f.isPartOfPrimaryKey?'✓':''} | ${enumStr} |`);
+      }
+    }
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+// ── FORMAT: JSON ──────────────────────────────────────────────────────────────
+function buildJson(tables){
+  const out = {
+    generated: new Date().toISOString(),
+    tenant: g('cfgTenant'),
+    environment: g('cfgEnv'),
+    tables: tables.map(t=>({
+      id: t.id,
+      name: t.name,
+      caption: t.caption,
+      fields: fieldsCache[t.name]||[],
+    })),
+  };
+  return JSON.stringify(out, null, 2);
+}
+</script>
+</body>
+</html>

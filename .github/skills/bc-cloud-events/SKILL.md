@@ -51,7 +51,7 @@ https://api.businesscentral.dynamics.com/v2.0/{tenantId}/{environment}/api/origo
 Scope: `https://api.businesscentral.dynamics.com/.default`
 
 > **Data Isolation — Entra Application Boundary**  
-> Every Cloud Events endpoint (`/tasks`, `/queues`, `/responses`, `/requestdata`) automatically
+> Every Cloud Events endpoint (`/tasks`, `/queues`, `/responses`, `/requests`) automatically
 > filters all results to the **Entra Application (Client ID)** that authenticated the request.
 > This is enforced server-side via `SystemCreatedBy = UserSecurityId()` — it cannot be bypassed
 > by any query parameter or OData filter.  
@@ -117,12 +117,12 @@ GET  /companies({companyId})/queues({id})                                   ← 
 
 Always use the URL from `task.data` verbatim. Do not construct it manually.
 
-### 3.4 `/requestdata({id})` — Read the Original Request Payload
+### 3.4 `/requests({id})` — Read the Original Request Payload
 
 Read-only endpoint that exposes the **original request body** that was sent for a message. Useful for auditing, debugging, or re-replaying a call.
 
 ```http
-GET /companies({companyId})/requestdata({id})
+GET /companies({companyId})/requests({id})
 Authorization: Bearer {token}
 ```
 
@@ -136,7 +136,7 @@ Response:
 
 Or fetch the raw blob stream:
 ```http
-GET /companies({companyId})/requestdata({id})/data
+GET /companies({companyId})/requests({id})/data
 Authorization: Bearer {token}
 ```
 
@@ -157,7 +157,7 @@ Once you have a message `id`, you can retrieve both the original request and the
 | What you want | URL |
 |---|---|
 | Full response body | `GET /responses({id})/data` |
-| Original request payload | `GET /requestdata({id})/data` |
+| Original request payload | `GET /requests({id})/data` |
 
 ### List queue history
 ```http
