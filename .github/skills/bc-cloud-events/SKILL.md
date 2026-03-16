@@ -991,6 +991,86 @@ Operators: `CONST` (exact), `FILTER` (pattern/range), `>` `<` `>=` `<=`, `&` (AN
 
 ---
 
+## 11a. Searching for Customers and Items (Lookup Pattern)
+
+When searching for a customer or item by a free-text query, **never combine multiple fields in one `FILTER` with `|`**. BC evaluates `WHERE(A=FILTER(...)|B=FILTER(...))` as an OR on field A's values, not across fields. Search one field at a time and fall back progressively:
+
+### Customer lookup — three-step pattern
+
+```javascript
+async function lookupCustomer(companyId, query, token) {
+  const q = sanitizedQuery; // strip injection chars
+  const FIELDS = [1, 2, 5, 7, 21, 22]; // No., Name, Address, City, ...
+
+  // Step 1: case-insensitive name search
+  let res = await cePost(companyId, {
+    type: 'Data.Records.Get', subject: 'Customer',
+    data: JSON.stringify({ tableView: `WHERE(Name=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
+  }, token);
+  if (res.result?.length) return res.result;
+
+  // Step 2: customer No. search
+  res = await cePost(companyId, {
+    type: 'Data.Records.Get', subject: 'Customer',
+    data: JSON.stringify({ tableView: `WHERE(No_=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
+  }, token);
+  if (res.result?.length) return res.result;
+
+  // Step 3: client-side fallback — all non-blocked customers (No., Name, Address)
+  const all = await cePost(companyId, {
+    type: 'Data.Records.Get', subject: 'Customer',
+    data: JSON.stringify({ tableView: 'WHERE(Blocked=CONST( ))', fieldNumbers: FIELDS, take: 200 })
+  }, token);
+  const lq = q.toLowerCase();
+  return (all.result || [])
+    .filter(r => Object.values(r.fields || {}).some(v => String(v).toLowerCase().includes(lq)))
+    .slice(0, 5);
+}
+```
+
+### Item lookup — same three-step pattern
+
+```javascript
+async function lookupItem(companyId, query, token) {
+  const q = sanitizedQuery;
+  const FIELDS = [1, 3, 30, 8]; // No., Description, Unit of Measure, ...
+
+  // Step 1: description search
+  let res = await cePost(companyId, {
+    type: 'Data.Records.Get', subject: 'Item',
+    data: JSON.stringify({ tableView: `WHERE(Description=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
+  }, token);
+  if (res.result?.length) return res.result;
+
+  // Step 2: item No. search
+  res = await cePost(companyId, {
+    type: 'Data.Records.Get', subject: 'Item',
+    data: JSON.stringify({ tableView: `WHERE(No_=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
+  }, token);
+  if (res.result?.length) return res.result;
+
+  // Step 3: client-side fallback — all non-blocked items
+  const all = await cePost(companyId, {
+    type: 'Data.Records.Get', subject: 'Item',
+    data: JSON.stringify({ tableView: 'WHERE(Blocked=CONST(false))', fieldNumbers: FIELDS, take: 200 })
+  }, token);
+  const lq = q.toLowerCase();
+  return (all.result || [])
+    .filter(r => Object.values(r.fields || {}).some(v => String(v).toLowerCase().includes(lq)))
+    .slice(0, 5);
+}
+```
+
+**Key rules:**
+- Always use `FILTER(@*query*)` (with `@` prefix) for case-insensitive substring matching.
+- Search **one field per request** — do not combine multiple fields with `|` across fields in one `WHERE`.
+- The `|` operator in `WHERE(A=FILTER(x|y))` means OR on values of field A, not OR across different fields.
+- The client-side fallback catches partial matches and alternate spellings that the BC filter misses.
+- For customers, `WHERE(Blocked=CONST( ))` filters out blocked customers (blank enum = not blocked).
+- For items, `WHERE(Blocked=CONST(false))` filters out blocked items.
+
+---
+
 ## 12. Creating Sales Orders Workflow
 
 There is no dedicated "create order" message type. Use `Data.Records.Set` for all steps.

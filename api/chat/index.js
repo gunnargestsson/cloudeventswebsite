@@ -124,29 +124,69 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
 
     case "lookup_customer": {
       const q = sanitizeFilter(input.query);
-      // Try exact number match first if query looks like a customer No
-      const isNum = /^[a-z0-9\-_]+$/i.test(q) && q.length <= 20;
-      const tableView = isNum
-        ? `WHERE(No_=FILTER(*${q}*)|Name=FILTER(*${q}*))`
-        : `WHERE(Name=FILTER(*${q}*))`;
-      const res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Customer", {
-        tableView,
-        fieldNumbers: [1, 2, 5, 7, 21, 22],
+      const CUST_FIELDS = [1, 2, 5, 7, 21, 22];
+
+      // Step 1: case-insensitive name search
+      let res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Customer", {
+        tableView: `WHERE(Name=FILTER(@*${q}*))`,
+        fieldNumbers: CUST_FIELDS,
         take: 5,
       });
-      return JSON.stringify(res.result || []);
+      if ((res.result || []).length) return JSON.stringify(res.result);
+
+      // Step 2: case-insensitive customer No. search
+      res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Customer", {
+        tableView: `WHERE(No_=FILTER(@*${q}*))`,
+        fieldNumbers: CUST_FIELDS,
+        take: 5,
+      });
+      if ((res.result || []).length) return JSON.stringify(res.result);
+
+      // Step 3: fall back — get all non-blocked customers (No., Name, Address) and
+      //         filter client-side so partial / phonetic matches still work.
+      const allRes = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Customer", {
+        tableView: "WHERE(Blocked=CONST( ))",
+        fieldNumbers: CUST_FIELDS,
+        take: 200,
+      });
+      const lq = q.toLowerCase();
+      const matches = (allRes.result || []).filter(r =>
+        Object.values(r.fields || {}).some(v => String(v).toLowerCase().includes(lq))
+      );
+      return JSON.stringify(matches.slice(0, 5));
     }
 
     case "lookup_item": {
       const q = sanitizeFilter(input.query);
-      // Try No_ match and Description match
-      const tableView = `WHERE(Description=FILTER(*${q}*)|No_=FILTER(*${q}*))`;
-      const res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
-        tableView,
-        fieldNumbers: [1, 3, 30, 8],
+      const ITEM_FIELDS = [1, 3, 30, 8];
+
+      // Step 1: case-insensitive description search
+      let res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
+        tableView: `WHERE(Description=FILTER(@*${q}*))`,
+        fieldNumbers: ITEM_FIELDS,
         take: 5,
       });
-      return JSON.stringify(res.result || []);
+      if ((res.result || []).length) return JSON.stringify(res.result);
+
+      // Step 2: case-insensitive item No. search
+      res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
+        tableView: `WHERE(No_=FILTER(@*${q}*))`,
+        fieldNumbers: ITEM_FIELDS,
+        take: 5,
+      });
+      if ((res.result || []).length) return JSON.stringify(res.result);
+
+      // Step 3: fall back — get all non-blocked items and filter client-side.
+      const allRes = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
+        tableView: "WHERE(Blocked=CONST(false))",
+        fieldNumbers: ITEM_FIELDS,
+        take: 200,
+      });
+      const lq = q.toLowerCase();
+      const matches = (allRes.result || []).filter(r =>
+        Object.values(r.fields || {}).some(v => String(v).toLowerCase().includes(lq))
+      );
+      return JSON.stringify(matches.slice(0, 5));
     }
 
     case "check_item_availability": {
