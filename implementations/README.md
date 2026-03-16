@@ -162,17 +162,16 @@ Each requirement is stored in its own subfolder with complete implementation det
 
 ### Requirement 7: Global Connection Settings
 **Folder**: `requirement-7-global-settings/`
-**Status**: ⏳ Ready for Implementation
+**Status**: ✅ Implemented
 **Description**: Centralise BC connection parameters in `localStorage` so credentials entered once persist across all pages and sessions. Adds a company-name dropdown (instead of raw GUID), language selection, and auto-fill from server environment variables.
 
 **Key Features**:
 - Shared `settings.js` module with `bcSettingsLoad()`, `bcSettingsSave()`, `bcSettingsClear()`, `bcSettingsReady()`, `bcSettingsHeaders()` helpers
 - New `GET /api/companies` Azure Function — fetches company list using client-supplied credentials
 - Settings panel component used by `bc-metadata-explorer.html`, `bc-cloud-events-explorer.html`, `sales-assistant.html`
-- Pre-fill from `/api/config` (tenant / clientId / environment) on first load
 - Company dropdown auto-populated via `/api/companies` after credentials entered
 - Language dropdown loaded from BC `Allowed Language` + `Language` tables per company
-- All settings (including client secret) persisted in `localStorage` with `bc_portal_` prefix
+- All settings persisted in `localStorage` with `bc_portal_` prefix
 - LCID synced to/from `index.html` so language choice is consistent across all pages
 
 **Files**:
@@ -180,7 +179,36 @@ Each requirement is stored in its own subfolder with complete implementation det
 
 ---
 
-## Architecture Overview
+### Requirement 8: BC Metadata MCP Server
+**Folder**: `requirement-8-mcp-server/`
+**Status**: ✅ Implemented (core) · ⏳ Extensions pending
+**Description**: Model Context Protocol server that exposes Business Central metadata and data to AI assistants (GitHub Copilot, Claude Desktop, Cursor) via a single HTTP POST endpoint at `/api/mcp`. Supports the MCP Streamable HTTP transport (`2024-11-05`).
+
+**Current Tools (implemented)**:
+- `list_tables` — all BC tables via `Help.Tables.Get`
+- `get_table_info` — summary for one table by name or number
+- `get_table_fields` — fields, types, enums, permissions for one table
+
+**Planned Additions**:
+- `list_companies` — expose the BC company list
+- `list_message_types` — `Help.MessageTypes.Get` for Cloud Event type discovery
+- `get_records` — read data from any BC table with filter/paging
+- `search_customers` / `search_items` — AI-friendly entity lookup tools
+- Filter/paging params on `list_tables` (1 000+ table payloads are large for LLMs)
+- Markdown table output format for better LLM readability
+- MCP Resources (`bc://tables`, `bc://tables/{name}`)
+- MCP Prompts (describe_table, find_related_tables)
+- Optional `MCP_API_KEY` bearer token auth
+- Table name input validation to prevent injection
+- `BC_COMPANY_ID` / `BC_COMPANY_NAME` env vars for explicit company targeting
+- Updated `/.well-known/mcp.json` discovery document
+
+**Files**:
+- `SPECIFICATION.md` - Full documentation of current implementation, all proposed additions, implementation order, and testing checklist
+
+---
+
+
 
 ### Cloud Events API Flow
 
