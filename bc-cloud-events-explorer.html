@@ -857,7 +857,7 @@ function renderHistoryList(){
     html += `<button class="src-pill${!historySourceFilter?' active':''}" onclick="filterHistorySource(null)" title="All sources">All (${historyItems.length})</button>`;
     for(const s of sources){
       const active = historySourceFilter===s;
-      html += `<button class="src-pill${active?' active':''}" onclick="filterHistorySource(${eA(s)})" title="${esc(s)}">${esc(s)} (${srcCount[s]})</button>`;
+      html += `<button class="src-pill${active?' active':''}" onclick="filterHistorySource('${s.replace(/'/g,"&#39;")}')" title="${esc(s)}">${esc(s)} (${srcCount[s]})</button>`;
     }
     html += `</div>`;
   }
@@ -881,6 +881,39 @@ function renderHistoryList(){
 function filterHistorySource(src){
   historySourceFilter = src;
   renderHistoryList();
+}
+
+// Populate structured compose form fields from a raw data JSON string (requestdata payload).
+function populateComposeForms(dataJson){
+  let data;
+  try{ data = JSON.parse(dataJson); } catch{ return; }
+  if(!data || typeof data !== 'object') return;
+
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if(el && val !== undefined && val !== null && val !== '') el.value = val;
+  };
+
+  set('d_tableName',  data.tableName);
+  set('d_tableView',  data.tableView);
+  set('d_skip',       data.skip);
+  set('d_take',       data.take);
+  set('d_startDateTime', data.startDateTime);
+  set('d_endDateTime',   data.endDateTime);
+  set('d_fromDate',      data.fromDate);
+  set('d_toDate',        data.toDate);
+  set('d_variantCode',   data.variantCode);
+  set('d_locationFilter',data.locationFilter);
+  set('d_customerNo',    data.customerNo);
+  set('d_quantity',      data.quantity);
+  set('d_requestedDeliveryDate', data.requestedDeliveryDate);
+  set('d_recordId',   data.id);   // buildEnvelope maps d_recordId → data.id
+  if(data.fieldNumbers) set('d_fieldNumbers',
+    Array.isArray(data.fieldNumbers) ? data.fieldNumbers.join(',') : data.fieldNumbers);
+  if(data.fields)     set('d_fields',
+    typeof data.fields     === 'object' ? JSON.stringify(data.fields,     null, 2) : data.fields);
+  if(data.primaryKey) set('d_primaryKey',
+    typeof data.primaryKey === 'object' ? JSON.stringify(data.primaryKey, null, 2) : data.primaryKey);
 }
 
 function fmtTime(isoStr){
@@ -936,23 +969,17 @@ async function openHistoryItem(idx){
     const epEl = document.getElementById('f_endpoint');
     if(epEl) epEl.value = item._endpoint||'tasks';
 
-    // Asynchronously fetch the original data payload and fill in the raw override
+    // Asynchronously fetch the original data payload and populate the form
     if(item.id){
       const capturedIdx = idx;
       ceFetchRequest(item.id).then(rd=>{
         if(currentHistoryIdx !== capturedIdx) return; // user moved on
         const rawData = rd.data || '';
         if(!rawData) return;
-        const rawSec = document.getElementById('rawSec');
-        const rawEl  = document.getElementById('f_raw');
-        const icon   = document.getElementById('ri');
-        if(rawEl){
-          // Pretty-print if valid JSON, otherwise use as-is
-          try{ rawEl.value = JSON.stringify(JSON.parse(rawData), null, 2); }
-          catch{ rawEl.value = rawData; }
-        }
-        if(rawSec) rawSec.style.display='block';
-        if(icon)   icon.textContent='▼';
+        // Populate structured d_* fields so Compose is fully editable
+        populateComposeForms(rawData);
+        // If Preview tab is active, refresh it now that data is ready
+        if(currentTab === 'preview') renderPreview();
       }).catch(()=>{}); // silently ignore if endpoint unavailable
     }
   } else {
