@@ -89,14 +89,28 @@ GET  /companies({companyId})/queues({id})                             ← check 
 
 ### 3. `/responses({id})/data` — Fetch Results
 
-After a task or completed queue job, use the **full URL from the `data` field** of the task response — it already includes `/data` at the end:
+When the task `id` is already known, call `/data` directly — no need to fetch the envelope first:
 
 ```http
-GET https://api.businesscentral.dynamics.com/v2.0/{tenantGuid}/{env}/api/origo/cloudEvent/v1.0/companies({companyId})/responses({id})/data
+GET https://api.businesscentral.dynamics.com/v2.0/{tenantId}/{env}/api/origo/cloudEvent/v1.0/companies({companyId})/responses({id})/data
 Authorization: Bearer {access_token}
 ```
 
-Do not construct this URL manually — always use `task.data` verbatim from the task response.
+Alternatively, if you have the full URL from the `data` field of the task POST response, you can also use it verbatim (it already ends with `/data`).
+
+---
+
+### 4. `/requests({id})/data` — Fetch Original Request Payload
+
+Retrieve the original input parameters sent with any task or queue item by calling `/data` directly on the requests endpoint:
+
+```http
+GET https://api.businesscentral.dynamics.com/v2.0/{tenantId}/{env}/api/origo/cloudEvent/v1.0/companies({companyId})/requests({id})/data
+Authorization: Bearer {access_token}
+```
+
+This returns the raw `data` payload of the original request (e.g. `{"tableName":"Customer","fieldNumbers":[2,7,35],"skip":0,"take":20}`).
+Useful for replaying or inspecting past events without storing the original parameters client-side.
 
 ---
 

@@ -112,8 +112,11 @@ module.exports = async function (context, req) {
       const token = await getToken(tenantId, clientId, clientSecret);
       const auth  = `Bearer ${token}`;
       const basePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})`;
-      const result = await bcJson("GET", `${basePath}/requests(${itemId})`, auth, null);
-      context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) };
+      // Call /requests({id})/data directly — no need to fetch the envelope first.
+      const result = await bcJson("GET", `${basePath}/requests(${itemId})/data`, auth, null);
+      // Normalise: the payload may come back as an object or a JSON string.
+      const data = typeof result === "string" ? result : JSON.stringify(result);
+      context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data }) };
     } catch (e) {
       context.res = { status: 502, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: e.message }) };
     }

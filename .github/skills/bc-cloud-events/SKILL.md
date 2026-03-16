@@ -58,9 +58,10 @@ Scope: `https://api.businesscentral.dynamics.com/.default`
 > **One Entra Application will never see messages, history, or responses that were created by
 > a different Entra Application**, even within the same BC company and environment.
 
-> **Important:** The `data` download URL returned in task responses uses the internal
-> tenant GUID (e.g. `9069b642-…`), not the named tenant. Always use the URL verbatim
-> — do not reconstruct it.
+> **Tenant GUID note:** The `data` URL returned in task/queue responses uses the internal
+> tenant GUID (e.g. `9069b642-…`), not the named tenant (`dynamics.is`). When using
+> the returned URL verbatim it will always work. If you construct the URL from a known
+> message ID (e.g. from a webhook), use the named-tenant form — both forms are accepted.
 
 ---
 
@@ -115,11 +116,27 @@ GET  /companies({companyId})/queues({id})                                   ← 
 
 ### 3.3 `/responses({id})/data` — Download Results
 
-Always use the URL from `task.data` verbatim. Do not construct it manually.
+If you already know the message ID, call `/data` directly — no prior lookup required:
 
-### 3.4 `/requests({id})` — Read the Original Request Payload
+```http
+GET /companies({companyId})/responses({id})/data
+Authorization: Bearer {token}
+```
 
-Read-only endpoint that exposes the **original request body** that was sent for a message. Useful for auditing, debugging, or re-replaying a call.
+The URL in `task.data` / `queue.data` is always this same pattern with the internal tenant GUID. You can also construct it yourself from a known message ID (e.g. from webhooks or your own storage).
+
+> **Tenant GUID note:** The `data` URL returned by BC uses the internal tenant GUID (e.g. `9069b642-…`), not the named tenant (`dynamics.is`). If you construct the URL yourself use the named tenant form like the example above — both work.
+
+### 3.4 `/requests({id})/data` — Read the Original Request Payload
+
+Returns the raw request body that was originally sent for a message. Call `/data` directly when you know the ID:
+
+```http
+GET /companies({companyId})/requests({id})/data
+Authorization: Bearer {token}
+```
+
+Or fetch the OData record (includes `id` + `data` fields) without the `/data` suffix:
 
 ```http
 GET /companies({companyId})/requests({id})
@@ -134,12 +151,6 @@ Response:
 }
 ```
 
-Or fetch the raw blob stream:
-```http
-GET /companies({companyId})/requests({id})/data
-Authorization: Bearer {token}
-```
-
 The `id` is the same GUID as the queue or task message — no extra lookup needed. Results are scoped to the current application (`SystemCreatedBy`).
 
 ---
@@ -152,7 +163,7 @@ Both endpoints support standard OData **GET** to list previously submitted messa
 > never see records created by another application. The `source` filter is an additional
 > optional label you control; it does not replace or weaken security isolation.
 
-Once you have a message `id`, you can retrieve both the original request and the result:
+Once you have a message `id`, call `/data` directly on either endpoint — no prior lookup needed:
 
 | What you want | URL |
 |---|---|
@@ -583,7 +594,31 @@ Returns Markdown documentation for the requested message type.
 }
 ```
 
-Response: `{ "tableName": "Customer", "readPermission": true, "writePermission": false }`
+Response:
+```json
+{
+  "status": "Success",
+  "permissions": {
+    "read": true,
+    "write": false
+  }
+}
+```
+
+Table names with special characters work directly in `subject`:
+```json
+{
+  "specversion": "1.0",
+  "type": "Help.Permissions.Get",
+  "source": "MyApp",
+  "subject": "G/L Account"
+}
+```
+Response: `{"status":"Success","permissions":{"read":true,"write":true}}`
+
+- `permissions.read` — user can read from the table
+- `permissions.write` — user can insert/modify/delete in the table
+- No `tableName` field in the response — use the value you sent as `subject`/`tableName`
 
 ---
 
@@ -1101,7 +1136,7 @@ const fields = await cePost(companyId, {
 
 1. **`data` must be a JSON string** — `"data": "{\"tableName\":\"Customer\"}"` not `"data": {"tableName": "Customer"}`. Failing to stringify is the most common error.
 
-2. **Don't reconstruct the data URL** — the URL in `task.data` uses the internal tenant GUID. Always use it verbatim.
+2. **Tenant GUID in returned data URLs** — the URL in `task.data` uses the internal tenant GUID, not the named tenant. Use it verbatim, or if constructing from a known message ID use the named-tenant form (both are accepted).
 
 3. **Field values in `Data.Records.Set` must be strings** — even numbers and booleans: `"Quantity": "5"` not `"Quantity": 5`.
 

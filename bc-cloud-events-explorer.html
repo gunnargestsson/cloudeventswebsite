@@ -975,13 +975,19 @@ async function openHistoryItem(idx){
       const capturedIdx = idx;
       ceFetchRequest(item.id).then(rd=>{
         if(currentHistoryIdx !== capturedIdx) return; // user moved on
-        const rawData = rd.data || '';
-        if(!rawData) return;
+        // data field may be a plain JSON string, or an already-resolved object
+        let raw = rd.data;
+        if(raw && typeof raw === 'object') raw = JSON.stringify(raw);
+        if(!raw) return;
+        // Populate envelope-level fields present on the request record
+        if(rd.source){ const el=document.getElementById('f_source'); if(el) el.value=rd.source; }
+        if(rd.subject){ const el=document.getElementById('f_subject'); if(el) el.value=rd.subject; }
+        if(rd.lcid){ const el=document.getElementById('f_lcid'); if(el) el.value=rd.lcid; }
         // Populate structured d_* fields so Compose is fully editable
-        populateComposeForms(rawData);
+        populateComposeForms(raw);
         // If Preview tab is active, refresh it now that data is ready
         if(currentTab === 'preview') renderPreview();
-      }).catch(()=>{}); // silently ignore if endpoint unavailable
+      }).catch(err=>{ console.warn('fetch-request failed:', err); });
     }
   } else {
     document.getElementById('mbody').innerHTML = `<div class="info-box"><strong>${esc(item.type||'?')}</strong><br>

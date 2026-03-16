@@ -36,7 +36,7 @@ header{padding:14px 26px;display:flex;align-items:center;gap:14px;border-bottom:
 /* LAYOUT */
 .app{display:grid;grid-template-columns:280px 1fr;height:calc(100vh - 59px)}
 .sb{border-right:1px solid var(--border);background:var(--bg2);display:flex;flex-direction:column;overflow:hidden}
-.sb-cfg{padding:16px 14px;display:flex;flex-direction:column;gap:9px;border-bottom:1px solid var(--border)}
+.sb-cfg{padding:16px 14px;display:flex;flex-direction:column;gap:9px;border-bottom:1px solid var(--border);flex-shrink:0;overflow-y:auto;max-height:60vh}
 .lbl{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);font-weight:600;margin-bottom:1px}
 .ci{background:var(--bg);border:1px solid var(--border);color:var(--text2);font-family:inherit;font-size:11px;padding:5px 9px;width:100%;outline:none;transition:all .15s}
 select.ci{cursor:pointer;appearance:auto}
@@ -247,13 +247,51 @@ let currentPermissions = null;
 let downloadScope = 'all';
 let selectedLcid = 1033;
 
+const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',1036:'French',1034:'Spanish',1043:'Dutch',1053:'Swedish',1044:'Norwegian'};
+
 // ── HELPERS ──────────────────────────────────────────────────────────────────
 function g(id){ return (document.getElementById(id)||{}).value||''; }
 function getLcid(){ return parseInt(document.getElementById('cfgLcid')?.value||'1033', 10); }
 function onLangChange(){
   selectedLcid = getLcid();
   fieldsCache = {}; // invalidate — captions differ by language
+  permissionsCache = {};
   if(allTables.length) loadTables();
+}
+
+async function loadLanguages(){
+  try{
+    // Step 1: get allowed LCIDs
+    const allowedRes = await cePost({
+      specversion:'1.0', type:'Data.Records.Get', source:'Metadata-Explorer v1.0',
+      subject:'Allowed Language'
+    });
+    const lcids = (allowedRes.result||[]).map(r=>parseInt(r.primaryKey?.LanguageId,10)).filter(Boolean);
+    const ids = lcids.length ? lcids : [1033];
+
+    // Step 2: fetch Language rows for those LCIDs to get display names
+    const tableView = `WHERE(Windows Language ID=FILTER(${ids.join('|')}))`;
+    const langRes = await cePost({
+      specversion:'1.0', type:'Data.Records.Get', source:'Metadata-Explorer v1.0',
+      data: JSON.stringify({tableName:'Language', tableView})
+    });
+    const lcidToName = {};
+    for(const rec of (langRes.result||[])){
+      const lcid = parseInt(rec.fields?.WindowsLanguageID, 10);
+      if(lcid && rec.fields?.Name)
+        lcidToName[lcid] = rec.fields.Name.charAt(0).toUpperCase() + rec.fields.Name.slice(1).toLowerCase();
+    }
+
+    const sel = document.getElementById('cfgLcid');
+    const prev = getLcid();
+    sel.innerHTML = ids.map(id=>
+      `<option value="${id}" ${id===prev?'selected':''}>${lcidToName[id]||LCID_NAMES[id]||'Language '+id}</option>`
+    ).join('');
+    // Sync selectedLcid in case previous value is no longer in the list
+    selectedLcid = getLcid();
+  } catch(e){
+    // fall back silently — static list remains
+  }
 }
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function setStatus(s,label){
@@ -311,6 +349,7 @@ async function loadTables(){
     document.getElementById('mbody').innerHTML=`<div class="est"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg><div>${allTables.length} tables loaded.<br>Select one to view its fields.</div></div>`;
     document.getElementById('statsBar').style.display='none';
     btn.textContent='↺ Refresh';
+    loadLanguages(); // populate language selector from Allowed Language table
   } catch(e){
     setStatus('err','Error');
     document.getElementById('sbTables').innerHTML=`<div class="sb-empty"><span style="color:var(--red)">${esc(e.message)}</span></div>`;
@@ -377,7 +416,11 @@ async function selectTable(tableId){
     ]);
     currentFields = fieldsRes.result||[];
     fieldsCache[currentTable.name] = currentFields;
-    currentPermissions = permRes;
+    // Normalise: API returns {status:'Success', permissions:{read,write}}
+    const p = permRes.permissions || permRes;
+    currentPermissions = (permRes.status === 'Success' || permRes.status == null)
+      ? { readPermission: !!(p.read ?? p.readPermission), writePermission: !!(p.write ?? p.writePermission) }
+      : null;
     permissionsCache[currentTable.name] = currentPermissions;
     setStatus('ok',`${allTables.length} tables`);
     renderFields();
