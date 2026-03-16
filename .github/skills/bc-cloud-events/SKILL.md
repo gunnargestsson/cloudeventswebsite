@@ -993,30 +993,39 @@ Operators: `CONST` (exact), `FILTER` (pattern/range), `>` `<` `>=` `<=`, `&` (AN
 
 ## 11a. Searching for Customers and Items (Lookup Pattern)
 
+> **CRITICAL — always use the BC AL field name in `tableView`, never the JSON key.**
+> `tableView` is parsed by BC using the original AL field names (e.g. `No.`, `Description`).
+> JSON keys (e.g. `No_`, `Description`) are only used inside the `fields` and `primaryKey` objects
+> of `Data.Records.Get` / `Data.Records.Set` responses and requests.
+> Obtain the correct AL name from `Help.Fields.Get` → `name` property.
+
 When searching for a customer or item by a free-text query, **never combine multiple fields in one `FILTER` with `|`**. BC evaluates `WHERE(A=FILTER(...)|B=FILTER(...))` as an OR on field A's values, not across fields. Search one field at a time and fall back progressively:
 
 ### Customer lookup — three-step pattern
+
+BC AL field names for Customer: `No.` · `Name` · `Address` · `City` · `Blocked`
 
 ```javascript
 async function lookupCustomer(companyId, query, token) {
   const q = sanitizedQuery; // strip injection chars
   const FIELDS = [1, 2, 5, 7, 21, 22]; // No., Name, Address, City, ...
 
-  // Step 1: case-insensitive name search
+  // Step 1: case-insensitive name search  — use BC field name "Name"
   let res = await cePost(companyId, {
     type: 'Data.Records.Get', subject: 'Customer',
     data: JSON.stringify({ tableView: `WHERE(Name=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
   }, token);
   if (res.result?.length) return res.result;
 
-  // Step 2: customer No. search
+  // Step 2: customer No. search  — BC field name is "No." (with period)
   res = await cePost(companyId, {
     type: 'Data.Records.Get', subject: 'Customer',
-    data: JSON.stringify({ tableView: `WHERE(No_=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
+    data: JSON.stringify({ tableView: `WHERE(No.=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
   }, token);
   if (res.result?.length) return res.result;
 
-  // Step 3: client-side fallback — all non-blocked customers (No., Name, Address)
+  // Step 3: client-side fallback — all non-blocked customers
+  //   BC field name for blocked status is "Blocked"; blank CONST = not blocked
   const all = await cePost(companyId, {
     type: 'Data.Records.Get', subject: 'Customer',
     data: JSON.stringify({ tableView: 'WHERE(Blocked=CONST( ))', fieldNumbers: FIELDS, take: 200 })
@@ -1030,26 +1039,29 @@ async function lookupCustomer(companyId, query, token) {
 
 ### Item lookup — same three-step pattern
 
+BC AL field names for Item: `No.` · `Description` · `Base Unit of Measure` · `Unit Price` · `Blocked`
+
 ```javascript
 async function lookupItem(companyId, query, token) {
   const q = sanitizedQuery;
-  const FIELDS = [1, 3, 30, 8]; // No., Description, Unit of Measure, ...
+  const FIELDS = [1, 3, 30, 8]; // No., Description, Unit of Measure, Unit Price
 
-  // Step 1: description search
+  // Step 1: description search  — BC field name is "Description"
   let res = await cePost(companyId, {
     type: 'Data.Records.Get', subject: 'Item',
     data: JSON.stringify({ tableView: `WHERE(Description=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
   }, token);
   if (res.result?.length) return res.result;
 
-  // Step 2: item No. search
+  // Step 2: item No. search  — BC field name is "No." (with period)
   res = await cePost(companyId, {
     type: 'Data.Records.Get', subject: 'Item',
-    data: JSON.stringify({ tableView: `WHERE(No_=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
+    data: JSON.stringify({ tableView: `WHERE(No.=FILTER(@*${q}*))`, fieldNumbers: FIELDS, take: 5 })
   }, token);
   if (res.result?.length) return res.result;
 
   // Step 3: client-side fallback — all non-blocked items
+  //   BC field name is "Blocked"; false = not blocked
   const all = await cePost(companyId, {
     type: 'Data.Records.Get', subject: 'Item',
     data: JSON.stringify({ tableView: 'WHERE(Blocked=CONST(false))', fieldNumbers: FIELDS, take: 200 })
@@ -1062,6 +1074,7 @@ async function lookupItem(companyId, query, token) {
 ```
 
 **Key rules:**
+- **`tableView` always uses BC AL field names** (from `Help.Fields.Get` → `name`). Never use JSON keys here.
 - Always use `FILTER(@*query*)` (with `@` prefix) for case-insensitive substring matching.
 - Search **one field per request** — do not combine multiple fields with `|` across fields in one `WHERE`.
 - The `|` operator in `WHERE(A=FILTER(x|y))` means OR on values of field A, not OR across different fields.

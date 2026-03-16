@@ -134,9 +134,9 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
       });
       if ((res.result || []).length) return JSON.stringify(res.result);
 
-      // Step 2: case-insensitive customer No. search
+      // Step 2: case-insensitive customer No. search  — BC field name is "No." (with period)
       res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Customer", {
-        tableView: `WHERE(No_=FILTER(@*${q}*))`,
+        tableView: `WHERE(No.=FILTER(@*${q}*))`,
         fieldNumbers: CUST_FIELDS,
         take: 5,
       });
@@ -168,9 +168,9 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
       });
       if ((res.result || []).length) return JSON.stringify(res.result);
 
-      // Step 2: case-insensitive item No. search
+      // Step 2: case-insensitive item No. search  — BC field name is "No." (with period)
       res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
-        tableView: `WHERE(No_=FILTER(@*${q}*))`,
+        tableView: `WHERE(No.=FILTER(@*${q}*))`,
         fieldNumbers: ITEM_FIELDS,
         take: 5,
       });
