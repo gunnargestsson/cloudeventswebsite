@@ -223,61 +223,32 @@ const docsCache = {};
 // ── NETWORK ───────────────────────────────────────────────────────────────────
 function g(id){ return (document.getElementById(id)||{}).value||''; }
 
-function baseUrl(){
-  return `https://api.businesscentral.dynamics.com/v2.0/${g('cfgTenant').trim()}/${g('cfgEnv').trim()}/api/origo/cloudEvent/v1.0/companies(${g('cfgCompany').trim()})`;
-}
-
-// Token cache
-let _tokenCache = null; // { token, expiresAt }
-
-async function getToken(){
-  if(_tokenCache && Date.now() < _tokenCache.expiresAt - 30000) return _tokenCache.token;
-
-  const tenant = g('cfgTenant').trim();
-  const clientId = g('cfgClientId').trim();
-  const clientSecret = g('cfgClientSecret').trim();
-
-  // Microsoft Entra token endpoint — supports CORS from browsers
-  const tokenUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
-
-  const body = new URLSearchParams({
-    grant_type: 'client_credentials',
-    client_id: clientId,
-    client_secret: clientSecret,
-    scope: 'https://api.businesscentral.dynamics.com/.default'
-  });
-
-  const res = await fetch(tokenUrl, {
+// All BC calls are proxied through /api/explorer to avoid browser CORS restrictions.
+// Credentials travel over HTTPS to our own SWA function; the function handles
+// the Entra token fetch and the two-step CloudEvents task/data-URL pattern.
+async function cePost(envelope, endpoint='tasks'){
+  const res = await fetch('/api/explorer', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString()
-  });
-
-  const data = await res.json();
-  if(!res.ok || data.error) throw new Error(`Token error: ${data.error_description || data.error || res.status}`);
-
-  _tokenCache = { token: data.access_token, expiresAt: Date.now() + (data.expires_in * 1000) };
-  return _tokenCache.token;
-}
-
-async function cePost(envelope){
-  const token = await getToken();
-  const url = `${baseUrl()}/tasks`;
-  const res = await fetch(url,{
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
-    body: JSON.stringify(envelope)
+    headers: {
+      'Content-Type':       'application/json',
+      'x-bc-tenant':        g('cfgTenant').trim(),
+      'x-bc-client-id':     g('cfgClientId').trim(),
+      'x-bc-client-secret': g('cfgClientSecret').trim(),
+      'x-bc-environment':   g('cfgEnv').trim(),
+      'x-bc-company':       g('cfgCompany').trim(),
+      'x-bc-endpoint':      endpoint,
+    },
+    body: JSON.stringify(envelope),
   });
   if(!res.ok){ const t=await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0,300)}`); }
-  const task = await res.json();
-  if(task.status==='Error') throw new Error(task.error||JSON.stringify(task));
-  if(!task.data || !String(task.data).startsWith('http')) return task;
-  // Step 2
-  const dr = await fetch(task.data,{headers:{'Authorization':`Bearer ${token}`}});
-  if(!dr.ok) throw new Error(`Data URL HTTP ${dr.status}`);
-  if(task.datacontenttype==='application/pdf') return {_pdf:true,dataUrl:task.data,status:'Success'};
-  const result = await dr.json();
-  if(result.status==='Error') throw new Error(result.error||'Result error');
+  const ct = res.headers.get('content-type')||'';
+  if(ct.includes('application/pdf')){
+    const blob = await res.blob();
+    return {_pdf:true, dataUrl:URL.createObjectURL(blob), status:'Success'};
+  }
+  const result = await res.json();
+  if(result.error && !result.status) throw new Error(result.error);
+  if(result.status==='Error') throw new Error(result.error||JSON.stringify(result));
   return result;
 }
 
@@ -292,7 +263,6 @@ async function connectAndLoad(){
   if(!g('cfgTenant')||!g('cfgEnv')||!g('cfgCompany')||!g('cfgClientId')||!g('cfgClientSecret')){
     alert('Fill in all five connection fields.'); return;
   }
-  _tokenCache = null; // clear so new credentials are used
   const btn = document.getElementById('connBtn');
   btn.disabled=true; btn.textContent='Connecting…';
   setStatus('ld','Loading…');
@@ -605,16 +575,8 @@ async function sendReq(){
   document.getElementById('pbar').style.display='none';
   const t0=Date.now();
   try{
-    let result;
-    if(endpoint==='queues'){
-      const token = await getToken();
-      const res=await fetch(`${baseUrl()}/queues`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify(env)});
-      if(!res.ok){ const t=await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0,300)}`); }
-      result=await res.json();
-      result._note='Queued asynchronously. Poll /queues({id})/Microsoft.NAV.GetStatus to check.';
-    } else {
-      result=await cePost(env);
-    }
+    const result = await cePost(env, endpoint);
+    if(endpoint==='queues') result._note='Queued asynchronously. Poll /queues({id})/Microsoft.NAV.GetStatus to check.';
     lastResp=result; currentPage=0;
     setStatus('ok','Connected');
     showResp(200,Date.now()-t0,result);
