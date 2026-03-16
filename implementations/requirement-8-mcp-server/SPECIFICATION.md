@@ -151,7 +151,7 @@ case "list_companies": content = await toolListCompanies(); break;
 ---
 
 ### 3. New Tool: `list_message_types`
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🟡 Medium  
 **File:** `api/mcp/index.js`
 
@@ -1005,8 +1005,57 @@ case "set_translations":  content = await toolSetTranslations(args);  break;
 | 🟡 Medium | §7 — filter/paging on `list_tables` | ~30 min |
 | 🟢 Low | §8 — markdown output format | ~1 h |
 | 🟢 Low | §9 — MCP Resources | ~2 h |
-| 🟢 Low | §10 — MCP Prompts (`describe_table`, `find_tables_for_entity`, `data_model_overview`, `sales_order_creation_workflow`, `customer_lookup_pattern`, `item_lookup_pattern`) | ~2 h |
+| 🟢 Low | §10 — MCP Prompts (`describe_table`, `find_tables_for_entity`, `data_model_overview`, `sales_order_creation_workflow`, `customer_lookup_pattern`, `item_lookup_pattern`, `implement_message_type`) | ~2 h |
 | 🟡 Medium | §14 — translation tools (`list_translations`, `set_translations`) | ~1 h |
+| 🟡 Medium | §15 — `get_message_type_help` tool + `implement_message_type` prompt | ~1 h |
+
+---
+
+### 15. New Tool: `get_message_type_help` + Prompt: `implement_message_type`
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Fetches the full implementation guide for a specific Cloud Event message type via `Help.Implementation.Get`. The BC server returns markdown documentation for the message type containing the JSON schema, required fields, examples, and business rules needed to implement it. Combined with `implement_message_type` prompt that bundles the guide with the full type catalogue.
+
+**Tool: `get_message_type_help`**
+```js
+async function toolGetMessageTypeHelp({ type, lcid = 1033 } = {}) {
+  // calls Help.Implementation.Get with subject = message type name
+  // returns { company, type, markdown }
+}
+```
+
+**Input parameters:**
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | ✅ | Message type name (e.g. `'Customer.Create'`) |
+| `lcid` | integer | — | Language LCID (default 1033) |
+
+**Resource:** `bc://message-types/{name}` — reads the help markdown for a given type.
+
+**Prompt: `implement_message_type`**
+
+Arguments: `type` (required), `lcid` (optional). Fetches `Help.Implementation.Get` for the given type and `Help.MessageTypes.Get` for the full catalogue in parallel, then composes a ready-to-use context block:
+
+```
+## Implementation Guide: Customer.Create
+
+**Company:** CRONUS IS
+
+---
+
+{full markdown help from Help.Implementation.Get}
+
+---
+
+## All available message types in this BC instance
+
+- **Customer.Create** (Inbound) — Creates a new customer
+- …
+```
+
+This gives an AI assistant everything it needs to implement the message type without any further BC lookups.
 
 ---
 

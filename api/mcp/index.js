@@ -13,6 +13,7 @@
  *   get_table_fields   — Help.Fields.Get + Help.Permissions.Get — fields for one table (json or markdown)
  *   list_companies     — /api/v2.0/companies — all companies in the BC environment
  *   list_message_types — Help.MessageTypes.Get — all Cloud Event message types
+ *   get_message_type_help — Help.Implementation.Get — full implementation guide (markdown) for one message type
  *   get_records        — Data.Records.Get — records from any table with filter/paging
  *   search_customers   — Data.Records.Get — customer lookup by name or number
  *   search_items       — Data.Records.Get — item lookup by description or number
@@ -21,7 +22,8 @@
  *
  * Resources: bc://companies, bc://message-types, bc://tables, bc://tables/{name}
  * Prompts:   describe_table, find_tables_for_entity, data_model_overview,
- *            sales_order_creation_workflow, customer_lookup_pattern, item_lookup_pattern
+ *            sales_order_creation_workflow, customer_lookup_pattern, item_lookup_pattern,
+ *            implement_message_type
  *
  * Required env vars: BC_TENANT_ID, BC_CLIENT_ID, BC_CLIENT_SECRET
  * Optional env vars: BC_ENVIRONMENT  (default "production")
@@ -314,6 +316,33 @@ async function toolListMessageTypes({ filter } = {}) {
   return { company: company.name, typeCount: types.length, types };
 }
 
+async function toolGetMessageTypeHelp({ type, lcid = 1033 } = {}) {
+  if (!type) throw new Error("Parameter 'type' is required (message type name, e.g. 'Customer.Create')");
+
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const company  = await getCompany();
+
+  const result = await bcTask(tenantId, env, company.id, {
+    specversion: "1.0",
+    type:        "Help.Implementation.Get",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(type),
+    lcid,
+  });
+
+  // The result may be a string (raw markdown) or an object with a result/value/content field
+  let markdown = result.result ?? result.value ?? result.content ?? result.markdown;
+  if (markdown == null) {
+    markdown = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+  }
+  if (typeof markdown !== "string") {
+    markdown = JSON.stringify(markdown, null, 2);
+  }
+
+  return { company: company.name, type: String(type), markdown };
+}
+
 async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid = 1033, format = "json" } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   validateTableName(table);
@@ -522,6 +551,18 @@ const TOOLS = [
     },
   },
   {
+    name:        "get_message_type_help",
+    description: "Returns the full implementation guide (markdown) for a specific Cloud Event message type from Business Central via Help.Implementation.Get. Contains the JSON schema, required fields, examples, and any business rules needed to implement the message type.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        type: { type: "string",  description: "Message type name (e.g. 'Customer.Create', 'SalesOrder.Post')." },
+        lcid: { type: "integer", description: "Language LCID for the help content (default 1033 = English)." },
+      },
+      required: ["type"],
+    },
+  },
+  {
     name:        "get_records",
     description: "Reads records from a Business Central table with optional filter, field selection, and paging. Returns up to 50 records by default (max 200).",
     inputSchema: {
@@ -641,8 +682,9 @@ async function handleMessage(msg) {
           case "get_table_info":     content = await toolGetTableInfo(args);      break;
           case "get_table_fields":   content = await toolGetTableFields(args);    break;
           case "list_companies":     content = await toolListCompanies();         break;
-          case "list_message_types": content = await toolListMessageTypes(args);  break;
-          case "get_records":        content = await toolGetRecords(args);        break;
+          case "list_message_types":    content = await toolListMessageTypes(args);       break;
+          case "get_message_type_help": content = await toolGetMessageTypeHelp(args);     break;
+          case "get_records":           content = await toolGetRecords(args);              break;
           case "search_customers":   content = await toolSearchCustomers(args);   break;
           case "search_items":       content = await toolSearchItems(args);       break;
           case "list_translations":  content = await toolListTranslations(args);  break;
@@ -680,6 +722,10 @@ async function handleMessage(msg) {
         let data;
         if (uri === "bc://companies")          data = await toolListCompanies();
         else if (uri === "bc://message-types") data = await toolListMessageTypes();
+        else if (uri.startsWith("bc://message-types/")) {
+          const msgType = decodeURIComponent(uri.slice("bc://message-types/".length));
+          data = await toolGetMessageTypeHelp({ type: msgType });
+        }
         else if (uri === "bc://tables")        data = await toolListTables({});
         else if (uri.startsWith("bc://tables/")) {
           const tableName = decodeURIComponent(uri.slice("bc://tables/".length));
@@ -732,6 +778,14 @@ async function handleMessage(msg) {
                 name: "item_lookup_pattern",
                 description: "Returns an item lookup guide with the complete live Item field table for this BC instance.",
                 arguments: [],
+              },
+              {
+                name: "implement_message_type",
+                description: "Returns the full implementation guide for a Cloud Event message type: the BC help documentation plus the list of all available message types for context.",
+                arguments: [
+                  { name: "type", description: "Message type name (e.g. 'Customer.Create')", required: true },
+                  { name: "lcid", description: "Language LCID for content (default 1033)",    required: false },
+                ],
               },
             ],
           },
@@ -801,6 +855,20 @@ async function handleMessage(msg) {
             `- In stock only: \`WHERE(Inventory=FILTER(>0))\`\n\n` +
             `To limit fields returned, pass \`fieldNumbers\` (e.g. \`[1,3,8,18,21,54]\` for No., Description, Base Unit of Measure, Unit Price, Inventory, Blocked).\n\n` +
             `**All Item fields in this BC instance:**\n${data.markdown}`;
+        } else if (promptName === "implement_message_type") {
+          if (!promptArgs.type) throw new Error("Argument 'type' is required for the implement_message_type prompt");
+          const lcid = Number(promptArgs.lcid) || 1033;
+          const [helpData, typesData] = await Promise.all([
+            toolGetMessageTypeHelp({ type: promptArgs.type, lcid }),
+            toolListMessageTypes({}),
+          ]);
+          text = `## Implementation Guide: ${promptArgs.type}\n\n` +
+            `**Company:** ${helpData.company}\n\n` +
+            `---\n\n` +
+            `${helpData.markdown}\n\n` +
+            `---\n\n` +
+            `## All available message types in this BC instance\n\n` +
+            typesData.types.map(t => `- **${t.name}** (${t.direction || ""})${t.description ? " — " + t.description : ""}`).join("\n");
         } else {
           return { jsonrpc: "2.0", id, error: { code: -32602, message: `Unknown prompt: ${promptName}` } };
         }
