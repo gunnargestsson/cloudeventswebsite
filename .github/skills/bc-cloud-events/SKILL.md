@@ -200,8 +200,8 @@ Document Type          → DocumentType
 Direction: **Outbound**
 
 Table identification (evaluated in this priority order):
-1. `data.tableName` — string
-2. `data.tableNumber` (or `tableNo` / `tableId`) — integer
+1. `data.tableNumber` (or `tableNo` / `tableId`) — integer
+2. `data.tableName` — string
 3. `subject` — table name or numeric string
 
 ```json
@@ -261,12 +261,27 @@ Direction: **Outbound**
 
 Same parameters as `Data.Records.Get` except no `fieldNumbers`. Returns only SystemId and `SystemModifiedAt`.
 
+**`startDateTime` and `endDateTime` are both optional:**
+- Omit `startDateTime` → defaults to `0DT` (beginning of time, returns all records from the start)
+- Omit `endDateTime` → defaults to `CurrentDateTime()` (up to now)
+- Omit both → returns IDs for all records in the table
+
 ```json
 {
   "specversion": "1.0",
   "type": "Data.RecordIds.Get",
   "source": "MyApp v1.0",
   "data": "{\"tableName\":\"Customer\",\"startDateTime\":\"2026-01-01T00:00:00Z\"}"
+}
+```
+
+Minimal form (all records, no date filter):
+```json
+{
+  "specversion": "1.0",
+  "type": "Data.RecordIds.Get",
+  "source": "MyApp v1.0",
+  "data": "{\"tableName\":\"Customer\"}"
 }
 ```
 
@@ -337,9 +352,14 @@ All metadata types use `/tasks`. `data` must be a JSON string.
 { "specversion": "1.0", "type": "Help.Tables.Get", "source": "MyApp v1.0", "lcid": 1033 }
 ```
 
-Single-table lookup via `subject`:
+Single-table lookup — three approaches (evaluated in priority order):
+1. `data.tableNumber` — integer in `data`
+2. `data.tableName` — string in `data`
+3. `subject` — table name or numeric string in the envelope
+
 ```json
 { "specversion": "1.0", "type": "Help.Tables.Get", "source": "MyApp", "subject": "Customer" }
+{ "specversion": "1.0", "type": "Help.Tables.Get", "source": "MyApp", "data": "{\"tableNumber\":18}", "lcid": 1039 }
 ```
 
 Response: `{ "status": "Success", "result": [{ "id": 18, "name": "Customer", "caption": "Customer" }] }`
@@ -535,11 +555,11 @@ Response depends on Cloud Events Setup — two formats:
     {
       "locationCode": "BLUE",
       "inventory": 50,
-      "reserved": 10,
+      "qtyReserved": 10,
       "grossRequirement": 20,
       "scheduledReceipt": 30,
       "plannedOrderReceipt": 15,
-      "projectedAvailableBalance": 65
+      "availableQuantity": 70
     }
   ]
 }
