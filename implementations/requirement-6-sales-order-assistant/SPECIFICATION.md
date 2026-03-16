@@ -149,7 +149,7 @@ Tone: professional, concise. Currency: ISK (króna) unless customer record shows
 | Tool | BC API Call | Description |
 |---|---|---|
 | `lookup_customer` | `Data.Records.Get` on `Customer`, fields [1,2,5,7,21,22], `tableView: "WHERE(No_=FILTER(*q*)\|Name=FILTER(*q*))"`, take 5 | Search customer by name or number |
-| `lookup_item` | `Data.Records.Get` on `Item`, fields [1,3,30,8], take 5 | Search item by number or description |
+| `lookup_item` | `Data.Records.Get` on `Item`, fields [1,3,8,18] (`No_`, `Description`, `BaseUnitofMeasure`, `UnitPrice`), take 5 | Search item by number or description |
 | `check_item_availability` | `Item.Availability.Get` with `itemNo`, optional `requestedDeliveryDate` | Get projected available quantity |
 | `get_item_price` | `Item.Price.Get` with `itemNo`, optional `customerNo` and `quantity` | Get sales price (customer-specific if provided) |
 | `check_customer_credit` | `Customer.CreditLimit.Get` | Get credit limit and outstanding balance |
@@ -172,7 +172,7 @@ Two-step `Data.Records.Set` process:
 ```json
 {
   "type": "Data.Records.Set",
-  "data": "{\"tableName\":\"Sales Line\",\"fields\":{\"DocumentType\":\"Order\",\"DocumentNo_\":\"SO-00123\",\"LineNo_\":10000,\"Type\":\"Item\",\"No_\":\"1000\",\"Quantity\":5,\"UnitPrice\":1200.00,\"UnitOfMeasureCode\":\"PCS\"}}"
+  "data": "{\"tableName\":\"Sales Line\",\"fields\":{\"DocumentType\":\"Order\",\"DocumentNo_\":\"SO-00123\",\"LineNo_\":10000,\"Type\":\"Item\",\"No_\":\"1000\",\"Quantity\":5,\"UnitPrice\":1200.00,\"UnitofMeasureCode\":\"PCS\"}}"
 }
 ```
 `LineNo_` increments by 10,000 per line.

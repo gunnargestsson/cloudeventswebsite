@@ -158,7 +158,7 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
 
     case "lookup_item": {
       const q = sanitizeFilter(input.query);
-      const ITEM_FIELDS = [1, 3, 30, 8];
+      const ITEM_FIELDS = [1, 3, 8, 18]; // No., Description, Base Unit of Measure, Unit Price
 
       // Step 1: case-insensitive description search
       let res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
