@@ -15,6 +15,7 @@
  *   list_message_types — Help.MessageTypes.Get — all Cloud Event message types
  *   get_message_type_help — Help.Implementation.Get — full implementation guide (markdown) for one message type
  *   get_records        — Data.Records.Get — records from any table with filter/paging
+ *   set_records        — Data.Records.Set — create / modify / delete / upsert records in any table
  *   search_customers   — Data.Records.Get — customer lookup by name or number
  *   search_items       — Data.Records.Get — item lookup by description or number
  *   list_translations  — Cloud Event Translation — list UI translations (filter by source/lcid)
@@ -383,6 +384,40 @@ async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid
   return { company: company.name, table: String(table), skip, take, count: records.length, records };
 }
 
+async function toolSetRecords({ table, data, mode = "upsert" } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required");
+  if (!Array.isArray(data) || !data.length) throw new Error("Parameter 'data' must be a non-empty array");
+  validateTableName(table);
+
+  const VALID_MODES = ["insert", "modify", "delete", "upsert"];
+  if (!VALID_MODES.includes(mode)) throw new Error(`Invalid mode '${mode}'. Valid values: ${VALID_MODES.join(", ")}`);
+
+  // Each record must have at least a primaryKey object
+  for (let i = 0; i < data.length; i++) {
+    const rec = data[i];
+    if (!rec || typeof rec !== "object") throw new Error(`data[${i}] must be an object`);
+    if (!rec.primaryKey || typeof rec.primaryKey !== "object") throw new Error(`data[${i}].primaryKey is required`);
+    if (mode !== "delete" && (!rec.fields || typeof rec.fields !== "object")) throw new Error(`data[${i}].fields is required for mode '${mode}'`);
+  }
+
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const company  = await getCompany();
+
+  const payload = mode === "upsert" ? { data } : { mode, data };
+
+  const result = await bcTask(tenantId, env, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Set",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(table),
+    data:        JSON.stringify(payload),
+  });
+
+  const records = result.result || result.value || (Array.isArray(result) ? result : []);
+  return { company: company.name, table: String(table), mode, written: data.length, records };
+}
+
 async function toolSearchCustomers({ query, take = 10 } = {}) {
   if (!query) throw new Error("Parameter 'query' is required");
   take = Math.min(Number(take) || 10, 50);
@@ -580,6 +615,36 @@ const TOOLS = [
     },
   },
   {
+    name:        "set_records",
+    description: "Creates, modifies, deletes, or upserts records in any Business Central table via Data.Records.Set. Each record must supply a primaryKey object (the BC primary key fields) and a fields object (the non-key fields to write). Mode 'upsert' (default) inserts if the record does not exist, otherwise modifies it.",
+    inputSchema: {
+      type:     "object",
+      properties: {
+        table: { type: "string", description: "BC table name (e.g. 'Customer', 'Sales Header')." },
+        mode:  { type: "string", enum: ["insert", "modify", "delete", "upsert"], description: "Write mode (default 'upsert')." },
+        data: {
+          type:  "array",
+          description: "Array of records to write. Each item must have a 'primaryKey' object and (except for delete) a 'fields' object.",
+          items: {
+            type:       "object",
+            properties: {
+              primaryKey: {
+                type:        "object",
+                description: "Key fields that identify the record (e.g. { DocumentType: 'Order', No_: 'SO-001' }).",
+              },
+              fields: {
+                type:        "object",
+                description: "Non-key field values to write (not required for mode 'delete').",
+              },
+            },
+            required: ["primaryKey"],
+          },
+        },
+      },
+      required: ["table", "data"],
+    },
+  },
+  {
     name:        "search_customers",
     description: "Search for customers in Business Central by name or customer number. Returns key fields (No., Name, Address, Phone, Contact, Country).",
     inputSchema: {
@@ -681,11 +746,12 @@ async function handleMessage(msg) {
           case "list_tables":        content = await toolListTables(args);        break;
           case "get_table_info":     content = await toolGetTableInfo(args);      break;
           case "get_table_fields":   content = await toolGetTableFields(args);    break;
-          case "list_companies":     content = await toolListCompanies();         break;
+          case "list_companies":        content = await toolListCompanies();              break;
           case "list_message_types":    content = await toolListMessageTypes(args);       break;
           case "get_message_type_help": content = await toolGetMessageTypeHelp(args);     break;
           case "get_records":           content = await toolGetRecords(args);              break;
-          case "search_customers":   content = await toolSearchCustomers(args);   break;
+          case "set_records":           content = await toolSetRecords(args);              break;
+          case "search_customers":      content = await toolSearchCustomers(args);        break;
           case "search_items":       content = await toolSearchItems(args);       break;
           case "list_translations":  content = await toolListTranslations(args);  break;
           case "set_translations":   content = await toolSetTranslations(args);   break;

@@ -1008,6 +1008,40 @@ case "set_translations":  content = await toolSetTranslations(args);  break;
 | 🟢 Low | §10 — MCP Prompts (`describe_table`, `find_tables_for_entity`, `data_model_overview`, `sales_order_creation_workflow`, `customer_lookup_pattern`, `item_lookup_pattern`, `implement_message_type`) | ~2 h |
 | 🟡 Medium | §14 — translation tools (`list_translations`, `set_translations`) | ~1 h |
 | 🟡 Medium | §15 — `get_message_type_help` tool + `implement_message_type` prompt | ~1 h |
+| 🟡 Medium | §16 — `set_records` tool — generic table write | ~1 h |
+
+---
+
+### 16. New Tool: `set_records`
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Writes records to any Business Central table via `Data.Records.Set`. Supports four modes: `insert`, `modify`, `delete`, and `upsert` (default). Each record in the `data` array must supply a `primaryKey` object (the BC primary-key fields) and a `fields` object (non-key fields to write — not required for `delete`). The table name is validated with `validateTableName()` before the BC call. Returns the written record count and any result records BC sends back.
+
+**Input parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `table` | string | ✅ | BC table name (e.g. `'Customer'`, `'Sales Header'`) |
+| `mode` | string | — | `"insert"` \| `"modify"` \| `"delete"` \| `"upsert"` (default) |
+| `data` | array | ✅ | Array of `{ primaryKey, fields }` objects |
+
+**Example — upsert a customer:**
+```jsonc
+{
+  "table": "Customer",
+  "data": [{
+    "primaryKey": { "No.": "C99999" },
+    "fields": { "Name": "Test Corp", "Address": "123 Main St", "Country/Region Code": "IS" }
+  }]
+}
+```
+
+**Returns:**
+```jsonc
+{ "company": "CRONUS IS", "table": "Customer", "mode": "upsert", "written": 1, "records": [...] }
+```
 
 ---
 
