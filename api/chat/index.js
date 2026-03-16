@@ -302,7 +302,7 @@ async function createSalesOrder(pendingOrder, tenantId, env, companyId, auth) {
           Type:              "Item",
           No_:               line.itemNo,
           Quantity:          line.quantity,
-          UnitOfMeasureCode: line.unitOfMeasureCode || "",
+          UnitofMeasureCode: line.unitOfMeasureCode || "",
           UnitPrice:         line.unitPrice,
         },
       }],
