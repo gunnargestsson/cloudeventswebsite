@@ -14,11 +14,21 @@ Your job is to help users create sales orders by understanding natural language 
 WORKFLOW:
 1. Extract the customer and order lines from the user's message or uploaded document.
 2. Use lookup_customer to find and confirm the correct BC customer. If multiple matches, list them and ask the user to confirm.
-3. Use lookup_item for each product mentioned. If ambiguous, ask the user.
+3. Use lookup_item for each product mentioned. The result includes both Base Unit of Measure (field 8) and Sales Unit of Measure (field 47).
+   - If the item has a Sales Unit of Measure that differs from the Base Unit of Measure, prefer the Sales Unit of Measure for the order line unless the user specifies otherwise.
+   - If the user mentions a unit that is neither the Base UoM nor the Sales UoM, call get_item_units_of_measure to retrieve all available UoM codes for that item first.
+   - If the user does not specify a unit, use the Sales Unit of Measure if present, otherwise use the Base Unit of Measure.
 4. Use check_item_availability for each resolved item. Note any stock issues.
-5. Use get_item_price for each item (pass the customerNo for customer-specific pricing).
+5. Use get_item_price for each item. Always pass customerNo and unitOfMeasureCode so the correct price tier is returned.
 6. Once ALL lines and the customer are resolved to real BC records, call propose_sales_order.
-7. Do NOT call propose_sales_order until you have confirmed: customerNo, and itemNo + unitPrice for every line.
+7. Do NOT call propose_sales_order until you have confirmed: customerNo, and itemNo + unitPrice + unitOfMeasureCode for every line.
+
+UNIT OF MEASURE RULES:
+- lookup_item returns: No., Description, Base Unit of Measure (field 8), Unit Price (field 18), Sales Unit of Measure (field 47).
+- Always set unitOfMeasureCode on every propose_sales_order line — never leave it blank.
+- If Base UoM and Sales UoM differ, mention both to the user and confirm which one to use.
+- Call get_item_units_of_measure when the user requests a specific UoM not yet known, or to show all options.
+- Pass the chosen unitOfMeasureCode to get_item_price.
 
 When the user message is exactly "__CONFIRM_ORDER__", create the sales order in BC using the pending order data you hold in context and report the resulting order number.
 
@@ -40,13 +50,24 @@ const TOOLS = [
   },
   {
     name: "lookup_item",
-    description: "Search for an item/product in Business Central by item number or description.",
+    description: "Search for an item/product in Business Central by item number or description. Returns No., Description, Base Unit of Measure (field 8), Unit Price (field 18), and Sales Unit of Measure (field 47). Prefer the Sales Unit of Measure as the default UoM for the order line when it differs from the Base Unit of Measure.",
     input_schema: {
       type: "object",
       properties: {
         query: { type: "string", description: "Item number or description to search" },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "get_item_units_of_measure",
+    description: "Returns all units of measure defined for a specific item in the Item Unit of Measure table, including the Qty. per Unit of Measure. Call this when the user requests a UoM not already returned by lookup_item, or when you need to present all available UoM options to the user.",
+    input_schema: {
+      type: "object",
+      properties: {
+        itemNo: { type: "string", description: "Item number" },
+      },
+      required: ["itemNo"],
     },
   },
   {
@@ -63,13 +84,14 @@ const TOOLS = [
   },
   {
     name: "get_item_price",
-    description: "Get the sales price for an item, optionally for a specific customer.",
+    description: "Get the sales price for an item, optionally for a specific customer and unit of measure. Always pass unitOfMeasureCode to ensure the correct UoM price tier is returned.",
     input_schema: {
       type: "object",
       properties: {
-        itemNo:     { type: "string" },
-        customerNo: { type: "string", description: "Optional — customer number for customer-specific pricing" },
-        quantity:   { type: "number", description: "Optional — quantity for volume pricing" },
+        itemNo:            { type: "string" },
+        customerNo:        { type: "string", description: "Optional — customer number for customer-specific pricing" },
+        quantity:          { type: "number", description: "Optional — quantity for volume pricing" },
+        unitOfMeasureCode: { type: "string", description: "Optional — unit of measure code (e.g. 'PCS', 'BOX'). Pass the chosen UoM so the correct price tier is returned." },
       },
       required: ["itemNo"],
     },
@@ -158,7 +180,7 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
 
     case "lookup_item": {
       const q = sanitizeFilter(input.query);
-      const ITEM_FIELDS = [1, 3, 8, 18]; // No., Description, Base Unit of Measure, Unit Price
+      const ITEM_FIELDS = [1, 3, 8, 18, 47]; // No., Description, Base Unit of Measure, Unit Price, Sales Unit of Measure
 
       // Step 1: case-insensitive description search
       let res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
@@ -196,10 +218,20 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
       return JSON.stringify(res);
     }
 
+    case "get_item_units_of_measure": {
+      const res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item Unit of Measure", {
+        tableView:    `WHERE(Item No.=FILTER(${sanitizeFilter(input.itemNo)}))`,
+        fieldNumbers: [1, 2, 3], // Item No., Code, Qty. per Unit of Measure
+        take:         50,
+      });
+      return JSON.stringify(res.result || []);
+    }
+
     case "get_item_price": {
       const data = {};
-      if (input.customerNo) data.customerNo = input.customerNo;
-      if (input.quantity)   data.quantity   = input.quantity;
+      if (input.customerNo)        data.customerNo        = input.customerNo;
+      if (input.quantity)          data.quantity          = input.quantity;
+      if (input.unitOfMeasureCode) data.unitOfMeasureCode = input.unitOfMeasureCode;
       const res = await bcTask(tenantId, env, companyId, auth, "Item.Price.Get", input.itemNo, Object.keys(data).length ? data : undefined);
       return JSON.stringify(res);
     }
