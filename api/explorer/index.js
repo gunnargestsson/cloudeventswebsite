@@ -24,18 +24,18 @@ async function getToken(tenantId, clientId, clientSecret) {
 }
 
 module.exports = async function (context, req) {
-  const tenantId    = req.headers["x-bc-tenant"];
-  const clientId    = req.headers["x-bc-client-id"];
-  const clientSecret = req.headers["x-bc-client-secret"];
-  const environment = req.headers["x-bc-environment"];
-  const companyId   = req.headers["x-bc-company"];
-  const endpoint    = (req.headers["x-bc-endpoint"] || "tasks").toLowerCase();
+  const tenantId     = req.headers["x-bc-tenant"]        || process.env.BC_TENANT_ID;
+  const clientId     = req.headers["x-bc-client-id"]     || process.env.BC_CLIENT_ID;
+  const clientSecret = req.headers["x-bc-client-secret"] || process.env.BC_CLIENT_SECRET;
+  const environment  = req.headers["x-bc-environment"]   || process.env.BC_ENVIRONMENT;
+  const companyId    = req.headers["x-bc-company"];
+  const endpoint     = (req.headers["x-bc-endpoint"] || "tasks").toLowerCase();
 
   if (!tenantId || !clientId || !clientSecret || !environment || !companyId) {
     context.res = {
       status: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Missing required headers: x-bc-tenant, x-bc-client-id, x-bc-client-secret, x-bc-environment, x-bc-company" }),
+      body: JSON.stringify({ error: "Missing credentials: x-bc-company is always required; provide x-bc-tenant/id/secret/environment headers or configure server environment variables" }),
     };
     return;
   }

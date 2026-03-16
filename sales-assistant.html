@@ -149,8 +149,8 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
     <div class="hsub">Origo · Business Central · Claude</div>
   </div>
   <div class="hsp"></div>
-  <button class="hpill" onclick="toggleSettings()" id="settingsToggle">⚙ Settings</button>
-  <a href="index.html" class="hpill">← BC Portal</a>
+  <button class="hpill" onclick="toggleSettings()" id="settingsToggle">⚙ API Key</button>
+  <a href="index.html" class="hpill">← Home</a>
 </header>
 
 <div class="workspace">
@@ -158,61 +158,19 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
   <!-- ── SETTINGS PANEL ─────────────────────────────────────────────── -->
   <aside class="settings-panel" id="settingsPanel">
     <div class="sp-head">
-      <div class="sp-title">Configuration</div>
-      <div class="sp-sub">Credentials stored in localStorage</div>
+      <div class="sp-title">Claude API Key</div>
+      <div class="sp-sub">Stored in localStorage — never sent to our server</div>
     </div>
     <div class="sp-body">
-
       <div class="sp-section">
-        <div class="sp-section-title">Claude AI</div>
         <div>
           <div class="lbl">API Key</div>
           <input class="ci" type="password" id="cfgClaudeKey" placeholder="sk-ant-…" autocomplete="off">
           <div class="key-note">Stored in localStorage — persists across sessions</div>
         </div>
+        <button class="save-btn" onclick="saveClaudeKey()">Save Key</button>
+        <div class="save-ok hidden" id="saveOk">✓ Key saved</div>
       </div>
-
-      <div class="sp-section">
-        <div class="sp-section-title">Business Central</div>
-        <div>
-          <div class="lbl">Tenant</div>
-          <input class="ci" id="cfgTenant" placeholder="dynamics.is" oninput="onSettingInput()">
-        </div>
-        <div>
-          <div class="lbl">Environment</div>
-          <input class="ci" id="cfgEnv" placeholder="Production" oninput="onSettingInput()">
-        </div>
-        <div>
-          <div class="lbl">Client ID</div>
-          <input class="ci" id="cfgClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" oninput="onSettingInput()">
-        </div>
-        <div>
-          <div class="lbl">Client Secret</div>
-          <input class="ci" type="password" id="cfgClientSecret" placeholder="your-client-secret" autocomplete="off" oninput="onSettingInput()">
-        </div>
-        <div>
-          <div style="display:flex;gap:6px;align-items:flex-end">
-            <div style="flex:1">
-              <div class="lbl">Company</div>
-              <select class="ci" id="cfgCompany" onchange="onCompanySelect()"><option value="">— load companies —</option></select>
-            </div>
-            <button class="save-btn" onclick="loadSettingsCompanies()" style="width:auto;padding:5px 11px;flex-shrink:0">Load</button>
-          </div>
-        </div>
-        <div>
-          <div class="lbl">Language</div>
-          <select class="ci" id="cfgLcid" onchange="onLcidSelect()">
-            <option value="1033">English</option>
-          </select>
-        </div>
-        <div id="settingsStatus" style="font-size:9px;color:var(--text3);min-height:12px"></div>
-      </div>
-
-      <div>
-        <button class="save-btn" onclick="saveSettings()">Save &amp; Continue</button>
-        <div class="save-ok hidden" id="saveOk">✓ Settings saved</div>
-      </div>
-
     </div>
   </aside>
 
@@ -260,23 +218,16 @@ let isBusy       = false;
 const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',1036:'French',1034:'Spanish',1043:'Dutch',1053:'Swedish',1044:'Norwegian'};
 
 function loadSettings() {
-  const s = bcSettingsLoad();
-  if (s.tenant)       document.getElementById('cfgTenant').value       = s.tenant;
-  if (s.env)          document.getElementById('cfgEnv').value          = s.env;
-  if (s.clientId)     document.getElementById('cfgClientId').value     = s.clientId;
-  if (s.clientSecret) document.getElementById('cfgClientSecret').value = s.clientSecret;
-  const claudeKey = localStorage.getItem('sa_claude_key');
-  if (claudeKey)      document.getElementById('cfgClaudeKey').value    = claudeKey;
-  if (s.companyId && s.companyName) {
-    const sel = document.getElementById('cfgCompany');
-    sel.innerHTML = `<option value="${s.companyId}">${s.companyName}</option>`;
-  }
-  const lcidSel = document.getElementById('cfgLcid');
-  if (s.lcid) {
-    let opt = lcidSel.querySelector(`option[value="${s.lcid}"]`);
-    if (!opt) { opt = document.createElement('option'); opt.value = s.lcid; opt.textContent = LCID_NAMES[parseInt(s.lcid,10)] || s.lcid; lcidSel.appendChild(opt); }
-    lcidSel.value = s.lcid;
-  }
+  const saved = localStorage.getItem('sa_claude_key');
+  if (saved) document.getElementById('cfgClaudeKey').value = saved;
+}
+
+function saveClaudeKey() {
+  const key = document.getElementById('cfgClaudeKey').value.trim();
+  if (key) localStorage.setItem('sa_claude_key', key);
+  const ok = document.getElementById('saveOk');
+  ok.classList.remove('hidden');
+  setTimeout(() => ok.classList.add('hidden'), 2500);
 }
 
 function saveSettings() {
@@ -350,22 +301,24 @@ function toggleSettings() {
 }
 
 function getConfig() {
+  const s    = bcSettingsLoad();
+  const mode = localStorage.getItem('bc_portal_mode') || 'server';
   return {
-    apiKey: document.getElementById('cfgClaudeKey').value.trim(),
+    apiKey: localStorage.getItem('sa_claude_key') || '',
     bcConfig: {
-      tenantId:     document.getElementById('cfgTenant').value.trim(),
-      environment:  document.getElementById('cfgEnv').value.trim(),
-      companyId:    document.getElementById('cfgCompany').value.trim(),
-      clientId:     document.getElementById('cfgClientId').value.trim(),
-      clientSecret: document.getElementById('cfgClientSecret').value.trim(),
+      companyId: s.companyId,
+      ...(mode === 'custom' ? {
+        tenantId:     s.tenant,
+        environment:  s.env,
+        clientId:     s.clientId,
+        clientSecret: s.clientSecret,
+      } : {}),
     },
   };
 }
 
 function configOk() {
-  const c = getConfig();
-  return c.apiKey && c.bcConfig.tenantId && c.bcConfig.environment &&
-         c.bcConfig.companyId && c.bcConfig.clientId && c.bcConfig.clientSecret;
+  return bcSettingsReady() && !!localStorage.getItem('sa_claude_key');
 }
 
 // ── CHAT RENDERING ────────────────────────────────────────────────────────────
@@ -407,7 +360,7 @@ async function sendMessage(overrideText) {
   if (isBusy) return;
   if (!configOk()) {
     document.getElementById('settingsPanel').classList.remove('hidden');
-    alert('Please fill in all settings before sending a message.');
+    alert('Please enter your Claude API key first.');
     return;
   }
 
@@ -489,7 +442,7 @@ async function uploadFile(file) {
   if (isBusy) return;
   if (!configOk()) {
     document.getElementById('settingsPanel').classList.remove('hidden');
-    alert('Please fill in all settings before uploading a file.');
+    alert('Please enter your Claude API key first.');
     return;
   }
 
@@ -548,7 +501,7 @@ async function uploadFile(file) {
 async function uploadFile(file) {
   if (!configOk()) {
     document.getElementById('settingsPanel').classList.remove('hidden');
-    alert('Please fill in all settings before uploading a file.');
+    alert('Please enter your Claude API key first.');
     return;
   }
   if (isBusy) return;
@@ -648,7 +601,7 @@ async function sendMessage(overrideText) {
   if (isBusy) return;
   if (!configOk()) {
     document.getElementById('settingsPanel').classList.remove('hidden');
-    alert('Please fill in all settings before sending a message.');
+    alert('Please enter your Claude API key first.');
     return;
   }
   const input = document.getElementById('chatInput');
@@ -803,11 +756,14 @@ function startNew() {
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
-loadSettings();
-// If fully configured, collapse settings panel by default
-if (configOk()) {
-  document.getElementById('settingsPanel').classList.add('hidden');
-}
+(function(){
+  if(!bcSettingsReady()){ location.href='index.html'; return; }
+  loadSettings();
+  // Auto-collapse key panel if key is already saved
+  if (localStorage.getItem('sa_claude_key')) {
+    document.getElementById('settingsPanel').classList.add('hidden');
+  }
+})();
 </script>
 </body>
 </html>

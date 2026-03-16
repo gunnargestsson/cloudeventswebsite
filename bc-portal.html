@@ -1,0 +1,2189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BC Portal</title>
+<script src="settings.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0d14;
+    --surface: #111520;
+    --surface2: #171d2e;
+    --border: #1e2640;
+    --border-bright: #2d3a5e;
+    --accent: #4f7fff;
+    --accent2: #7c5cfc;
+    --accent-glow: rgba(79,127,255,0.18);
+    --text: #e8ecf5;
+    --text-dim: #6b7799;
+    --text-mid: #9ba8c8;
+    --green: #27c08a;
+    --red: #f25f5c;
+    --amber: #f5a623;
+    --radius: 12px;
+    --radius-sm: 7px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(79,127,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79,127,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+  #app { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+  /* HEADER */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,13,20,0.85);
+    backdrop-filter: blur(12px);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.15rem; letter-spacing: -0.02em;
+  }
+  .logo-icon {
+    width: 34px; height: 34px;
+    border-radius: 9px;
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .logo span { color: var(--text-dim); font-weight: 400; font-size: 0.78rem; }
+  .header-right { display: flex; align-items: center; gap: 14px; }
+  .status-pill {
+    display: flex; align-items: center; gap: 7px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 99px; padding: 5px 14px;
+    font-size: 0.72rem; color: var(--text-dim);
+  }
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-dim);
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2.5s infinite; }
+  .status-dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
+
+  .lang-select {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 99px; color: var(--text-mid);
+    font-family: 'DM Mono', monospace; font-size: 0.72rem;
+    padding: 5px 12px; outline: none; cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+    appearance: none; -webkit-appearance: none;
+  }
+  .lang-select:hover, .lang-select:focus { border-color: var(--accent); color: var(--text); }
+
+  main { flex: 1; padding: 32px; max-width: 1300px; margin: 0 auto; width: 100%; }
+
+  /* BREADCRUMB */
+  .breadcrumb {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 0.72rem; color: var(--text-dim); margin-bottom: 28px;
+  }
+  .breadcrumb .crumb { color: var(--text-mid); cursor: pointer; transition: color 0.2s; }
+  .breadcrumb .crumb:hover { color: var(--accent); }
+  .breadcrumb .sep { color: var(--border-bright); }
+
+  /* SECTION HEADER */
+  .section-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 24px; }
+  .section-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.6rem; letter-spacing: -0.03em; }
+  .section-title small {
+    display: block; font-family: 'DM Mono', monospace;
+    font-size: 0.68rem; color: var(--text-dim); font-weight: 400;
+    letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 4px;
+  }
+  .badge {
+    background: var(--surface2); border: 1px solid var(--border-bright);
+    color: var(--text-mid); padding: 4px 12px; border-radius: 99px; font-size: 0.72rem;
+  }
+
+  /* SEARCH */
+  .search-wrap { position: relative; margin-bottom: 20px; }
+  .search-wrap input {
+    width: 100%; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text);
+    font-family: 'DM Mono', monospace; font-size: 0.85rem;
+    padding: 11px 16px 11px 42px; outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .search-wrap input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .search-wrap input::placeholder { color: var(--text-dim); }
+  .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-dim); }
+
+  /* COMPANY SELECTOR */
+  #view-companies { animation: fadeIn 0.3s ease; }
+  .company-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .company-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px;
+    cursor: pointer; transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
+    position: relative; overflow: hidden;
+  }
+  .company-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    opacity: 0; transition: opacity 0.2s;
+  }
+  .company-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(79,127,255,0.12); }
+  .company-card:hover::before { opacity: 1; }
+  .company-icon {
+    width: 44px; height: 44px; border-radius: 11px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.3rem; margin-bottom: 16px;
+  }
+  .company-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1rem; margin-bottom: 6px; }
+  .company-meta { font-size: 0.72rem; color: var(--text-dim); line-height: 1.7; }
+  .company-meta span { display: block; }
+
+  /* CUSTOMER LIST */
+  #view-customers { display: none; animation: fadeIn 0.3s ease; }
+  .customer-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+  .customer-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px;
+    cursor: pointer; transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
+    position: relative; overflow: hidden;
+  }
+  .customer-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    opacity: 0; transition: opacity 0.2s;
+  }
+  .customer-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(79,127,255,0.12); }
+  .customer-card:hover::before { opacity: 1; }
+  .cust-avatar {
+    width: 40px; height: 40px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem; margin-bottom: 14px;
+    overflow: hidden;
+  }
+  .cust-avatar img, .banner-avatar img {
+    width: 100%; height: 100%; object-fit: cover; border-radius: inherit;
+  }
+  .cust-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.93rem; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cust-no { font-size: 0.7rem; color: var(--text-dim); margin-bottom: 14px; }
+  .cust-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+  .cust-tag { font-size: 0.67rem; padding: 3px 9px; border-radius: 99px; background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); }
+  .cust-tag.green { color: var(--green); border-color: rgba(39,192,138,0.25); background: rgba(39,192,138,0.06); }
+  .cust-tag.amber { color: var(--amber); border-color: rgba(245,166,35,0.25); background: rgba(245,166,35,0.06); }
+
+  /* CUSTOMER DETAIL */
+  #view-detail { display: none; animation: fadeIn 0.3s ease; }
+  .customer-banner {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px 28px; margin-bottom: 28px;
+    display: flex; align-items: center; gap: 20px;
+    position: relative; overflow: hidden;
+  }
+  .customer-banner::after {
+    content: ''; position: absolute; right: -30px; top: -30px;
+    width: 160px; height: 160px; border-radius: 50%;
+    background: radial-gradient(circle, var(--accent-glow), transparent 70%);
+    pointer-events: none;
+  }
+  .banner-avatar {
+    width: 56px; height: 56px; border-radius: 14px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.4rem; flex-shrink: 0;
+    overflow: hidden;
+  }
+  .banner-info { flex: 1; }
+  .banner-name { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.25rem; letter-spacing: -0.02em; margin-bottom: 5px; }
+  .banner-sub { font-size: 0.76rem; color: var(--text-dim); display: flex; gap: 16px; flex-wrap: wrap; }
+  .back-btn {
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text-mid); padding: 8px 16px; border-radius: var(--radius-sm);
+    cursor: pointer; font-family: 'DM Mono', monospace; font-size: 0.76rem;
+    transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+  }
+  .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* TABS */
+  .tabs {
+    display: flex; gap: 4px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 5px; margin-bottom: 24px; width: fit-content;
+  }
+  .tab {
+    padding: 8px 20px; border-radius: var(--radius-sm);
+    font-family: 'DM Mono', monospace; font-size: 0.76rem;
+    cursor: pointer; transition: all 0.2s; color: var(--text-dim); border: none; background: none;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { background: var(--accent); color: #fff; box-shadow: 0 2px 12px rgba(79,127,255,0.35); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* TABLE */
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  thead tr { background: var(--surface2); border-bottom: 1px solid var(--border); }
+  th { padding: 12px 18px; text-align: left; font-size: 0.67rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.15s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--surface2); }
+  td { padding: 13px 18px; font-size: 0.81rem; color: var(--text-mid); }
+  td strong { color: var(--text); font-weight: 500; }
+  .amount-pos { color: var(--green); font-family: 'DM Mono', monospace; text-align: right; }
+  .amount-neg { color: var(--red); font-family: 'DM Mono', monospace; text-align: right; }
+  .num { text-align: right; font-family: 'DM Mono', monospace; }
+  .chip { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 99px; font-size: 0.67rem; font-weight: 500; }
+  .chip.open { background: rgba(79,127,255,0.1); color: var(--accent); border: 1px solid rgba(79,127,255,0.25); }
+  .chip.closed { background: rgba(39,192,138,0.08); color: var(--green); border: 1px solid rgba(39,192,138,0.2); }
+  .chip.pending { background: rgba(245,166,35,0.08); color: var(--amber); border: 1px solid rgba(245,166,35,0.2); }
+
+  /* CREATE ORDER */
+  .order-form-wrap { display: grid; grid-template-columns: 1fr 370px; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .order-form-wrap { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .panel-header { padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--surface2); font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; }
+  .item-row { display: flex; align-items: center; gap: 14px; padding: 13px 20px; border-bottom: 1px solid var(--border); transition: background 0.15s; }
+  .item-row:last-child { border-bottom: none; }
+  .item-row:hover { background: var(--surface2); }
+  .item-icon { width: 36px; height: 36px; border-radius: 8px; background: var(--surface2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0; }
+  .item-info { flex: 1; min-width: 0; }
+  .item-name { font-size: 0.82rem; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item-no { font-size: 0.68rem; color: var(--text-dim); }
+  .item-price { font-family: 'DM Mono', monospace; font-size: 0.82rem; color: var(--text-mid); flex-shrink: 0; min-width: 70px; text-align: right; }
+  .qty-ctrl { display: flex; align-items: center; gap: 6px; }
+  .qty-btn { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); cursor: pointer; font-size: 1rem; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .qty-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .qty-display { width: 28px; text-align: center; font-family: 'DM Mono', monospace; font-size: 0.82rem; }
+  .avail-badge { display: inline-block; font-size: 0.62rem; font-family:'DM Mono',monospace; padding: 1px 5px; border-radius: 4px; background: rgba(39,192,138,0.12); color: var(--green); border: 1px solid rgba(39,192,138,0.25); margin-left: 5px; vertical-align: middle; }
+  .avail-badge.avail-low  { background: rgba(245,166,35,0.12);  color: var(--amber); border-color: rgba(245,166,35,0.25); }
+  .avail-badge.avail-none { background: rgba(242,95,92,0.12);   color: var(--red);   border-color: rgba(242,95,92,0.25); }
+  .avail-badge.avail-loading { background: var(--surface2); color: var(--text-dim); border-color: var(--border); }
+  .order-summary { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; position: sticky; top: 90px; }
+  .summary-line { display: flex; justify-content: space-between; padding: 11px 20px; border-bottom: 1px solid var(--border); font-size: 0.8rem; }
+  .summary-line .label { color: var(--text-dim); }
+  .summary-line .val { font-family: 'DM Mono', monospace; color: var(--text); }
+  .summary-total { padding: 16px 20px; border-top: 1px solid var(--border-bright); display: flex; justify-content: space-between; align-items: center; font-family: 'Syne', sans-serif; font-weight: 700; }
+  .summary-total .total-val { font-size: 1.2rem; color: var(--accent); font-family: 'DM Mono', monospace; }
+  .field-group { padding: 14px 20px; border-bottom: 1px solid var(--border); }
+  .field-label { font-size: 0.68rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .field-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-family: 'DM Mono', monospace; font-size: 0.82rem; padding: 9px 12px; outline: none; transition: border-color 0.2s; }
+  .field-input:focus { border-color: var(--accent); }
+  .field-input::placeholder { color: var(--text-dim); }
+  .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none; border-radius: var(--radius-sm); color: #fff; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; padding: 13px; cursor: pointer; margin: 16px 20px; width: calc(100% - 40px); transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s; box-shadow: 0 4px 16px rgba(79,127,255,0.3); }
+  .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  /* SUCCESS */
+  .order-success { text-align: center; padding: 48px 20px; display: none; }
+  .order-success.visible { display: block; }
+  .success-ring { width: 72px; height: 72px; border-radius: 50%; background: rgba(39,192,138,0.1); border: 2px solid var(--green); display: flex; align-items: center; justify-content: center; font-size: 1.8rem; margin: 0 auto 20px; box-shadow: 0 0 32px rgba(39,192,138,0.2); }
+  .success-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.2rem; margin-bottom: 8px; }
+  .success-sub { font-size: 0.82rem; color: var(--text-dim); margin-bottom: 24px; }
+  .btn-ghost { background: none; border: 1px solid var(--border); color: var(--text-mid); padding: 9px 20px; border-radius: var(--radius-sm); cursor: pointer; font-family: 'DM Mono', monospace; font-size: 0.82rem; transition: all 0.2s; }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* LOADER */
+  .loader-wrap { display: flex; align-items: center; justify-content: center; padding: 60px; flex-direction: column; gap: 14px; }
+  .spinner { width: 30px; height: 30px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .loader-label { font-size: 0.76rem; color: var(--text-dim); }
+  .empty-state { text-align: center; padding: 56px 20px; color: var(--text-dim); font-size: 0.84rem; }
+  .empty-icon { font-size: 2.4rem; margin-bottom: 12px; opacity: 0.4; }
+  .empty-sub { font-size: 0.78rem; margin-top: 4px; }
+
+  /* SALES HISTORY */
+  .sales-history-filters { display: flex; gap: 16px; padding: 14px 16px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 14px; align-items: flex-end; flex-wrap: wrap; }
+  .date-filter-group { display: flex; flex-direction: column; gap: 4px; }
+  .date-filter-label { font-size: 0.72rem; color: var(--text-dim); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; }
+  .date-filter-input { padding: 7px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--input-bg,var(--surface)); color: var(--text); font-family: inherit; font-size: 0.85rem; }
+  .btn-refresh { padding: 7px 16px; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; font-size: 0.85rem; }
+  .btn-refresh:hover { opacity: 0.85; }
+  .sales-history-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 0 12px; border-bottom: 1px solid var(--border); margin-bottom: 14px; flex-wrap: wrap; gap: 6px; }
+  .sales-history-title { font-size: 0.85rem; color: var(--text); font-weight: 500; }
+  .sales-history-summary { font-size: 0.75rem; color: var(--text-dim); }
+  .sh-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+  .sh-sortable:hover { color: var(--text); }
+  .sort-arrow { opacity: 0.3; font-size: 0.7em; }
+  .sort-arrow.active { opacity: 1; color: var(--accent); }
+
+  /* TOAST */
+  #toast { position: fixed; bottom: 28px; right: 28px; background: var(--surface); border: 1px solid var(--border-bright); border-radius: var(--radius); padding: 13px 18px; font-size: 0.8rem; color: var(--text); box-shadow: 0 8px 32px rgba(0,0,0,0.5); transform: translateY(16px); opacity: 0; transition: all 0.3s; z-index: 999; max-width: 320px; display: flex; align-items: center; gap: 10px; }
+  #toast.show { transform: translateY(0); opacity: 1; }
+
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* ENV CONFIG PANEL */
+  .config-panel {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 18px;
+    margin-bottom: 22px; font-size: 0.72rem;
+  }
+  .config-row { display: flex; align-items: center; gap: 8px; }
+  .config-key { color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+  .config-val { font-family: 'DM Mono', monospace; color: var(--text-mid); }
+  .config-val.missing { color: var(--red); }
+  .config-secret-set { color: var(--green); }
+  .config-secret-missing { color: var(--red); }
+  .config-divider { width: 1px; height: 14px; background: var(--border); }
+
+  /* PAGINATION */
+  .pagination { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 0.76rem; color: var(--text-dim); justify-content: flex-end; flex-wrap: wrap; }
+  .page-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text-mid); padding: 5px 14px; border-radius: var(--radius-sm); cursor: pointer; font-family: 'DM Mono', monospace; font-size: 0.74rem; transition: all 0.15s; }
+  .page-btn:hover:not([disabled]) { border-color: var(--accent); color: var(--accent); }
+  .page-btn[disabled] { opacity: 0.3; cursor: not-allowed; }
+  .page-info { font-family: 'DM Mono', monospace; }
+
+  /* DOCUMENT ACTION BUTTONS */
+  .doc-action-btn { background: none; border: none; cursor: pointer; font-size: 0.9rem; padding: 3px 7px; border-radius: var(--radius-sm); transition: all 0.15s; color: var(--text-mid); line-height: 1; }
+  .doc-action-btn:hover { background: var(--surface-alt); color: var(--text); }
+  .doc-action-btn.info { color: #6a9fff; }
+  .doc-action-btn.info:hover { color: var(--accent); }
+  .doc-action-btn.pdf { color: #c08080; }
+  .doc-action-btn.pdf:hover { color: #e07070; }
+  th.action-col, td.action-col { width: 38px; text-align: center; padding: 0 4px; }
+
+  /* STATS MODAL */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .modal-overlay.hidden { display: none; }
+  .modal-box { background: var(--surface); border: 1px solid var(--border-bright); border-radius: var(--radius); width: 100%; max-width: 540px; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .modal-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 18px 22px 14px; border-bottom: 1px solid var(--border); gap: 12px; }
+  .modal-title { font-size: 0.94rem; font-weight: 700; color: var(--text); font-family: 'DM Mono', monospace; }
+  .modal-subtitle { font-size: 0.72rem; color: var(--text-dim); margin-top: 3px; }
+  .modal-close { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 1rem; padding: 4px 8px; border-radius: var(--radius-sm); transition: all 0.15s; flex-shrink: 0; margin-top: -2px; }
+  .modal-close:hover { background: var(--surface-alt); color: var(--text); }
+  .modal-body { padding: 18px 22px 22px; }
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-bottom: 18px; }
+  .stat-row { display: flex; flex-direction: column; gap: 2px; }
+  .stat-label { font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
+  .stat-value { font-size: 0.84rem; color: var(--text); font-family: 'DM Mono', monospace; }
+  .stat-value.hl { color: var(--green); font-weight: 600; }
+  .modal-section-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin: 16px 0 8px; font-weight: 600; border-top: 1px solid var(--border); padding-top: 14px; }
+  .vat-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+  .vat-table th { text-align: right; color: var(--text-dim); font-weight: 600; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  .vat-table th:first-child { text-align: left; }
+  .vat-table td { padding: 7px 8px; color: var(--text-mid); border-bottom: 1px solid var(--border); font-family: 'DM Mono', monospace; text-align: right; }
+  .vat-table td:first-child { text-align: left; color: var(--text); }
+  .vat-table tr:last-child td { border-bottom: none; }
+  /* Credit limit section in order summary */
+  .credit-section { padding: 10px 20px 12px; border-bottom: 1px solid var(--border); }
+  .credit-info-row { display: flex; justify-content: space-between; align-items: baseline; }
+  .credit-info-label { font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
+  .credit-info-val { font-family: 'DM Mono', monospace; font-size: 0.76rem; color: var(--text); }
+  .credit-info-val.ok   { color: var(--green); }
+  .credit-info-val.warn { color: var(--amber); }
+  .credit-info-val.over { color: var(--red); }
+  .credit-bar-wrap { margin-top: 5px; background: var(--surface2); border-radius: 4px; height: 5px; overflow: hidden; }
+  .credit-bar { height: 5px; border-radius: 4px; transition: width 0.3s, background 0.3s; background: var(--green); }
+  .credit-bar.warn { background: var(--amber); }
+  .credit-bar.over { background: var(--red); }
+  /* Credit info button on customer banner */
+  #credit-info-btn { font-size: 1.05rem; padding: 4px 9px; margin-right: 6px; }
+  /* Item picture in info modal */
+  .item-picture { width: 100%; max-height: 220px; object-fit: contain; border-radius: var(--radius); background: var(--surface2); display: block; }
+  .item-picture-all-btn { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 0.72rem; padding: 4px 0 0; text-decoration: underline; display: block; }
+  .item-picture-gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+  .item-picture-gallery img { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: var(--radius-sm); background: var(--surface2); cursor: pointer; }
+  .item-picture-back-btn { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 0.75rem; padding: 0 0 14px; display: block; }
+</style>
+<link rel="stylesheet" href="customer-create.css" />
+</head>
+<body>
+<div id="app">
+  <header>
+    <a class="logo" href="index.html" style="text-decoration:none;color:inherit">
+      <div class="logo-icon"><img src="origo.jpeg" alt="Origo"></div>
+      BC Portal <span>/ Business Central</span>
+    </a>
+    <div class="header-right">
+      <a href="index.html" style="display:flex;align-items:center;gap:6px;padding:5px 14px;background:var(--surface);border:1px solid var(--border);border-radius:99px;font-size:0.72rem;color:var(--text-mid);text-decoration:none;transition:border-color 0.2s,color 0.2s" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-mid)'">← Home</a>
+      <div id="lang-wrap" style="display:none">
+        <select id="lang-select" class="lang-select" onchange="onLangChange(this.value)" title="Language"></select>
+      </div>
+      <div class="status-pill">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-label">Initialising...</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- COMPANY SELECTION -->
+    <div id="view-companies">
+      <div class="breadcrumb"><span style="color:var(--text)" data-t="Companies">Companies</span></div>
+      <div class="section-header">
+        <div class="section-title"><small>Business Central / UAT</small><span data-t="Select Company">Select Company</span></div>
+        <span class="badge" id="company-count">—</span>
+      </div>
+      <div id="config-panel" class="config-panel" style="display:none">
+        <div class="config-row"><span class="config-key">Tenant</span><span class="config-val" id="cfg-tenant">—</span></div>
+        <div class="config-divider"></div>
+        <div class="config-row"><span class="config-key">Client ID</span><span class="config-val" id="cfg-client-id">—</span></div>
+        <div class="config-divider"></div>
+        <div class="config-row"><span class="config-key">Client Secret</span><span id="cfg-secret">—</span></div>
+        <div class="config-divider"></div>
+        <div class="config-row"><span class="config-key">Environment</span><span class="config-val" id="cfg-env">—</span></div>
+      </div>
+      <div id="company-grid" class="company-grid">
+        <div class="loader-wrap"><div class="spinner"></div><span class="loader-label" data-t="Authenticating...">Authenticating...</span></div>
+      </div>
+    </div>
+
+    <!-- CUSTOMER LIST -->
+    <div id="view-customers">
+      <div class="breadcrumb">
+        <span class="crumb" onclick="showCompanies()" data-t="Companies">Companies</span>
+        <span class="sep">/</span>
+        <span id="crumb-company" style="color:var(--text)">—</span>
+      </div>
+      <div class="section-header">
+        <div class="section-title"><small id="customers-company-label">—</small><span data-t="Customers">Customers</span></div>
+        <button class="btn-ghost" onclick="showCreateCustomer()" data-t="+ Create Customer" style="margin-left:auto">+ Create Customer</button>
+        <span class="badge" id="customer-count">—</span>
+      </div>
+      <div class="search-wrap">
+        <span class="search-icon">⌕</span>
+        <input type="text" id="customer-search" data-tp="Search by name or number..." placeholder="Search by name or number..." oninput="filterCustomers()" />
+      </div>
+      <div id="customer-grid" class="customer-grid">
+        <div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading customers...</span></div>
+      </div>
+      <div id="customer-pagination"></div>
+    </div>
+
+    <!-- CUSTOMER DETAIL -->
+    <div id="view-detail">
+      <div class="breadcrumb">
+        <span class="crumb" onclick="showCompanies()" data-t="Companies">Companies</span>
+        <span class="sep">/</span>
+        <span class="crumb" onclick="showCustomers()" id="crumb-company2">—</span>
+        <span class="sep">/</span>
+        <span id="crumb-customer" style="color:var(--text)">—</span>
+      </div>
+      <div class="customer-banner">
+        <div class="banner-avatar" id="banner-avatar">?</div>
+        <div class="banner-info">
+          <div class="banner-name" id="banner-name">—</div>
+          <div class="banner-sub">
+            <span>🏢 <span id="banner-no">—</span></span>
+            <span>📍 <span id="banner-city">—</span></span>
+            <span id="banner-location-wrap" style="display:none">🏭 <span id="banner-location">—</span></span>
+            <span>📧 <span id="banner-email">—</span></span>
+          </div>
+        </div>
+        <button id="credit-info-btn" class="doc-action-btn info" style="display:none" onclick="showCreditInfo()" title="Credit information">ⓘ</button>
+        <button class="back-btn" onclick="showCustomers()" data-t="← Customers">← Customers</button>
+      </div>
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('ledger')" data-t="Ledger Entries">Ledger Entries</button>
+        <button class="tab" onclick="switchTab('sales-history')" data-t="Sales History">Sales History</button>
+        <button class="tab" onclick="switchTab('documents')" data-t="Documents">Documents</button>
+        <button class="tab" onclick="switchTab('create-order')" data-t="Create Order">Create Order</button>
+      </div>
+      <div id="tab-ledger" class="tab-panel active">
+        <div id="ledger-content"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label" data-t="Loading...">Loading...</span></div></div>
+      </div>
+      <div id="tab-sales-history" class="tab-panel">
+        <div id="sales-history-content"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label" data-t="Loading...">Loading...</span></div></div>
+      </div>
+      <div id="tab-documents" class="tab-panel">
+        <div id="documents-content"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label" data-t="Loading...">Loading...</span></div></div>
+      </div>
+      <div id="tab-create-order" class="tab-panel">
+        <div id="order-success" class="order-success">
+          <div class="success-ring">✓</div>
+          <div class="success-title" data-t="Order Created!">Order Created!</div>
+          <div class="success-sub" id="order-success-msg"></div>
+          <button class="btn-ghost" onclick="resetOrder()" data-t="Create Another">Create Another</button>
+        </div>
+        <div id="order-form-content">
+          <div class="order-form-wrap">
+            <div class="panel">
+              <div class="panel-header" data-t="Select Items">Select Items</div>
+              <div class="search-wrap" style="padding:12px 16px 0; margin-bottom:0;">
+                <span class="search-icon">⌕</span>
+                <input type="text" id="item-search" data-tp="Search items..." placeholder="Search items..." oninput="filterItems()" />
+              </div>
+              <div id="items-list"><div class="loader-wrap"><div class="spinner"></div><span class="loader-label">Loading items...</span></div></div>
+            </div>
+            <div class="order-summary panel">
+              <div class="panel-header" data-t="Order Summary">Order Summary</div>
+              <div id="order-credit-section" class="credit-section" style="display:none">
+                <div class="credit-info-row">
+                  <span class="credit-info-label" data-t="Credit Limit">Credit Limit</span>
+                  <span class="credit-info-val" id="credit-limit-val">—</span>
+                </div>
+                <div class="credit-info-row" style="margin-top:4px">
+                  <span class="credit-info-label" data-t="Remaining Credit">Remaining Credit</span>
+                  <span class="credit-info-val" id="credit-remaining-val">—</span>
+                </div>
+                <div class="credit-bar-wrap">
+                  <div class="credit-bar" id="credit-bar" style="width:100%"></div>
+                </div>
+              </div>
+              <div class="field-group">
+                <div class="field-label" data-t="Requested Delivery Date">Requested Delivery Date</div>
+                <input type="date" class="field-input" id="order-date" />
+              </div>
+              <div class="field-group">
+                <div class="field-label" data-t="External Document No.">External Document No.</div>
+                <input type="text" class="field-input" id="order-ext-doc" data-tp="Your PO / reference..." placeholder="Your PO / reference..." />
+              </div>
+              <div id="order-lines"></div>
+              <div class="summary-total">
+                <div>
+                  <span data-t="Total">Total</span>
+                  <div id="total-vat-tag" style="font-size:0.65rem;color:var(--text-dim);font-weight:400;margin-top:1px"></div>
+                </div>
+                <span class="total-val" id="order-total">0.00</span>
+              </div>
+              <button class="btn-primary" id="submit-btn" onclick="submitOrder()" data-t="Post Sales Order →">Post Sales Order →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CREATE CUSTOMER -->
+    <div id="view-create-customer" style="display:none">
+      <div class="breadcrumb">
+        <span class="crumb" onclick="showCompanies()" data-t="Companies">Companies</span>
+        <span class="sep">/</span>
+        <span class="crumb" onclick="showCustomers()" id="crumb-company3">—</span>
+        <span class="sep">/</span>
+        <span style="color:var(--text)" data-t="Create Customer">Create Customer</span>
+      </div>
+
+      <div class="section-header">
+        <div class="section-title">
+          <small id="create-customer-company-label">—</small>
+          <span data-t="Create New Customer">Create New Customer</span>
+        </div>
+      </div>
+
+      <button class="customer-back-btn" onclick="showCustomers()">
+        ← <span data-t="Back to Customers">Back to Customers</span>
+      </button>
+
+      <form id="customer-create-form">
+        <!-- Identification Section -->
+        <fieldset>
+          <legend data-t="Identification">Identification</legend>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-registration-no" class="required" id="label-registration-no">Registration No.</label>
+              <div class="reg-no-wrapper">
+                <input type="text" id="customer-registration-no" maxlength="10" required />
+                <span id="kennitala-indicator" class="validation-indicator"></span>
+              </div>
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-no" id="label-no">No.</label>
+              <input type="text" id="customer-no" class="readonly-field" readonly />
+            </div>
+          </div>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-name" class="required" id="label-name">Name</label>
+              <input type="text" id="customer-name" maxlength="100" required />
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-name2" id="label-name2">Name 2</label>
+              <input type="text" id="customer-name2" maxlength="50" />
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Address Section -->
+        <fieldset>
+          <legend data-t="Address">Address</legend>
+          <div class="customer-form-group">
+            <label for="customer-address" id="label-address">Address</label>
+            <input type="text" id="customer-address" maxlength="100" />
+          </div>
+          <div class="customer-form-group">
+            <label for="customer-address2" id="label-address2">Address 2</label>
+            <input type="text" id="customer-address2" maxlength="50" />
+          </div>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-post-code" id="label-post-code">Post Code</label>
+              <select id="customer-post-code">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-city" id="label-city">City</label>
+              <input type="text" id="customer-city" class="readonly-field" readonly />
+            </div>
+          </div>
+          <div class="customer-form-group">
+            <label for="customer-country-code" id="label-country-code">Country/Region Code</label>
+            <input type="text" id="customer-country-code" class="readonly-field" readonly />
+          </div>
+          <div class="customer-form-group" style="display: none;">
+            <label for="customer-county" id="label-county">County</label>
+            <input type="text" id="customer-county" class="readonly-field" readonly />
+          </div>
+        </fieldset>
+
+        <!-- Contact Section -->
+        <fieldset>
+          <legend data-t="Contact">Contact</legend>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-phone" id="label-phone">Phone No.</label>
+              <input type="tel" id="customer-phone" maxlength="30" />
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-email" id="label-email">E-Mail</label>
+              <input type="email" id="customer-email" maxlength="80" />
+            </div>
+          </div>
+          <div class="customer-form-group">
+            <label for="customer-contact" id="label-contact">Contact</label>
+            <input type="text" id="customer-contact" maxlength="100" />
+          </div>
+        </fieldset>
+
+        <!-- Posting Section -->
+        <fieldset>
+          <legend data-t="Posting">Posting</legend>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-posting-group" class="required" id="label-posting-group">Customer Posting Group</label>
+              <select id="customer-posting-group" required>
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-gen-bus-posting-group" class="required" id="label-gen-bus-posting-group">Gen. Bus. Posting Group</label>
+              <select id="customer-gen-bus-posting-group" required>
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+          </div>
+          <div class="customer-form-group">
+            <label for="customer-vat-bus-posting-group" id="label-vat-bus-posting-group">VAT Bus. Posting Group</label>
+            <select id="customer-vat-bus-posting-group">
+              <option value="">-- Select --</option>
+            </select>
+          </div>
+        </fieldset>
+
+        <!-- Payment Section -->
+        <fieldset>
+          <legend data-t="Payment">Payment</legend>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-payment-terms" id="label-payment-terms">Payment Terms Code</label>
+              <select id="customer-payment-terms">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-payment-method" id="label-payment-method">Payment Method Code</label>
+              <select id="customer-payment-method">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Sales Section -->
+        <fieldset>
+          <legend data-t="Sales">Sales</legend>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-currency" id="label-currency">Currency Code</label>
+              <select id="customer-currency">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-language" id="label-language">Language Code</label>
+              <select id="customer-language">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+          </div>
+          <div class="customer-form-row">
+            <div class="customer-form-group">
+              <label for="customer-salesperson" id="label-salesperson">Salesperson Code</label>
+              <select id="customer-salesperson">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+            <div class="customer-form-group">
+              <label for="customer-location" id="label-location">Location Code</label>
+              <select id="customer-location">
+                <option value="">-- Select --</option>
+              </select>
+            </div>
+          </div>
+        </fieldset>
+
+        <!-- Credit Management Section -->
+        <fieldset>
+          <legend data-t="Credit Management">Credit Management</legend>
+          <div class="customer-form-group">
+            <label for="customer-credit-limit" id="label-credit-limit">Credit Limit (LCY)</label>
+            <input type="number" id="customer-credit-limit" min="0" step="0.01" value="0" />
+          </div>
+        </fieldset>
+
+        <!-- Media Section -->
+        <fieldset>
+          <legend data-t="Media">Media</legend>
+          <div class="customer-form-group">
+            <label for="customer-image" id="label-image">Image</label>
+            <input type="file" id="customer-image" accept="image/*" />
+            <div class="helper-text" data-t="Upload a customer logo or image (optional)">Upload a customer logo or image (optional)</div>
+            <div id="imagePreview"></div>
+          </div>
+        </fieldset>
+
+        <!-- Form Actions -->
+        <div class="customer-form-actions">
+          <button type="button" class="customer-btn customer-btn-secondary" onclick="resetCustomerForm()" data-t="Reset Form">Reset Form</button>
+          <button type="submit" class="customer-btn customer-btn-primary" data-t="Create Customer">Create Customer</button>
+        </div>
+      </form>
+    </div>
+  </main>
+</div>
+
+<div id="toast"><span id="toast-icon"></span><span id="toast-msg"></span></div>
+
+<!-- ORDER STATISTICS MODAL -->
+<div id="stats-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeStatsModal()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="stats-modal-title"></div>
+        <div class="modal-subtitle" id="stats-modal-subtitle"></div>
+      </div>
+      <button class="modal-close" onclick="closeStatsModal()">✕</button>
+    </div>
+    <div class="modal-body" id="stats-modal-body">
+      <div class="loader-wrap"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- STATE ----
+let companies = [];
+let customers = [];
+let items = [];
+let selectedCompany = null;
+let selectedCustomer = null;
+let orderQty = {};
+let customerCredit = null;
+let itemPrices = {};       // keyed by item.id; value = best priceListLine — always fetched fresh on interaction
+let itemPictures = {};     // keyed by item.id; value = Media array or null once loaded, undefined = not yet fetched
+let selectedLcid = 1033;
+// Restore last-used LCID from shared localStorage settings
+{ const _saved = parseInt(localStorage.getItem('bc_portal_lcid') || '1033', 10); if (_saved) selectedLcid = _saved; }
+let allLanguages = [];     // All languages from Language table for customer dropdown
+
+// Field metadata cache — keyed by "companyId:lcid:tableName"
+// Cleared when a different company is selected; LCID is part of the key so
+// switching languages keeps each language's captions independently cached.
+let fieldMetaCache = {};
+// Localized enum captions for Customer.Blocked — value (e.g. 'Ship') → caption (e.g. 'Afhenda')
+let blockedEnumCaptions = {};
+// UI string translations keyed by English source text — loaded from Cloud Event Translation table
+let uiTranslations = {};
+const UI_STRINGS = [
+  'Customers', 'Select Company', '← Customers', 'Companies',
+  'Ledger Entries', 'Sales History', 'Documents', 'Create Order',
+  'Search by name or number...',
+  'Active', 'Order', 'Invoice', 'Paid', 'Type', 'No.', 'Credit Memo',
+  'Select Items', 'Search items...',
+  'Order Summary', 'Requested Delivery Date', 'External Document No.', 'Your PO / reference...',
+  'Total', 'Post Sales Order →', 'Create Another', 'Order Created!',
+  'No customers found', 'No documents found', 'No items found', 'No companies found',
+  'customers', 'records', 'Page', 'of', 'Prev', 'Next',
+  'Open', 'Closed', 'companies',
+  'Total excl. VAT', 'Total incl. VAT', 'VAT Amount', 'Quantity',
+  'Line Discount', 'Invoice Discount', 'Total Weight', 'Total Volume',
+  'VAT Breakdown', 'VAT Identifier', 'Base', 'VAT', 'Downloading PDF...',
+  'Loading customers...', 'Loading ledger entries...', 'Loading sales history...', 'Loading documents...', 'Loading items...',
+  'Credit Limit', 'Remaining Credit', 'Balance', 'Outstanding',
+  'Item Availability', 'Available Quantity', 'Inventory', 'Reserved',
+  'Gross Requirement', 'Scheduled Receipt', 'Planned Receipt',
+  'No availability', 'Exceeds available quantity', 'Availability', 'Unit of measure',
+  'Price excl. VAT', 'Price incl. VAT', 'VAT %', 'Prices excl. VAT', 'Prices incl. VAT',
+  'Allow line discount', 'Allow invoice discount', 'Min. Quantity', 'Line Discount %', 'Price List',
+  'Customer price', 'Pricing',
+  'Overdue balance', 'Credit limit exceeded', 'Credit limit reached',
+  'Credit information', 'Remaining with tolerance', 'Details', 'Tolerance', 'Due this period',
+  'Authenticating...', 'Loading...',
+  'No ledger entries', 'No sales history', 'No items added yet',
+  'This customer has no invoiced items in the selected period.',
+  'Item No.', 'Description', 'Variant', '# Orders',
+  'From', 'To', 'Refresh', 'Period', 'items',
+  'Invalid date range', 'From date cannot be after to date',
+  'From date is required', 'To date cannot be in the future',
+  'Sales History:', 'Failed to load sales history: {0}',
+  'Error loading sales history',
+  'Statistics', 'Download PDF',
+  'Add at least one item', 'Creating...', 'Sales order created!',
+  'Failed to create sales order', 'Failed to add line for', 'Failed: ',
+  'Order {no} created for {name}.',
+  'Pictures', 'View all', 'Back', 'No picture',
+  '+ Create Customer', 'Create Customer', 'Create New Customer', 'Back to Customers',
+  'Identification', 'Address', 'Contact', 'Posting', 'Payment', 'Sales', 
+  'Credit Management', 'Media', 'Reset Form',
+  'Upload a customer logo or image (optional)',
+  // Customer creation messages and validation
+  '-- Select --', '-- LCY --', 'Loading form data...', 'Creating customer...',
+  'Customer {0} created successfully!', 
+  'An error occurred while creating the customer.',
+  'Failed to create customer: {0}',
+  'Failed to load form data. Please refresh the page.',
+  'A customer with Registration No. {0} already exists (Customer No. {1}: {2}).',
+  '{0} is required', 'Invalid email format', 
+  'Invalid Registration No. check digit', 'Must be 10 digits',
+  'Must be a non-negative number', 'Please fix the following errors:',
+  'Error looking up post code',
+  // Customer creation field captions (these will be replaced by BC field captions, but serve as fallbacks)
+  'Registration No.', 'No.', 'Name', 'Name 2',
+  'Post Code', 'City', 'Country/Region Code', 'County',
+  'Phone No.', 'E-Mail',
+  'Customer Posting Group', 'Gen. Bus. Posting Group', 'VAT Bus. Posting Group',
+  'Payment Terms Code', 'Payment Method Code',
+  'Currency Code', 'Language Code', 'Salesperson Code', 'Location Code',
+  'Credit Limit (LCY)', 'Image',
+  'No ledger entries in the selected period.',
+  'No documents in the selected period.'
+];
+
+// Fallback names used only when the Language table lookup fails
+const LCID_NAMES = {
+  1033: 'English', 1039: 'Icelandic', 1030: 'Danish',
+  1031: 'German',  1036: 'French',    1034: 'Spanish',
+  1043: 'Dutch',   1053: 'Swedish',   1044: 'Norwegian'
+};
+
+// ---- API ----
+// bcGet: used only for company list (standard v2.0 API, pre-company-selection)
+async function bcGet(path) {
+  const r = await fetch('/api/bc?path=' + encodeURIComponent(path));
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    let errorMsg = e.error || 'API error ' + r.status;
+    // Include full error details for demo debugging
+    if (e && Object.keys(e).length > 0) {
+      errorMsg += '\n\nFull Error Details:\n' + JSON.stringify(e, null, 2);
+    }
+    throw new Error(errorMsg);
+  }
+  return r.json();
+}
+
+// cePost: Cloud Events two-step — proxy POSTs to /tasks and follows the data URL
+// Errors can occur at two points:
+// 1. POST response itself (e.g., PDF generation failures, validation errors)
+// 2. GET /data response (e.g., data operation failures)
+async function cePost(companyId, event) {
+  const r = await fetch('/api/bc?companyId=' + encodeURIComponent(companyId), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...event, lcid: selectedLcid })
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    let errorMsg = e.error || 'API error ' + r.status;
+    // Include full error details for demo debugging
+    if (e && Object.keys(e).length > 0) {
+      errorMsg += '\n\nFull Error Details:\n' + JSON.stringify(e, null, 2);
+    }
+    throw new Error(errorMsg);
+  }
+  const result = await r.json();
+  // Check Cloud Events task status — "Error" means the task failed
+  // This can be in the POST response (direct error) or GET /data response (task execution error)
+  if (result.status === 'Error') {
+    let errorMsg = result.error || 'Cloud Events task failed';
+    // Include callStack if available for detailed debugging
+    if (result.callStack) {
+      errorMsg += '\n\nCall Stack:\n' + result.callStack.replace(/\\\"/g, '"');
+    }
+    // Include full result object for complete context
+    errorMsg += '\n\nFull Error Response:\n' + JSON.stringify(result, null, 2);
+    throw new Error(errorMsg);
+  }
+  return result;
+}
+
+// getFieldMeta: returns Help.Fields.Get result array for a table, cached by company+lcid+table.
+// Subsequent calls for the same combination are instant (no network round-trip).
+async function getFieldMeta(tableName, fieldNumbers) {
+  const key = `${selectedCompany.id}:${selectedLcid}:${tableName}`;
+  if (fieldMetaCache[key]) return fieldMetaCache[key];
+  const res = await cePost(selectedCompany.id, {
+    specversion: '1.0', type: 'Help.Fields.Get', source: 'BC Portal',
+    data: JSON.stringify({ tableName, fieldNumbers })
+  });
+  const meta = res.result || [];
+  fieldMetaCache[key] = meta;
+  return meta;
+}
+
+// t(): translate a UI constant; falls back to the English text when no translation is available
+function t(s) { return uiTranslations[s] || s; }
+
+// applyUiTranslations(): update all [data-t] / [data-tp] DOM elements with current translations
+function applyUiTranslations() {
+  document.querySelectorAll('[data-t]').forEach(el => { el.textContent = t(el.dataset.t); });
+  document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
+}
+
+// loadUiTranslations(): batch-fetch all translations for the active language from the
+// Cloud Event Translation table. Any UI_STRINGS not yet in the table are created as blank
+// records so users can fill in the TargetText directly in Business Central.
+async function loadUiTranslations() {
+  uiTranslations = {};
+  if (selectedLcid === 1033) return; // English — no translation needed
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+      subject: 'Cloud Event Translation',
+      data: JSON.stringify({ tableView: `WHERE(Windows Language ID=CONST(${selectedLcid}),Source=CONST(BC Portal))`, take: UI_STRINGS.length + 50 })
+    });
+    const rows = res.result || [];
+    for (const rec of rows) {
+      const src = (rec.primaryKey || {}).SourceText;
+      const tgt = (rec.fields || {}).TargetText;
+      if (src && tgt) uiTranslations[src] = tgt;
+    }
+    // Create placeholder records for any strings not yet in the table
+    const existing = new Set(rows.map(r => (r.primaryKey || {}).SourceText));
+    const missing = UI_STRINGS.filter(s => !existing.has(s));
+    if (missing.length) {
+      await cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Set', source: 'BC Portal',
+        subject: 'Cloud Event Translation',
+        data: JSON.stringify({
+          data: missing.map(s => ({
+            primaryKey: { Source: 'BC Portal', WindowsLanguageID: String(selectedLcid), SourceText: s },
+            fields: { TargetText: '' }
+          }))
+        })
+      });
+    }
+  } catch(e) { /* silently fall back to English */ }
+}
+
+// ---- UTILS ----
+function pageSize() { return 20; }
+function fmt(n) { return (parseFloat(n)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtDate(d) { if (!d || d === '0001-01-01') return '—'; return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
+function initials(s) { if (!s) return '?'; return s.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase(); }
+
+// ---- LANGUAGE ----
+async function loadLanguages() {
+  try {
+    // Step 1: get allowed LCIDs for UI language selector
+    const allowedRes = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+      subject: 'Allowed Language'
+    });
+    const lcids = (allowedRes.result || []).map(r => parseInt(r.primaryKey.LanguageId, 10)).filter(Boolean);
+    const ids = lcids.length ? lcids : [1033];
+
+    // Step 2: fetch only those Language rows using FILTER with | as OR
+    const tableView = `WHERE(Windows Language ID=FILTER(${ids.join('|')}))`;
+    const langRes = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+      data: JSON.stringify({ tableName: 'Language', tableView })
+    });
+
+    // Build LCID → display name map from the Language table
+    const lcidToName = {};
+    for (const rec of (langRes.result || [])) {
+      const lcid = parseInt(rec.fields.WindowsLanguageID, 10);
+      if (lcid && rec.fields.Name) lcidToName[lcid] = rec.fields.Name.charAt(0).toUpperCase() + rec.fields.Name.slice(1).toLowerCase();
+    }
+
+    const sel = document.getElementById('lang-select');
+    sel.innerHTML = ids.map(id =>
+      `<option value="${id}" ${id === selectedLcid ? 'selected' : ''}>${lcidToName[id] || LCID_NAMES[id] || 'Language ' + id}</option>`
+    ).join('');
+    document.getElementById('lang-wrap').style.display = '';
+  } catch(e) {
+    // fall back silently — English is already the default
+  }
+}
+
+// Load ALL languages from Language table for customer dropdown
+async function loadAllLanguages() {
+  try {
+    const result = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Data.Records.Get',
+      source: 'BC Portal',
+      data: JSON.stringify({ tableName: 'Language' })
+    });
+    
+    if (result.result) {
+      allLanguages = result.result;
+    }
+  } catch(e) {
+    console.error('Error loading all languages:', e);
+    allLanguages = [];
+  }
+}
+
+async function onLangChange(value) {
+  selectedLcid = parseInt(value, 10);
+  localStorage.setItem('bc_portal_lcid', String(selectedLcid));  // sync for explorer pages
+  await loadUiTranslations();
+  applyUiTranslations();
+  const detail = document.getElementById('view-detail');
+  if (detail.style.display !== 'none') {
+    // Reload all data tabs (captions are LCID-keyed in fieldMetaCache)
+    loadLedger();
+    loadDocuments();
+    if (document.getElementById('sales-history-content')?.dataset.loaded) {
+      loadSalesHistory();
+    }
+    // Re-render items in place — no API needed, and avoids clearing the cart
+    filterItems();
+    updateSummary();
+  } else {
+    loadCustomers();
+  }
+  
+  // Reload customer creation form if it's open
+  if (typeof reloadCustomerFormForLanguage === 'function') {
+    await reloadCustomerFormForLanguage();
+  }
+}
+
+// ---- MAPPERS ---- (normalize Cloud Events { id, primaryKey, fields } records to flat objects)
+function mapCustomer(rec) {
+  const f = rec.fields || {};
+  return {
+    id: rec.id,
+    number: (rec.primaryKey || {}).No_ || '',
+    displayName: f.Name || '',
+    city: f.City || '',
+    country: f.Country_RegionCode || '',
+    email: f.EMail || '',
+    blocked: (f.Blocked === ' ' || !f.Blocked) ? '' : f.Blocked,
+    balance: parseFloat(f.BalanceLCY) || 0,
+    locationCode: f.LocationCode || '',
+    priceIncludingVAT: f.PriceIncludingVAT === true || f.PriceIncludingVAT === 'true',
+    image: (f.Image && f.Image.Value) ? f.Image.Value : null
+  };
+}
+
+function mapItem(rec) {
+  const f = rec.fields || {};
+  return {
+    id: rec.id,
+    number: (rec.primaryKey || {}).No_ || '',
+    displayName: f.Description || (rec.primaryKey || {}).No_ || '',
+    unitPrice: parseFloat(f.UnitPrice) || 0,
+    type: f.Type || 'Inventory'
+  };
+}
+
+// ---- PAGINATION ----
+function paginate(containerId, total, skip, take, fnName) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (total <= take) { el.innerHTML = ''; return; }
+  const page = Math.floor(skip / take);
+  const totalPages = Math.ceil(total / take);
+  el.innerHTML = `<div class="pagination">
+    <span class="page-info">${total.toLocaleString()} ${t('records')} — ${t('Page')} ${page + 1} ${t('of')} ${totalPages}</span>
+    <button class="page-btn" onclick="${fnName}(${Math.max(0, skip - take)})" ${page === 0 ? 'disabled' : ''}>← ${t('Prev')}</button>
+    <button class="page-btn" onclick="${fnName}(${skip + take})" ${page >= totalPages - 1 ? 'disabled' : ''}>${t('Next')} →</button>
+  </div>`;
+}
+
+function setStatus(state) {
+  const dot = document.getElementById('status-dot');
+  const lbl = document.getElementById('status-label');
+  dot.className = 'status-dot ' + state;
+  lbl.textContent = state === 'connected' ? 'Connected' : state === 'error' ? 'Error' : 'Connecting...';
+}
+
+function toast(msg, type='info') {
+  const el = document.getElementById('toast');
+  document.getElementById('toast-icon').textContent = type==='success'?'✓':type==='error'?'✕':'ℹ';
+  document.getElementById('toast-msg').textContent = msg;
+  el.style.borderColor = type==='error'?'var(--red)':type==='success'?'var(--green)':'var(--border-bright)';
+  el.style.whiteSpace = 'pre-wrap'; // Allow multi-line error messages
+  el.style.maxWidth = type==='error' ? '600px' : '320px'; // Wider for error details
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'), type==='error' ? 8000 : 3500); // Longer display for errors
+}
+
+function show(id) {
+  ['view-companies','view-customers','view-detail','view-create-customer'].forEach(v => {
+    document.getElementById(v).style.display = v===id ? 'block' : 'none';
+  });
+}
+
+// ---- COMPANIES ----
+async function loadCompanies() {
+  try {
+    const d = await bcGet('companies');
+    companies = d.value || [];
+    setStatus('connected');
+    document.getElementById('company-count').textContent = companies.length + ' ' + t('companies');
+
+    if (!companies.length) {
+      document.getElementById('company-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">🏢</div><p>${t('No companies found')}</p></div>`;
+      return;
+    }
+
+    const icons = ['🏢','🏗️','🏭','🏬','🏛️'];
+    document.getElementById('company-grid').innerHTML = companies.map((c,i) => `
+      <div class="company-card" onclick="selectCompany('${c.id}')">
+        <div class="company-icon">${icons[i % icons.length]}</div>
+        <div class="company-name">${c.displayName || c.name}</div>
+        <div class="company-meta">
+          <span>ID: ${c.id.substring(0,8)}...</span>
+          ${c.businessProfileId ? `<span>Profile: ${c.businessProfileId}</span>` : ''}
+          ${c.systemVersion ? `<span>Version: ${c.systemVersion}</span>` : ''}
+        </div>
+      </div>`).join('');
+  } catch(e) {
+    setStatus('error');
+    const errorDetails = e.stack || e.message;
+    document.getElementById('company-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`;
+    toast(errorDetails, 'error');
+  }
+}
+
+function showCompanies() { show('view-companies'); }
+
+async function selectCompany(id) {
+  selectedCompany = companies.find(c=>c.id===id);
+  if (!selectedCompany) return;
+  fieldMetaCache = {};        // new company — discard all cached field metadata
+  blockedEnumCaptions = {};
+  uiTranslations = {};
+  // Sync selected company to shared localStorage settings so explorer pages can reuse it
+  localStorage.setItem('bc_portal_company_id',   selectedCompany.id);
+  localStorage.setItem('bc_portal_company_name', selectedCompany.displayName || selectedCompany.name || '');
+  const name = selectedCompany.displayName || selectedCompany.name;
+  document.getElementById('crumb-company').textContent = name;
+  document.getElementById('crumb-company2').textContent = name;
+  document.getElementById('customers-company-label').textContent = name;
+  show('view-customers');
+  await loadLanguages();         // Load allowed languages for UI selector
+  await loadAllLanguages();      // Load all languages for customer dropdown
+  await loadUiTranslations();
+  applyUiTranslations();
+  await loadCustomers();
+}
+
+// ---- CUSTOMERS ----
+async function loadCustomers(skip = 0) {
+  const take = pageSize();
+  document.getElementById('customer-grid').innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading customers...')}</span></div>`;
+  document.getElementById('customer-pagination').innerHTML = '';
+  try {
+    const [res, metaCust] = await Promise.all([
+      cePost(selectedCompany.id, {
+        specversion: '1.0',
+        type: 'Data.Records.Get',
+        source: 'BC Portal',
+        data: JSON.stringify({ tableName: 'Customer', fieldNumbers: [2, 7, 35, 39, 59, 82, 83, 102, 140], skip, take })
+      }),
+      getFieldMeta('Customer', [39])
+    ]);
+    const field39 = metaCust.find(f => f.id === 39);
+    if (field39 && field39.enum) field39.enum.forEach(e => { if (e.value.trim()) blockedEnumCaptions[e.value] = e.caption; });
+    customers = (res.result || []).map(mapCustomer);
+    const total = res.noOfRecords || 0;
+    document.getElementById('customer-count').textContent = total.toLocaleString() + ' ' + t('customers');
+    renderCustomers(customers);
+    paginate('customer-pagination', total, skip, take, 'loadCustomers');
+  } catch(e) {
+    const errorDetails = e.stack || e.message;
+    document.getElementById('customer-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`;
+    toast(errorDetails, 'error');
+  }
+}
+
+function renderCustomers(list) {
+  if (!list.length) {
+    document.getElementById('customer-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">👥</div><p>${t('No customers found')}</p></div>`;
+    return;
+  }
+  document.getElementById('customer-grid').innerHTML = list.map(c => `
+    <div class="customer-card" onclick="selectCustomer('${c.id}')">
+      <div class="cust-avatar">${c.image ? `<img src="data:image/jpeg;base64,${c.image}" alt="">` : initials(c.displayName)}</div>
+      <div class="cust-name">${c.displayName||'—'}</div>
+      <div class="cust-no"># ${c.number||'—'}</div>
+      <div class="cust-meta">
+        ${c.city?`<span class="cust-tag">📍 ${c.city}</span>`:''}
+        ${c.blocked===''?`<span class="cust-tag green">● ${t('Active')}</span>`:`<span class="cust-tag amber">● ${blockedEnumCaptions[c.blocked]||c.blocked}</span>`}
+        ${c.balance?`<span class="cust-tag">${fmt(c.balance)}</span>`:''}
+      </div>
+    </div>`).join('');
+}
+
+function filterCustomers() {
+  const q = document.getElementById('customer-search').value.toLowerCase();
+  renderCustomers(customers.filter(c =>
+    (c.displayName||'').toLowerCase().includes(q) || (c.number||'').toLowerCase().includes(q)
+  ));
+}
+
+function showCustomers() { show('view-customers'); }
+
+async function selectCustomer(id) {
+  selectedCustomer = customers.find(c=>c.id===id);
+  if (!selectedCustomer) return;
+  document.getElementById('crumb-customer').textContent = selectedCustomer.displayName;
+  const bannerAv = document.getElementById('banner-avatar');
+  if (selectedCustomer.image) {
+    bannerAv.innerHTML = `<img src="data:image/jpeg;base64,${selectedCustomer.image}" alt="">`;
+  } else {
+    bannerAv.textContent = initials(selectedCustomer.displayName);
+  }
+  document.getElementById('banner-name').textContent = selectedCustomer.displayName;
+  document.getElementById('banner-no').textContent = selectedCustomer.number||'—';
+  document.getElementById('banner-city').textContent = [selectedCustomer.city, selectedCustomer.country].filter(Boolean).join(', ')||'—';
+  document.getElementById('banner-email').textContent = selectedCustomer.email||'—';
+  const locWrap = document.getElementById('banner-location-wrap');
+  const locEl   = document.getElementById('banner-location');
+  locWrap.style.display = 'none';
+  if (selectedCustomer.locationCode) {
+    cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+      data: JSON.stringify({ tableName: 'Location', fieldNumbers: [2], tableView: `WHERE(Code=CONST(${selectedCustomer.locationCode}))`, take: 1 })
+    }).then(r => {
+      const name = ((r.result||[])[0]||{}).fields?.Name;
+      if (name) { locEl.textContent = name; locWrap.style.display = ''; }
+      else if (selectedCustomer.locationCode) { locEl.textContent = selectedCustomer.locationCode; locWrap.style.display = ''; }
+    }).catch(() => { locEl.textContent = selectedCustomer.locationCode; locWrap.style.display = ''; });
+  }
+  const _dd = shGetDefaultDates();
+  ledgerFromDate = _dd.from; ledgerToDate = _dd.to;
+  docsFromDate   = _dd.from; docsToDate   = _dd.to;
+  show('view-detail');
+  switchTab('ledger');
+  loadLedger();
+  loadDocuments();
+  loadItems();
+  customerCredit = null;
+  itemPrices = {};
+  itemPictures = {};
+  document.getElementById('credit-info-btn').style.display = 'none';
+  document.getElementById('order-credit-section').style.display = 'none';
+  loadCreditLimit();
+}
+
+// ---- TABS ----
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach((t,i)=>{
+    t.classList.toggle('active', ['ledger','sales-history','documents','create-order'][i]===tab);
+  });
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('tab-'+tab).classList.add('active');
+  
+  // Load content on first access
+  if (tab === 'sales-history' && !document.getElementById('sales-history-content').dataset.loaded) {
+    loadSalesHistory();
+  }
+}
+
+// ---- SALES HISTORY ----
+let salesHistoryData = null;
+let salesHistorySortCol = 'quantity';
+let salesHistorySortDir = -1; // -1 = desc, 1 = asc
+// Date filter state for Ledger Entries and Documents — reset per customer
+let ledgerFromDate = null;
+let ledgerToDate   = null;
+let docsFromDate   = null;
+let docsToDate     = null;
+
+function shGetDefaultDates() {
+  const to = new Date();
+  const from = new Date();
+  from.setFullYear(from.getFullYear() - 1);
+  return { from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] };
+}
+
+function shValidateDates(fromDate, toDate) {
+  if (!fromDate) return { valid: false, error: t('From date is required') };
+  const today = new Date().toISOString().split('T')[0];
+  if (toDate && toDate > today) return { valid: false, error: t('To date cannot be in the future') };
+  if (toDate && fromDate > toDate) return { valid: false, error: t('From date cannot be after to date') };
+  return { valid: true };
+}
+
+function shSortData(data) {
+  return [...data].sort((a, b) => {
+    let av = a[salesHistorySortCol], bv = b[salesHistorySortCol];
+    if (salesHistorySortCol === 'quantity' || salesHistorySortCol === 'noOfOrders') {
+      av = parseFloat(av) || 0; bv = parseFloat(bv) || 0;
+    } else {
+      av = String(av || '').toLowerCase(); bv = String(bv || '').toLowerCase();
+    }
+    if (av < bv) return -1 * salesHistorySortDir;
+    if (av > bv) return 1 * salesHistorySortDir;
+    return 0;
+  });
+}
+
+function shSort(col) {
+  if (salesHistorySortCol === col) {
+    salesHistorySortDir *= -1;
+  } else {
+    salesHistorySortCol = col;
+    salesHistorySortDir = (col === 'quantity' || col === 'noOfOrders') ? -1 : 1;
+  }
+  if (salesHistoryData) {
+    const from = document.getElementById('sh-from-date')?.value || '';
+    const to = document.getElementById('sh-to-date')?.value || '';
+    shRenderTable(salesHistoryData, from, to);
+  }
+}
+
+function shArrow(col) {
+  if (col !== salesHistorySortCol) return ' <span class="sort-arrow">↕</span>';
+  return salesHistorySortDir === 1
+    ? ' <span class="sort-arrow active">↑</span>'
+    : ' <span class="sort-arrow active">↓</span>';
+}
+
+function shRenderTable(result, fromDate, toDate) {
+  const el = document.getElementById('sales-history-content');
+  const rows = shSortData(result.salesHistory || []);
+
+  const filterBar = `<div class="sales-history-filters">
+    <div class="date-filter-group">
+      <span class="date-filter-label">${t('From')}</span>
+      <input class="date-filter-input" type="date" id="sh-from-date" value="${fromDate}">
+    </div>
+    <div class="date-filter-group">
+      <span class="date-filter-label">${t('To')}</span>
+      <input class="date-filter-input" type="date" id="sh-to-date" value="${toDate}">
+    </div>
+    <button class="btn-refresh" onclick="shRefresh()">${t('Refresh')}</button>
+  </div>`;
+
+  if (!rows.length) {
+    el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">📊</div><p>${t('No sales history')}</p><p class="empty-sub">${t('This customer has no invoiced items in the selected period.')}</p></div>`;
+    return;
+  }
+
+  const header = `<div class="sales-history-header">
+    <span class="sales-history-title">${t('Sales History:')} ${result.customerNo || ''} — ${result.customerName || ''}</span>
+    <span class="sales-history-summary">${t('Period')}: ${fmtDate(result.fromDate)} – ${fmtDate(result.toDate)} &nbsp;|&nbsp; ${result.noOfRecords ?? rows.length} ${t('items')}</span>
+  </div>`;
+
+  el.innerHTML = filterBar + header + `<div class="table-wrap"><table>
+    <thead><tr>
+      <th class="sh-sortable" onclick="shSort('itemNo')">${t('Item No.')}${shArrow('itemNo')}</th>
+      <th class="sh-sortable" onclick="shSort('description')">${t('Description')}${shArrow('description')}</th>
+      <th class="sh-sortable" style="text-align:center" onclick="shSort('variantCode')">${t('Variant')}${shArrow('variantCode')}</th>
+      <th class="sh-sortable num" onclick="shSort('quantity')">${t('Quantity')}${shArrow('quantity')}</th>
+      <th class="sh-sortable num" onclick="shSort('noOfOrders')">${t('# Orders')}${shArrow('noOfOrders')}</th>
+    </tr></thead>
+    <tbody>${rows.map(row => `<tr>
+      <td><strong>${row.itemNo || '—'}</strong></td>
+      <td>${row.description || '—'}</td>
+      <td style="text-align:center">${row.variantCode || '<span style="opacity:0.35">—</span>'}</td>
+      <td class="num">${fmt(row.quantity)} ${row.unitOfMeasureCode || ''}</td>
+      <td class="num">${row.noOfOrders ?? 0}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function shRefresh() {
+  const fromDate = document.getElementById('sh-from-date')?.value;
+  const toDate = document.getElementById('sh-to-date')?.value;
+  const v = shValidateDates(fromDate, toDate);
+  if (!v.valid) { toast(v.error, 'error'); return; }
+  document.getElementById('sales-history-content').dataset.loaded = '';
+  loadSalesHistory(fromDate, toDate);
+}
+
+async function loadSalesHistory(fromDate = null, toDate = null) {
+  const defaults = shGetDefaultDates();
+  fromDate = fromDate || document.getElementById('sh-from-date')?.value || defaults.from;
+  toDate   = toDate   || document.getElementById('sh-to-date')?.value   || defaults.to;
+
+  const el = document.getElementById('sales-history-content');
+  el.innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading sales history...')}</span></div>`;
+  el.dataset.loaded = 'true';
+
+  try {
+    const result = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Customer.SalesHistory.Get',
+      source: 'BC Portal',
+      subject: selectedCustomer.number,
+      data: JSON.stringify({ fromDate, toDate })
+    });
+
+    if (result.status === 'Error') {
+      const msg = result.error || 'Unknown error';
+      el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${t('Error loading sales history')}</p></div>`;
+      toast(t('Failed to load sales history: {0}').replace('{0}', msg), 'error');
+      return;
+    }
+
+    salesHistoryData = result;
+    shRenderTable(result, fromDate, toDate);
+  } catch (error) {
+    console.error('Error loading sales history:', error);
+    const errorDetails = error.stack || error.message;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space:pre-wrap;text-align:left;font-size:0.75rem">${errorDetails}</p></div>`;
+    toast('Failed to load sales history:\n' + errorDetails, 'error');
+  }
+}
+
+// ---- LEDGER ----
+function buildLedgerFilterBar() {
+  return `<div class="sales-history-filters">
+    <div class="date-filter-group">
+      <span class="date-filter-label">${t('From')}</span>
+      <input class="date-filter-input" type="date" id="ledger-from-date" value="${ledgerFromDate || ''}">
+    </div>
+    <div class="date-filter-group">
+      <span class="date-filter-label">${t('To')}</span>
+      <input class="date-filter-input" type="date" id="ledger-to-date" value="${ledgerToDate || ''}">
+    </div>
+    <button class="btn-refresh" onclick="ledgerRefresh()">${t('Refresh')}</button>
+  </div>`;
+}
+
+function ledgerRefresh() {
+  const fromDate = document.getElementById('ledger-from-date')?.value || null;
+  const toDate   = document.getElementById('ledger-to-date')?.value   || null;
+  const v = shValidateDates(fromDate, toDate);
+  if (!v.valid) { toast(v.error, 'error'); return; }
+  ledgerFromDate = fromDate;
+  ledgerToDate   = toDate;
+  loadLedger(0);
+}
+
+async function loadLedger(skip = 0) {
+  const take = pageSize();
+  const el = document.getElementById('ledger-content');
+  const filterBar = buildLedgerFilterBar();
+  el.innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading ledger entries...')}</span></div>`;
+  try {
+    const startDateTime = ledgerFromDate ? `${ledgerFromDate}T00:00:00Z` : null;
+    const endDateTime   = ledgerToDate   ? `${ledgerToDate}T23:59:59Z`   : null;
+    const payload = {
+      tableName: 'Cust. Ledger Entry',
+      fieldNumbers: [4, 5, 6, 7, 13, 14, 36],
+      tableView: `WHERE(Customer No.=CONST(${selectedCustomer.number}))`,
+      skip, take
+    };
+    if (startDateTime) payload.startDateTime = startDateTime;
+    if (endDateTime)   payload.endDateTime   = endDateTime;
+    const [res, meta] = await Promise.all([
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+        data: JSON.stringify(payload)
+      }),
+      getFieldMeta('Cust. Ledger Entry', [1, 4, 5, 6, 7, 13, 14, 36])
+    ]);
+    const cap = {};
+    meta.forEach(f => { cap[f.id] = f.caption; });
+    const rows = res.result || [];
+    const total = res.noOfRecords || 0;
+    if (!rows.length) {
+      el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">📒</div><p>${t('No ledger entries')}</p><p class="empty-sub">${t('No ledger entries in the selected period.')}</p></div>`;
+      return;
+    }
+    rows.sort((a,b) => parseInt((b.primaryKey||{}).EntryNo_||0) - parseInt((a.primaryKey||{}).EntryNo_||0));
+    el.innerHTML = filterBar + `<div class="table-wrap"><table>
+      <thead><tr><th>${cap[1]||'Entry No.'}</th><th>${cap[4]||'Date'}</th><th>${cap[5]||'Doc Type'}</th><th>${cap[6]||'Doc No.'}</th><th>${cap[7]||'Description'}</th><th class="num">${cap[13]||'Amount'}</th><th class="num">${cap[14]||'Remaining'}</th><th>${cap[36]||'Status'}</th></tr></thead>
+      <tbody>${rows.map(rec => {
+        const f = rec.fields || {}; const pk = rec.primaryKey || {};
+        return `<tr>
+          <td>${pk.EntryNo_||'—'}</td>
+          <td>${fmtDate(f.PostingDate)}</td>
+          <td>${f.DocumentType||'—'}</td>
+          <td><strong>${f.DocumentNo_||'—'}</strong></td>
+          <td>${f.Description||'—'}</td>
+          <td class="${parseFloat(f.Amount||0)>=0?'amount-pos':'amount-neg'}">${fmt(f.Amount)}</td>
+          <td class="num">${fmt(f.RemainingAmount)}</td>
+          <td>${f.Open?`<span class="chip open">● ${t('Open')}</span>`:`<span class="chip closed">✓ ${t('Closed')}</span>`}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+    <div id="ledger-pagination"></div>`;
+    paginate('ledger-pagination', total, skip, take, 'loadLedger');
+  } catch(e) {
+    const errorDetails = e.stack || e.message;
+    el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`;
+    toast(errorDetails,'error');
+  }
+}
+
+// ---- DOCUMENTS ----
+function buildDocsFilterBar() {
+  return `<div class="sales-history-filters">
+    <div class="date-filter-group">
+      <span class="date-filter-label">${t('From')}</span>
+      <input class="date-filter-input" type="date" id="docs-from-date" value="${docsFromDate || ''}">
+    </div>
+    <div class="date-filter-group">
+      <span class="date-filter-label">${t('To')}</span>
+      <input class="date-filter-input" type="date" id="docs-to-date" value="${docsToDate || ''}">
+    </div>
+    <button class="btn-refresh" onclick="docsRefresh()">${t('Refresh')}</button>
+  </div>`;
+}
+
+function docsRefresh() {
+  const fromDate = document.getElementById('docs-from-date')?.value || null;
+  const toDate   = document.getElementById('docs-to-date')?.value   || null;
+  const v = shValidateDates(fromDate, toDate);
+  if (!v.valid) { toast(v.error, 'error'); return; }
+  docsFromDate = fromDate;
+  docsToDate   = toDate;
+  loadDocuments();
+}
+
+async function loadDocuments() {
+  const take = pageSize();
+  const el = document.getElementById('documents-content');
+  const filterBar = buildDocsFilterBar();
+  el.innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading documents...')}</span></div>`;
+  try {
+    const startDateTime = docsFromDate ? `${docsFromDate}T00:00:00Z` : null;
+    const endDateTime   = docsToDate   ? `${docsToDate}T23:59:59Z`   : null;
+    const addDates = (payload) => {
+      if (startDateTime) payload.startDateTime = startDateTime;
+      if (endDateTime)   payload.endDateTime   = endDateTime;
+      return payload;
+    };
+    const [ordRes, invRes, crmRes, metaOrd, metaInv] = await Promise.all([
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+        data: JSON.stringify(addDates({ tableName: 'Sales Header', fieldNumbers: [19, 20, 61, 120, 5790], tableView: `WHERE(Document Type=CONST(Order),Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take }))
+      }).catch(() => ({ result: [] })),
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+        data: JSON.stringify(addDates({ tableName: 'Sales Invoice Header', fieldNumbers: [20, 24, 61], tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take }))
+      }).catch(() => ({ result: [] })),
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+        data: JSON.stringify(addDates({ tableName: 'Sales Cr.Memo Header', fieldNumbers: [20, 24, 61], tableView: `WHERE(Sell-to Customer No.=CONST(${selectedCustomer.number}))`, skip: 0, take }))
+      }).catch(() => ({ result: [] })),
+      getFieldMeta('Sales Header', [19, 20, 61, 120, 5790]),
+      getFieldMeta('Sales Invoice Header', [20, 24, 61])
+    ]);
+    // Build caption maps
+    const capOrd = {}; metaOrd.forEach(f => { capOrd[f.id] = f.caption; });
+    const capInv = {}; metaInv.forEach(f => { capInv[f.id] = f.caption; });
+    const statusEnumCaptions = {};
+    const field120 = metaOrd.find(f => f.id === 120);
+    if (field120 && field120.enum) field120.enum.forEach(e => { statusEnumCaptions[e.value] = e.caption; });
+    const orders = (ordRes.result || []).map(rec => {
+      const status = (rec.fields||{}).Status || 'Open';
+      return { _t: 'Order', number: (rec.primaryKey||{}).No_,
+        _orderDate: (rec.fields||{}).OrderDate, _postingDate: (rec.fields||{}).PostingDate,
+        _total: (rec.fields||{}).AmountIncludingVAT,
+        _status: status, _statusLabel: statusEnumCaptions[status] || status,
+        dueDate: (rec.fields||{}).RequestedDeliveryDate };
+    });
+    const invoices = (invRes.result || []).map(rec => ({
+      _t: 'Invoice', number: (rec.primaryKey||{}).No_,
+      _orderDate: null, _postingDate: (rec.fields||{}).PostingDate,
+      _total: (rec.fields||{}).AmountIncludingVAT,
+      _status: 'Paid', _statusLabel: t('Paid'), dueDate: (rec.fields||{}).DueDate
+    }));
+    const creditMemos = (crmRes.result || []).map(rec => ({
+      _t: 'Credit Memo', number: (rec.primaryKey||{}).No_,
+      _orderDate: null, _postingDate: (rec.fields||{}).PostingDate,
+      _total: (rec.fields||{}).AmountIncludingVAT,
+      _status: 'Paid', _statusLabel: t('Paid'), dueDate: null
+    }));
+    const docs = [...orders, ...invoices, ...creditMemos]
+      .sort((a,b) => new Date(b._postingDate||b._orderDate||0) - new Date(a._postingDate||a._orderDate||0));
+    if (!docs.length) {
+      el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">📄</div><p>${t('No documents found')}</p><p class="empty-sub">${t('No documents in the selected period.')}</p></div>`;
+      return;
+    }
+    const typeIcon = { Order: '📦', Invoice: '🧾', 'Credit Memo': '📝' };
+    el.innerHTML = filterBar + `<div class="table-wrap"><table>
+      <thead><tr><th>${t('Type')}</th><th>${t('No.')}</th><th>${capOrd[19]||'Order Date'}</th><th>${capInv[20]||'Posting Date'}</th><th>${capInv[24]||'Due Date'}</th><th class="num">${capInv[61]||'Total incl. VAT'}</th><th>${capOrd[120]||'Status'}</th><th class="action-col"></th></tr></thead>
+      <tbody>${docs.map(d=>{
+        let actionBtn = '';
+        if (d._t === 'Order') {
+          actionBtn = `<button class="doc-action-btn info" title="${t('Statistics')}" onclick="showOrderStats('${d.number}')">ⓘ</button>`;
+        } else if (d._t === 'Invoice') {
+          actionBtn = `<button class="doc-action-btn pdf" title="${t('Download PDF')}" onclick="downloadPdf('invoice','${d.number}')">⬇ PDF</button>`;
+        } else if (d._t === 'Credit Memo') {
+          actionBtn = `<button class="doc-action-btn pdf" title="${t('Download PDF')}" onclick="downloadPdf('creditmemo','${d.number}')">⬇ PDF</button>`;
+        }
+        return `<tr>
+        <td>${typeIcon[d._t]||'📄'} ${t(d._t)}</td>
+        <td><strong>${d.number||'—'}</strong></td>
+        <td>${fmtDate(d._orderDate)}</td>
+        <td>${fmtDate(d._postingDate)}</td>
+        <td>${fmtDate(d.dueDate)}</td>
+        <td class="amount-pos">${fmt(d._total)}</td>
+        <td>${chipStatus(d._status, d._statusLabel)}</td>
+        <td class="action-col">${actionBtn}</td>
+      </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+  } catch(e) {
+    const errorDetails = e.stack || e.message;
+    el.innerHTML = filterBar + `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`;
+    toast(errorDetails,'error');
+  }
+}
+
+function chipStatus(s, label) {
+  if (!s) return '—';
+  const m = {Open:'open','In Review':'pending',Released:'closed',Paid:'closed',Draft:'pending','Pending Prepayment':'pending'};
+  return `<span class="chip ${m[s]||'open'}">${label || s}</span>`;
+}
+
+// ---- ORDER STATISTICS ----
+async function showOrderStats(orderNo) {
+  const modal    = document.getElementById('stats-modal');
+  const body     = document.getElementById('stats-modal-body');
+  const title    = document.getElementById('stats-modal-title');
+  const subtitle = document.getElementById('stats-modal-subtitle');
+  title.textContent    = orderNo;
+  subtitle.textContent = '';
+  body.innerHTML = '<div class="loader-wrap"><div class="spinner"></div></div>';
+  modal.classList.remove('hidden');
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Sales.Order.Statistics',
+      source: 'BC Portal', subject: orderNo
+    });
+    subtitle.textContent = [res.customerName, res.currencyCode, fmtDate(res.orderDate)].filter(Boolean).join(' · ');
+    const o = res.order || {};
+    body.innerHTML = `
+      <div class="stats-grid">
+        <div class="stat-row"><span class="stat-label">${t('Total excl. VAT')}</span><span class="stat-value hl">${fmt(o.totalExclVAT)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Total incl. VAT')}</span><span class="stat-value hl">${fmt(o.totalInclVAT)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('VAT Amount')}</span><span class="stat-value">${fmt(o.vatAmount)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Quantity')}</span><span class="stat-value">${(o.quantity||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Line Discount')}</span><span class="stat-value">${fmt(o.lineDiscountAmount)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Invoice Discount')}</span><span class="stat-value">${fmt(o.invoiceDiscountAmount)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Total Weight')}</span><span class="stat-value">${(o.totalWeight||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Total Volume')}</span><span class="stat-value">${(o.totalVolume||0).toLocaleString()}</span></div>
+      </div>
+      ${(res.vat_totals||[]).length ? `
+        <div class="modal-section-title">${t('VAT Breakdown')}</div>
+        <table class="vat-table">
+          <thead><tr><th>${t('VAT Identifier')}</th><th>%</th><th>${t('Base')}</th><th>${t('VAT')}</th><th>${t('Total incl. VAT')}</th></tr></thead>
+          <tbody>${(res.vat_totals||[]).map(v=>`<tr>
+            <td>${v.vatIdentifier||'—'}</td>
+            <td>${v.vatPct||0}%</td>
+            <td>${fmt(v.vatBase)}</td>
+            <td>${fmt(v.vatAmount)}</td>
+            <td>${fmt(v.amountInclVAT)}</td>
+          </tr>`).join('')}</tbody>
+        </table>` : ''}
+    `;
+  } catch(e) {
+    body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
+  }
+}
+
+function closeStatsModal() {
+  document.getElementById('stats-modal').classList.add('hidden');
+}
+
+// ---- CREDIT LIMIT ----
+async function loadCreditLimit() {
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Customer.CreditLimit.Get',
+      source: 'BC Portal', subject: selectedCustomer.number
+    });
+    customerCredit = res;
+    document.getElementById('credit-info-btn').style.display = '';
+    renderCreditDisplay();
+  } catch(e) { /* credit info is optional */ }
+}
+
+function computeOrderTotal() {
+  return Object.entries(orderQty)
+    .filter(([,q]) => q > 0)
+    .reduce((sum, [id, qty]) => sum + qty * getEffectivePrice(id), 0);
+}
+
+function renderCreditDisplay() {
+  const section = document.getElementById('order-credit-section');
+  if (!customerCredit || !(customerCredit.creditLimitLCY > 0)) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+  const total   = computeOrderTotal();
+  const remaining = customerCredit.remainingCredit - total;
+  const limit     = customerCredit.creditLimitLCY;
+  const pct = Math.max(0, Math.min(100, (remaining / limit) * 100));
+  const bar    = document.getElementById('credit-bar');
+  const remVal = document.getElementById('credit-remaining-val');
+  document.getElementById('credit-limit-val').textContent = fmt(limit);
+  remVal.textContent = fmt(remaining);
+  bar.style.width = pct + '%';
+  bar.className    = 'credit-bar';
+  remVal.className = 'credit-info-val';
+  if (remaining < 0) {
+    bar.classList.add('over');  remVal.classList.add('over');
+  } else if (total > customerCredit.remainingCredit || remaining < limit * 0.1) {
+    bar.classList.add('warn');  remVal.classList.add('warn');
+  } else {
+    remVal.classList.add('ok');
+  }
+}
+
+async function showCreditInfo() {
+  const modal    = document.getElementById('stats-modal');
+  const body     = document.getElementById('stats-modal-body');
+  const title    = document.getElementById('stats-modal-title');
+  const subtitle = document.getElementById('stats-modal-subtitle');
+  title.textContent    = t('Credit information');
+  subtitle.textContent = selectedCustomer ? selectedCustomer.displayName : '';
+  modal.classList.remove('hidden');
+  if (!customerCredit) {
+    body.innerHTML = '<div class="loader-wrap"><div class="spinner"></div></div>';
+    try {
+      const res = await cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Customer.CreditLimit.Get',
+        source: 'BC Portal', subject: selectedCustomer.number
+      });
+      customerCredit = res;
+    } catch(e) {
+      body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
+      return;
+    }
+  }
+  const c = customerCredit;
+  const limitSet  = c.creditLimitLCY > 0;
+  const exceeded  = c.isCreditLimitExceeded;
+  const overdue   = c.hasOverdueBalance;
+  const remColor  = c.remainingCredit < 0 ? 'var(--red)' : (c.remainingCredit < c.creditLimitLCY * 0.1 ? 'var(--amber)' : 'var(--green)');
+  body.innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-row"><span class="stat-label">${t('Credit Limit')}</span><span class="stat-value hl">${limitSet ? fmt(c.creditLimitLCY) : '—'}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Remaining Credit')}</span><span class="stat-value" style="color:${remColor}">${limitSet ? fmt(c.remainingCredit) : '—'}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Balance')}</span><span class="stat-value">${fmt(c.balanceLCY)}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Outstanding')}</span><span class="stat-value">${fmt(c.outstandingAmountLCY)}</span></div>
+    </div>
+    ${exceeded ? `<div style="padding:8px 12px;background:rgba(242,95,92,0.12);border:1px solid var(--red);border-radius:var(--radius-sm);color:var(--red);font-size:0.78rem;margin-bottom:10px">⚠ ${t('Credit limit exceeded')}</div>` : ''}
+    ${overdue  ? `<div style="padding:8px 12px;background:rgba(245,166,35,0.12);border:1px solid var(--amber);border-radius:var(--radius-sm);color:var(--amber);font-size:0.78rem;margin-bottom:10px">⚠ ${t('Overdue balance')}</div>` : ''}
+    ${limitSet ? `
+      <div class="modal-section-title">${t('Details')}</div>
+      <div class="stats-grid">
+        <div class="stat-row"><span class="stat-label">${t('Remaining Credit')}</span><span class="stat-value">${fmt(c.remainingCredit)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Remaining with tolerance')}</span><span class="stat-value">${fmt(c.remainingCreditWithTolerance)}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Tolerance')} %</span><span class="stat-value">${(c.tolerancePercent || 0).toFixed(1)}%</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Due this period')}</span><span class="stat-value">${fmt(c.outstandingBalanceDueLCY)}</span></div>
+      </div>` : ''}
+  `;
+}
+
+// ---- PDF DOWNLOAD ----
+async function downloadPdf(docType, docNo) {
+  const eventType = docType === 'invoice' ? 'Sales.SalesInvoice.Pdf' : 'Sales.SalesCreditMemo.Pdf';
+  try {
+    toast(t('Downloading PDF...'), 'info');
+    // Use raw fetch so we can detect binary (application/pdf) vs JSON error responses
+    const r = await fetch('/api/bc?companyId=' + encodeURIComponent(selectedCompany.id), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ specversion: '1.0', type: eventType, source: 'BC Portal', subject: docNo, lcid: selectedLcid })
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e.error || 'PDF download failed (' + r.status + ')');
+    }
+    const ct = r.headers.get('content-type') || '';
+    const isBinary = ct.includes('pdf') || ct.includes('octet-stream');
+    if (!isBinary) {
+      // PDF generation failed - check for Cloud Events error response
+      // Error can be in the POST response directly (no data URL) or from the data endpoint
+      const result = await r.json().catch(() => ({}));
+      if (result.status === 'Error') {
+        let errorMsg = result.error || 'PDF generation failed';
+        if (result.callStack) {
+          errorMsg += '\n\nCall Stack:\n' + result.callStack.replace(/\\\"/g, '"');
+        }
+        throw new Error(errorMsg);
+      }
+      throw new Error(result.error || 'Unexpected response type: ' + ct);
+    }
+    const blob = new Blob([await r.arrayBuffer()], { type: 'application/pdf' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `${docNo}.pdf`; a.click();
+  } catch(e) { 
+    const errorDetails = e.stack || e.message;
+    toast(errorDetails, 'error'); 
+  }
+}
+
+// ---- ITEMS ----
+async function loadItems() {
+  document.getElementById('items-list').innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span class="loader-label">${t('Loading items...')}</span></div>`;
+  orderQty = {};
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Data.Records.Get',
+      source: 'BC Portal',
+      data: JSON.stringify({ tableName: 'Item', fieldNumbers: [3, 10, 18], tableView: 'WHERE(Type=CONST(Inventory),Sales Blocked=CONST(false))', take: pageSize() * 2 })
+    });
+    items = (res.result || []).map(mapItem);
+    itemPrices = {};
+    itemPictures = {};
+    renderItems(items);
+  } catch(e) { 
+    const errorDetails = e.stack || e.message;
+    document.getElementById('items-list').innerHTML=`<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`; 
+    toast(errorDetails, 'error');
+  }
+}
+
+
+
+function getEffectivePrice(id) {
+  const it = items.find(i => i.id === id);
+  const pl = itemPrices[id];
+  if (!pl) return it ? it.unitPrice : 0;
+  return selectedCustomer?.priceIncludingVAT ? (pl.unitPriceInclVAT ?? pl.unitPrice) : (pl.unitPriceExclVAT ?? pl.unitPrice);
+}
+
+function getLinePriceExclVAT(id) {
+  const it = items.find(i => i.id === id);
+  const pl = itemPrices[id];
+  if (!pl) return it ? it.unitPrice : 0;
+  return pl.unitPriceExclVAT ?? pl.unitPrice;
+}
+
+function mergeAvailability(lines) {
+  if (!lines || !lines.length) return null;
+  const sum = { inventory: 0, qtyReserved: 0, grossRequirement: 0, scheduledReceipt: 0, plannedOrderReceipt: 0, availableQuantity: 0 };
+  for (const a of lines) {
+    sum.inventory           += a.inventory           || 0;
+    sum.qtyReserved         += a.qtyReserved         || 0;
+    sum.grossRequirement    += a.grossRequirement    || 0;
+    sum.scheduledReceipt    += a.scheduledReceipt    || 0;
+    sum.plannedOrderReceipt += a.plannedOrderReceipt || 0;
+    sum.availableQuantity   += a.availableQuantity   || 0;
+  }
+  const codes = [...new Set(lines.map(a => a.locationCode).filter(Boolean))];
+  sum.locationCode = codes.join(', ');
+  return sum;
+}
+
+async function showItemAvailability(id) {
+  const it = items.find(i => i.id === id);
+  if (!it) return;
+  const modal    = document.getElementById('stats-modal');
+  const body     = document.getElementById('stats-modal-body');
+  const title    = document.getElementById('stats-modal-title');
+  const subtitle = document.getElementById('stats-modal-subtitle');
+  title.textContent    = it.number;
+  subtitle.textContent = it.displayName;
+  modal.classList.remove('hidden');
+  body.innerHTML = '<div class="loader-wrap"><div class="spinner"></div></div>';
+
+  // Always fetch fresh — availability and price change frequently
+  let res, avail, priceLine;
+  let pictures = itemPictures[id]; // pictures are stable; only fetch once per session
+  try {
+    const data = selectedCustomer?.locationCode ? { locationFilter: selectedCustomer.locationCode } : {};
+    const availResult = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Item.Availability.Get',
+      source: 'BC Portal', subject: it.number,
+      data: JSON.stringify(data)
+    });
+    res = availResult;
+    avail = mergeAvailability(res.availability || []);
+  } catch(e) {
+    const errorDetails = e.stack || e.message;
+    body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`;
+    toast(errorDetails, 'error');
+    return;
+  }
+  // Fetch fresh price; fetch picture only if not yet loaded for this session
+  const fetches = [
+    cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Item.Price.Get',
+      source: 'BC Portal', subject: it.number,
+      data: JSON.stringify({ customerNo: selectedCustomer?.number || '' })
+    }).then(pr => {
+      priceLine = (pr.priceListLines || [])[0] || null;
+      itemPrices[id] = priceLine;
+    }).catch(() => { priceLine = null; itemPrices[id] = null; })
+  ];
+  if (pictures === undefined) {
+    fetches.push(
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Get',
+        source: 'BC Portal',
+        data: JSON.stringify({ tableName: 'Item', fieldNumbers: [92], tableView: `WHERE(No.=CONST(${it.number}))` })
+      }).then(pr => {
+        const rec = (pr.result || [])[0];
+        pictures = rec?.fields?.Picture?.Media || null;
+        itemPictures[id] = pictures;
+      }).catch(() => { pictures = null; itemPictures[id] = null; })
+    );
+  }
+  await Promise.all(fetches);
+  const loc   = avail?.locationCode || selectedCustomer?.locationCode || '—';
+
+  const pictureSection = pictures && pictures.length ? `
+    <div style="margin-bottom:14px">
+      <img class="item-picture" src="data:image/jpeg;base64,${pictures[0].Value}" alt="${it.displayName}">
+      ${pictures.length > 1 ? `<button class="item-picture-all-btn" onclick="showItemPictureGallery('${id}')">${t('View all')} (${pictures.length})</button>` : ''}
+    </div>` : '';
+
+  const priceSection = priceLine ? `
+    <div class="modal-section-title">${t('Pricing')}</div>
+    <div class="stats-grid">
+      <div class="stat-row"><span class="stat-label">${t('Price excl. VAT')}</span><span class="stat-value hl">${fmt(priceLine.unitPriceExclVAT)}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Price incl. VAT')}</span><span class="stat-value hl">${fmt(priceLine.unitPriceInclVAT)}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('VAT %')}</span><span class="stat-value">${(priceLine.vatPct||0).toFixed(1)}%</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Line Discount %')}</span><span class="stat-value">${(priceLine.lineDiscountPct||0).toFixed(1)}%</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Allow line discount')}</span><span class="stat-value">${priceLine.allowLineDisc ? '✓' : '✕'}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Allow invoice discount')}</span><span class="stat-value">${priceLine.allowInvoiceDisc ? '✓' : '✕'}</span></div>
+    </div>` : '';
+
+  body.innerHTML = `
+    ${pictureSection}
+    <div class="stats-grid">
+      <div class="stat-row"><span class="stat-label">${t('Unit of measure')}</span><span class="stat-value">${res?.baseUnitOfMeasure||'—'}</span></div>
+      <div class="stat-row"><span class="stat-label">${t('Requested Delivery Date')}</span><span class="stat-value">${fmtDate(res?.requestedDeliveryDate)||'—'}</span></div>
+    </div>
+    ${priceSection}
+    ${avail ? `
+      <div class="modal-section-title">${t('Availability')} — ${loc}</div>
+      <div class="stats-grid">
+        <div class="stat-row"><span class="stat-label">${t('Available Quantity')}</span><span class="stat-value hl">${(avail.availableQuantity||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Inventory')}</span><span class="stat-value">${(avail.inventory||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Reserved')}</span><span class="stat-value">${(avail.qtyReserved||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Gross Requirement')}</span><span class="stat-value">${(avail.grossRequirement||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Scheduled Receipt')}</span><span class="stat-value">${(avail.scheduledReceipt||0).toLocaleString()}</span></div>
+        <div class="stat-row"><span class="stat-label">${t('Planned Receipt')}</span><span class="stat-value">${(avail.plannedOrderReceipt||0).toLocaleString()}</span></div>
+      </div>` :
+      `<div class="empty-state" style="padding:24px 0"><div class="empty-icon">📦</div><p>${t('No availability')}</p></div>`}
+  `;
+}
+
+function showItemPictureGallery(id) {
+  const it = items.find(i => i.id === id);
+  const pictures = itemPictures[id];
+  if (!pictures || !pictures.length) return;
+  const body = document.getElementById('stats-modal-body');
+  body.innerHTML = `
+    <button class="item-picture-back-btn" onclick="showItemAvailability('${id}')">← ${t('Back')}</button>
+    <div class="modal-section-title" style="margin-top:0;border-top:none;padding-top:0">${t('Pictures')} (${pictures.length})</div>
+    <div class="item-picture-gallery">
+      ${pictures.map((m, i) => `<img src="data:image/jpeg;base64,${m.Value}" alt="${it.displayName} ${i + 1}">`).join('')}
+    </div>
+  `;
+}
+
+function renderItems(list) {
+  if (!list.length) { document.getElementById('items-list').innerHTML=`<div class="empty-state"><div class="empty-icon">📦</div><p>${t('No items found')}</p></div>`; return; }
+  const icons = {Inventory:'📦',Service:'⚙','Non-Inventory':'📋'};
+  document.getElementById('items-list').innerHTML = list.map(it=>`
+    <div class="item-row">
+      <div class="item-icon">${icons[it.type]||'📦'}</div>
+      <div class="item-info">
+        <div class="item-name">${it.displayName}</div>
+        <div class="item-no">${it.number}</div>
+      </div>
+      <div class="item-price">${fmt(getEffectivePrice(it.id))}</div>
+      <button class="doc-action-btn info" onclick="showItemAvailability('${it.id}')" title="${t('Item Availability')}">ⓘ</button>
+      <div class="qty-ctrl">
+        <button class="qty-btn" onclick="changeQty('${it.id}',-1)">−</button>
+        <div class="qty-display" id="qty-${it.id}">${orderQty[it.id]||0}</div>
+        <button class="qty-btn" onclick="changeQty('${it.id}',1)">+</button>
+      </div>
+    </div>`).join('');
+}
+
+function filterItems() {
+  const q = document.getElementById('item-search').value.toLowerCase();
+  renderItems(items.filter(i=>(i.displayName||'').toLowerCase().includes(q)||(i.number||'').toLowerCase().includes(q)));
+  Object.keys(orderQty).forEach(id=>{ const el=document.getElementById('qty-'+id); if(el) el.textContent=orderQty[id]; });
+}
+
+async function changeQty(id, delta) {
+  if (delta > 0) {
+    const it = items.find(i => i.id === id);
+    // Always fetch fresh price and availability for this item
+    const [priceRes, availRes] = await Promise.allSettled([
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Item.Price.Get',
+        source: 'BC Portal', subject: it.number,
+        data: JSON.stringify({ customerNo: selectedCustomer?.number || '' })
+      }),
+      cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Item.Availability.Get',
+        source: 'BC Portal', subject: it.number,
+        data: JSON.stringify(selectedCustomer?.locationCode ? { locationFilter: selectedCustomer.locationCode } : {})
+      })
+    ]);
+    if (priceRes.status === 'fulfilled') {
+      itemPrices[id] = (priceRes.value.priceListLines || [])[0] || null;
+    }
+    if (availRes.status === 'fulfilled') {
+      const avail = mergeAvailability(availRes.value.availability || []);
+      const maxQty = avail ? (avail.availableQuantity || 0) : 0;
+      if ((orderQty[id] || 0) + delta > maxQty) {
+        toast(t('Exceeds available quantity'), 'error');
+        return;
+      }
+    }
+    if (customerCredit && customerCredit.creditLimitLCY > 0) {
+      const linePrice = getEffectivePrice(id) * delta;
+      const newTotal = computeOrderTotal() + linePrice;
+      if (newTotal > customerCredit.remainingCreditWithTolerance) {
+        toast(t('Credit limit reached'), 'error');
+        return;
+      }
+    }
+  }
+  const next = Math.max(0, (orderQty[id]||0) + delta);
+  if (next===0) delete orderQty[id]; else orderQty[id]=next;
+  const el = document.getElementById('qty-'+id);
+  if (el) el.textContent = next;
+  updateSummary();
+}
+
+function updateSummary() {
+  const lines = Object.entries(orderQty).filter(([,q])=>q>0);
+  const el = document.getElementById('order-lines');
+  if (!lines.length) { el.innerHTML='<div style="padding:16px 20px;font-size:0.77rem;color:var(--text-dim);text-align:center">' + t('No items added yet') + '</div>'; document.getElementById('order-total').textContent='0.00'; return; }
+  let total = 0;
+  el.innerHTML = lines.map(([id,qty])=>{
+    const it = items.find(i=>i.id===id);
+    if (!it) return '';
+    const line = qty * getEffectivePrice(id);
+    total += line;
+    return `<div class="summary-line"><span class="label">${it.displayName} × ${qty}</span><span class="val">${fmt(line)}</span></div>`;
+  }).join('');
+  document.getElementById('order-total').textContent = fmt(total);
+  const vatTag = document.getElementById('total-vat-tag');
+  if (vatTag) vatTag.textContent = selectedCustomer?.priceIncludingVAT ? t('Prices incl. VAT') : t('Prices excl. VAT');
+  renderCreditDisplay();
+}
+
+// ---- SUBMIT ORDER ----
+async function submitOrder() {
+  const lines = Object.entries(orderQty).filter(([,q])=>q>0);
+  if (!lines.length) { toast(t('Add at least one item'), 'error'); return; }
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true; btn.textContent = t('Creating...');
+  try {
+    // Generate a unique order number (BC will store it; number series must allow manual nos.)
+    const orderNo = 'WEB' + Date.now().toString().slice(-7);
+    const deliveryDate = document.getElementById('order-date').value;
+    const extDoc = document.getElementById('order-ext-doc').value;
+
+    // Step 1: Create Sales Header via Data.Records.Set
+    const headerFields = { SelltoCustomerNo_: selectedCustomer.number };
+    if (deliveryDate) headerFields.RequestedDeliveryDate = deliveryDate;
+    if (extDoc) headerFields.ExternalDocumentNo_ = extDoc;
+    const headerRes = await cePost(selectedCompany.id, {
+      specversion: '1.0', type: 'Data.Records.Set', source: 'BC Portal', subject: 'Sales Header',
+      data: JSON.stringify({ data: [{ primaryKey: { DocumentType: 'Order', No_: orderNo }, fields: headerFields }] })
+    });
+    if (headerRes.status !== 'Success') throw new Error(headerRes.error || t('Failed to create sales order'));
+    const createdNo = (headerRes.result?.[0]?.primaryKey?.No_) || orderNo;
+
+    // Step 2: Create Sales Lines
+    let lineNo = 10000;
+    for (const [itemId, qty] of lines) {
+      const it = items.find(i=>i.id===itemId);
+      if (!it) continue;
+      const lineRes = await cePost(selectedCompany.id, {
+        specversion: '1.0', type: 'Data.Records.Set', source: 'BC Portal', subject: 'Sales Line',
+        data: JSON.stringify({ data: [{ primaryKey: { DocumentType: 'Order', DocumentNo_: createdNo, LineNo_: lineNo }, fields: { Type: 'Item', No_: it.number, Quantity: String(qty), UnitPrice: String(getLinePriceExclVAT(it.id)) } }] })
+      });
+      if (lineRes.status !== 'Success') throw new Error(lineRes.error || `${t('Failed to add line for')} ${it.displayName}`);
+      lineNo += 10000;
+    }
+
+    document.getElementById('order-form-content').style.display='none';
+    document.getElementById('order-success-msg').textContent=t('Order {no} created for {name}.').replace('{no}', createdNo).replace('{name}', selectedCustomer.displayName);
+    document.getElementById('order-success').classList.add('visible');
+    toast(t('Sales order created!'), 'success');
+    loadDocuments();
+  } catch(e) {
+    toast(t('Failed: ') + e.message, 'error');
+  } finally {
+    btn.disabled=false; btn.textContent=t('Post Sales Order →');
+  }
+}
+
+function resetOrder() {
+  orderQty={};
+  document.getElementById('order-form-content').style.display='block';
+  document.getElementById('order-success').classList.remove('visible');
+  document.getElementById('order-date').value='';
+  document.getElementById('order-ext-doc').value='';
+  renderItems(items); updateSummary();
+}
+
+// ---- CONFIG PANEL ----
+async function loadConfig() {
+  try {
+    const r = await fetch('/api/config');
+    if (!r.ok) return;
+    const c = await r.json();
+    const set = (id, val) => {
+      const el = document.getElementById(id);
+      el.textContent = val || 'not set';
+      if (!val) el.className = 'config-val missing';
+    };
+    set('cfg-tenant', c.BC_TENANT_ID);
+    set('cfg-client-id', c.BC_CLIENT_ID);
+    set('cfg-env', c.BC_ENVIRONMENT);
+    document.getElementById('cfg-secret').innerHTML = c.BC_CLIENT_SECRET
+      ? '<span class="config-secret-set">● set</span>'
+      : '<span class="config-secret-missing">✕ not set</span>';
+    document.getElementById('config-panel').style.display = 'flex';
+  } catch(e) { /* silently skip if function not yet deployed */ }
+}
+
+// ---- GUARD: redirect to landing page if not connected ----
+(function() {
+  if (!localStorage.getItem('bc_portal_company_id')) location.href = 'index.html';
+})();
+
+// ---- BOOT ----
+window.onload = () => { show('view-companies'); loadConfig(); loadCompanies(); };
+</script>
+<script src="customer-create.js"></script>
+</body>
+</html>

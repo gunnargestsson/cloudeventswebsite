@@ -66,16 +66,16 @@ module.exports = async function (context, req) {
     return;
   }
 
-  const tenantId     = req.headers["x-bc-tenant"];
-  const clientId     = req.headers["x-bc-client-id"];
-  const clientSecret = req.headers["x-bc-client-secret"];
-  const environment  = req.headers["x-bc-environment"];
+  const tenantId     = req.headers["x-bc-tenant"]        || process.env.BC_TENANT_ID;
+  const clientId     = req.headers["x-bc-client-id"]     || process.env.BC_CLIENT_ID;
+  const clientSecret = req.headers["x-bc-client-secret"] || process.env.BC_CLIENT_SECRET;
+  const environment  = req.headers["x-bc-environment"]   || process.env.BC_ENVIRONMENT;
 
   if (!tenantId || !clientId || !clientSecret || !environment) {
     context.res = {
       status: 400,
       headers: { "Content-Type": "application/json", ...CORS },
-      body: JSON.stringify({ error: "Missing required headers: x-bc-tenant, x-bc-client-id, x-bc-client-secret, x-bc-environment" }),
+      body: JSON.stringify({ error: "Missing credentials: provide x-bc-* headers or configure server environment variables" }),
     };
     return;
   }

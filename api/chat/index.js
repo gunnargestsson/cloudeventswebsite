@@ -329,9 +329,13 @@ module.exports = async function (context, req) {
   if (!messages)  { context.res = { status: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: "messages array is required" }) }; return; }
   if (!bcConfig)  { context.res = { status: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: "bcConfig is required" }) }; return; }
 
-  const { tenantId, environment, companyId, clientId, clientSecret } = bcConfig;
+  const tenantId     = bcConfig.tenantId     || process.env.BC_TENANT_ID;
+  const environment  = bcConfig.environment  || process.env.BC_ENVIRONMENT;
+  const companyId    = bcConfig.companyId;
+  const clientId     = bcConfig.clientId     || process.env.BC_CLIENT_ID;
+  const clientSecret = bcConfig.clientSecret || process.env.BC_CLIENT_SECRET;
   if (!tenantId || !environment || !companyId || !clientId || !clientSecret) {
-    context.res = { status: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: "bcConfig must include tenantId, environment, companyId, clientId, clientSecret" }) };
+    context.res = { status: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: "bcConfig must include companyId; tenantId/environment/clientId/clientSecret can be provided in bcConfig or via server environment variables" }) };
     return;
   }
 

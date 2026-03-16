@@ -32,12 +32,25 @@ function bcSettingsClear() {
 }
 
 function bcSettingsReady() {
+  const mode = localStorage.getItem('bc_portal_mode') || 'server';
+  if (mode === 'server') {
+    return !!localStorage.getItem('bc_portal_company_id');
+  }
   const s = bcSettingsLoad();
   return !!(s.tenant && s.env && s.clientId && s.clientSecret && s.companyId);
 }
 
+/**
+ * In server mode: returns only { 'x-bc-company': companyId } so the Azure Function
+ * falls back to env vars for credentials while the company selection comes from the client.
+ * In custom mode: returns the full credential header set, or null if any field is missing.
+ */
 function bcSettingsHeaders() {
   const s = bcSettingsLoad();
+  const mode = localStorage.getItem('bc_portal_mode') || 'server';
+  if (mode === 'server') {
+    return s.companyId ? { 'x-bc-company': s.companyId } : null;
+  }
   if (!s.tenant || !s.env || !s.clientId || !s.clientSecret || !s.companyId) return null;
   return {
     'x-bc-tenant':        s.tenant,

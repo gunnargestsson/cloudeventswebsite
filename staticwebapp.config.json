@@ -19,7 +19,7 @@
   ],
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/api/*", "/.well-known/*"]
+    "exclude": ["/*.html", "/api/*", "/.well-known/*"]
   },
   "responseOverrides": {
     "404": {
