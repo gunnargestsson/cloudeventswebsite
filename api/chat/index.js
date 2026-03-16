@@ -22,17 +22,19 @@ Your job is to help users create sales orders by understanding natural language 
 WORKFLOW:
 1. Extract the customer and order lines from the user's message or uploaded document.
 2. Use lookup_customer to find and confirm the correct BC customer. If multiple matches, list them and ask the user to confirm.
-3. Use lookup_item for each product mentioned. The result includes both Base Unit of Measure (field 8) and Sales Unit of Measure (field 47).
-   - If the item has a Sales Unit of Measure that differs from the Base Unit of Measure, prefer the Sales Unit of Measure for the order line unless the user specifies otherwise.
-   - If the user mentions a unit that is neither the Base UoM nor the Sales UoM, call get_item_units_of_measure to retrieve all available UoM codes for that item first.
-   - If the user does not specify a unit, use the Sales Unit of Measure if present, otherwise use the Base Unit of Measure.
+3. Use lookup_item for each product mentioned. The result has explicit fields: itemNo, description, baseUnitOfMeasure, unitPrice, salesUnitOfMeasure.
+   - Use salesUnitOfMeasure as the UoM for the order line if non-empty; otherwise use baseUnitOfMeasure. Copy the exact string.
+   - NEVER use a UoM code you did not receive from lookup_item or get_item_units_of_measure.
+   - If the user mentions a unit that is neither baseUnitOfMeasure nor salesUnitOfMeasure, call get_item_units_of_measure first.
 4. Use check_item_availability for each resolved item. Note any stock issues.
 5. Use get_item_price for each item. Always pass customerNo and unitOfMeasureCode so the correct price tier is returned.
 6. Once ALL lines and the customer are resolved to real BC records, call propose_sales_order.
 7. Do NOT call propose_sales_order until you have confirmed: customerNo, and itemNo + unitPrice + unitOfMeasureCode for every line.
 
 UNIT OF MEASURE RULES:
-- lookup_item returns: No., Description, Base Unit of Measure (field 8), Unit Price (field 18), Sales Unit of Measure (field 47).
+- lookup_item returns explicit fields: itemNo, description, baseUnitOfMeasure, unitPrice, salesUnitOfMeasure.
+- NEVER invent or guess a UoM code (e.g. do NOT use 'PCS', 'EA', 'EACH' unless that exact string was returned by lookup_item or get_item_units_of_measure).
+- Use salesUnitOfMeasure if non-empty, otherwise use baseUnitOfMeasure. Copy the value exactly as returned.
 - Always set unitOfMeasureCode on every propose_sales_order line — never leave it blank.
 - If Base UoM and Sales UoM differ, mention both to the user and confirm which one to use.
 - Call get_item_units_of_measure when the user requests a specific UoM not yet known, or to show all options.
@@ -58,7 +60,7 @@ const TOOLS = [
   },
   {
     name: "lookup_item",
-    description: "Search for an item/product in Business Central by item number or description. Returns No., Description, Base Unit of Measure (field 8), Unit Price (field 18), and Sales Unit of Measure (field 47). Prefer the Sales Unit of Measure as the default UoM for the order line when it differs from the Base Unit of Measure.",
+    description: "Search for an item/product in Business Central by item number or description. Returns objects with fields: itemNo, description, baseUnitOfMeasure, unitPrice, salesUnitOfMeasure. Always use salesUnitOfMeasure as the UoM if non-empty, otherwise baseUnitOfMeasure. Never invent a UoM code — only use what this tool returns.",
     input_schema: {
       type: "object",
       properties: {
@@ -190,21 +192,29 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
       const q = sanitizeFilter(input.query);
       const ITEM_FIELDS = [1, 3, 8, 18, 47]; // No., Description, Base Unit of Measure, Unit Price, Sales Unit of Measure
 
+      const mapItems = (rows) => (rows || []).map(r => ({
+        itemNo:              r.primaryKey?.["No."] || r.fields?.["No."] || "",
+        description:         r.fields?.["Description"] || "",
+        baseUnitOfMeasure:   r.fields?.["Base Unit of Measure"] || "",
+        unitPrice:           r.fields?.["Unit Price"] ?? 0,
+        salesUnitOfMeasure:  r.fields?.["Sales Unit of Measure"] || "",
+      }));
+
       // Step 1: case-insensitive description search
       let res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
         tableView: `WHERE(Description=FILTER(@*${q}*))`,
         fieldNumbers: ITEM_FIELDS,
         take: 5,
       });
-      if ((res.result || []).length) return JSON.stringify(res.result);
+      if ((res.result || []).length) return JSON.stringify(mapItems(res.result));
 
-      // Step 2: case-insensitive item No. search  — BC field name is "No." (with period)
+      // Step 2: case-insensitive item No. search
       res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
         tableView: `WHERE(No.=FILTER(@*${q}*))`,
         fieldNumbers: ITEM_FIELDS,
         take: 5,
       });
-      if ((res.result || []).length) return JSON.stringify(res.result);
+      if ((res.result || []).length) return JSON.stringify(mapItems(res.result));
 
       // Step 3: fall back — get all non-blocked items and filter client-side.
       const allRes = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
@@ -216,7 +226,7 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
       const matches = (allRes.result || []).filter(r =>
         Object.values(r.fields || {}).some(v => String(v).toLowerCase().includes(lq))
       );
-      return JSON.stringify(matches.slice(0, 5));
+      return JSON.stringify(mapItems(matches.slice(0, 5)));
     }
 
     case "check_item_availability": {
