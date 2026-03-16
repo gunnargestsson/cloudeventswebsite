@@ -4,5 +4,10 @@
   "description": "Business Central Portal – Azure Functions API",
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "xlsx": "^0.18.5",
+    "msg-parser": "^2.0.0"
   }
 }

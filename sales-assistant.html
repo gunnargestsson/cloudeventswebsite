@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Sales Assistant · Origo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#080d14;--bg2:#0d1520;--bg3:#111c2a;--bg4:#162030;
+  --border:#1e2d3d;--border2:#243547;
+  --text:#e2eaf4;--text2:#8ba4bf;--text3:#4a6379;
+  --accent:#00d4ff;--accent2:#0096cc;
+  --green:#00ff88;--green2:#00cc6a;
+  --orange:#ff8c42;--red:#ff4d6d;--purple:#a78bfa;--yellow:#ffd60a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'JetBrains Mono',monospace;background:var(--bg);color:var(--text);height:100vh;overflow:hidden;display:flex;flex-direction:column}
+body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.04) 2px,rgba(0,0,0,0.04) 4px);pointer-events:none;z-index:1000}
+
+/* ── HEADER ── */
+header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0;z-index:100}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;flex-shrink:0}
+.logo-icon{width:32px;height:32px;border-radius:8px;overflow:hidden;flex-shrink:0}
+.logo-icon img{width:100%;height:100%;object-fit:cover;display:block}
+.htitle{font-family:'Syne',sans-serif;font-weight:800;font-size:15px;color:#fff}
+.hsub{font-size:9px;color:var(--text3);letter-spacing:2px;text-transform:uppercase}
+.hsp{flex:1}
+.hpill{display:flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid var(--border2);background:var(--bg3);font-size:10px;color:var(--text2);text-decoration:none;transition:border-color .15s,color .15s;cursor:pointer}
+.hpill:hover{border-color:var(--accent2);color:var(--text)}
+.hbtn{padding:6px 14px;background:var(--accent);border:none;color:var(--bg);font-family:inherit;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.5px;text-transform:uppercase;transition:background .15s}
+.hbtn:hover{background:#00eeff}
+.hbtn.ghost{background:none;border:1px solid var(--border2);color:var(--text2)}
+.hbtn.ghost:hover{border-color:var(--accent2);color:var(--accent)}
+
+/* ── LAYOUT ── */
+.workspace{display:grid;grid-template-columns:340px 1fr;flex:1;overflow:hidden}
+
+/* ── SETTINGS PANEL ── */
+.settings-panel{border-right:1px solid var(--border);background:var(--bg2);display:flex;flex-direction:column;overflow-y:auto}
+.settings-panel::-webkit-scrollbar{width:3px}.settings-panel::-webkit-scrollbar-thumb{background:var(--border2)}
+.sp-head{padding:16px 16px 10px;border-bottom:1px solid var(--border)}
+.sp-title{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:#fff;margin-bottom:2px}
+.sp-sub{font-size:9.5px;color:var(--text3)}
+.sp-body{padding:14px 16px;display:flex;flex-direction:column;gap:14px}
+.sp-section{display:flex;flex-direction:column;gap:8px}
+.sp-section-title{font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:var(--text3);font-weight:600;padding-bottom:4px;border-bottom:1px solid var(--border)}
+.lbl{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-weight:600;margin-bottom:2px}
+.ci{background:var(--bg);border:1px solid var(--border);color:var(--text2);font-family:inherit;font-size:11px;padding:6px 9px;width:100%;outline:none;transition:all .15s}
+.ci:focus{border-color:var(--accent2);color:var(--text)}
+.ci::placeholder{color:var(--text3)}
+.key-note{font-size:9px;color:var(--text3);display:flex;align-items:center;gap:5px;margin-top:1px}
+.key-note::before{content:'🔒';font-size:10px}
+.save-btn{padding:8px;background:var(--accent);border:none;color:var(--bg);font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px;text-transform:uppercase;transition:all .15s;width:100%;margin-top:4px}
+.save-btn:hover{background:#00eeff}
+.save-ok{font-size:10px;color:var(--green);text-align:center;padding:4px 0}
+
+/* ── MAIN AREA ── */
+.main-area{display:flex;flex-direction:column;overflow:hidden}
+
+/* ── CHAT PANEL ── */
+.chat-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative}
+.chat-history{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
+.chat-history::-webkit-scrollbar{width:3px}.chat-history::-webkit-scrollbar-thumb{background:var(--border2)}
+.msg{display:flex;flex-direction:column;gap:4px;max-width:80%}
+.msg.user{align-self:flex-end;align-items:flex-end}
+.msg.assistant{align-self:flex-start;align-items:flex-start}
+.msg-bubble{padding:9px 13px;font-size:11px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+.msg.user .msg-bubble{background:var(--accent2);color:#fff;border-radius:0}
+.msg.assistant .msg-bubble{background:var(--bg3);color:var(--text);border:1px solid var(--border);border-radius:0}
+.msg-time{font-size:8.5px;color:var(--text3)}
+.msg-tool{font-size:9.5px;color:var(--text3);background:var(--bg3);border:1px solid var(--border2);padding:5px 10px;border-left:2px solid var(--purple);display:flex;align-items:center;gap:7px}
+.msg-tool .spinner{width:9px;height:9px;border-width:1.5px;flex-shrink:0}
+.thinking{align-self:flex-start;display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:10px;color:var(--text3);background:var(--bg3);border:1px solid var(--border)}
+
+/* ── FILE UPLOAD ZONE ── */
+.upload-zone{margin:0 20px 8px;border:1px dashed var(--border2);padding:12px 16px;text-align:center;font-size:10px;color:var(--text3);cursor:pointer;transition:all .15s;position:relative}
+.upload-zone:hover,.upload-zone.drag-over{border-color:var(--accent2);color:var(--accent)}
+.upload-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-status{margin:0 20px 6px;font-size:10px;color:var(--text2);display:flex;align-items:center;gap:7px}
+
+/* ── CHAT INPUT ── */
+.chat-input-row{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0;background:var(--bg2)}
+.chat-input{flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;padding:8px 12px;outline:none;resize:none;height:40px;transition:border-color .15s;line-height:1.5}
+.chat-input:focus{border-color:var(--accent2)}
+.chat-input::placeholder{color:var(--text3)}
+.send-btn{padding:0 18px;background:var(--accent);border:none;color:var(--bg);font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.5px;text-transform:uppercase;transition:background .15s;flex-shrink:0}
+.send-btn:hover:not(:disabled){background:#00eeff}
+.send-btn:disabled{background:var(--text3);cursor:not-allowed}
+
+/* ── CONFIRMATION PANEL ── */
+.confirm-panel{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px}
+.confirm-panel::-webkit-scrollbar{width:3px}.confirm-panel::-webkit-scrollbar-thumb{background:var(--border2)}
+.cp-title{font-family:'Syne',sans-serif;font-size:17px;font-weight:700;color:#fff}
+.cp-sub{font-size:10px;color:var(--text3);margin-top:2px}
+.order-card{background:var(--bg2);border:1px solid var(--border2);padding:18px}
+.oc-row{display:flex;gap:24px;padding-bottom:14px;border-bottom:1px solid var(--border);margin-bottom:14px;flex-wrap:wrap}
+.oc-kv{display:flex;flex-direction:column;gap:3px}
+.oc-k{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3)}
+.oc-v{font-size:12px;color:var(--text);font-weight:500}
+.lines-table{width:100%;border-collapse:collapse;font-size:11px}
+.lines-table th{padding:6px 10px;text-align:left;font-size:8.5px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);background:var(--bg3)}
+.lines-table td{padding:7px 10px;border-bottom:1px solid rgba(30,45,61,.5);color:var(--text2);vertical-align:middle}
+.lines-table tr:hover td{background:var(--bg3)}
+.lines-table .warn td{background:rgba(255,140,66,.06);border-bottom-color:rgba(255,140,66,.2)}
+.lines-table .warn td:first-child{border-left:2px solid var(--orange)}
+.stock-warn{font-size:9px;color:var(--orange);display:flex;align-items:center;gap:4px}
+.totals-row{display:flex;flex-direction:column;align-items:flex-end;gap:5px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.total-line{display:flex;gap:24px;font-size:11px}
+.total-line .k{color:var(--text3);width:160px;text-align:right}
+.total-line .v{color:var(--text);font-weight:500;width:100px;text-align:right}
+.total-line.grand .v{color:var(--accent);font-size:13px;font-weight:700}
+.confirm-actions{display:flex;gap:10px;justify-content:flex-end}
+.confirm-btn{padding:10px 24px;border:none;font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:.5px;text-transform:uppercase;transition:all .15s}
+.confirm-btn.ok{background:var(--green);color:var(--bg)}
+.confirm-btn.ok:hover{background:var(--green2)}
+.confirm-btn.ok:disabled{background:var(--text3);cursor:not-allowed}
+.confirm-btn.cancel{background:none;border:1px solid var(--border2);color:var(--text2)}
+.confirm-btn.cancel:hover{border-color:var(--accent2);color:var(--accent)}
+.success-banner{background:rgba(0,255,136,.08);border:1px solid var(--green);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.success-banner .msg-text{font-size:12px;color:var(--green)}
+.success-banner .order-no{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:var(--green)}
+
+/* ── SPINNERS ETC ── */
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:sp .6s linear infinite;flex-shrink:0}
+@keyframes sp{to{transform:rotate(360deg)}}
+.sd{width:7px;height:7px;border-radius:50%;background:var(--text3);transition:all .3s}
+.sd.ok{background:var(--green);box-shadow:0 0 7px rgba(0,255,136,.6)}
+.sd.err{background:var(--red);box-shadow:0 0 7px rgba(255,77,109,.6)}
+.hidden{display:none!important}
+
+/* ── MARKDOWN-ish rendering in chat ── */
+.msg-bubble strong{color:#fff;font-weight:700}
+.msg-bubble code{background:var(--bg4);padding:1px 5px;font-size:10px;font-family:inherit}
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="https://origo.is" target="_blank" rel="noopener noreferrer">
+    <div class="logo-icon"><img src="origo.jpeg" alt="Origo"></div>
+  </a>
+  <div>
+    <div class="htitle">AI Sales Assistant</div>
+    <div class="hsub">Origo · Business Central · Claude</div>
+  </div>
+  <div class="hsp"></div>
+  <button class="hpill" onclick="toggleSettings()" id="settingsToggle">⚙ Settings</button>
+  <a href="index.html" class="hpill">← BC Portal</a>
+</header>
+
+<div class="workspace">
+
+  <!-- ── SETTINGS PANEL ─────────────────────────────────────────────── -->
+  <aside class="settings-panel" id="settingsPanel">
+    <div class="sp-head">
+      <div class="sp-title">Configuration</div>
+      <div class="sp-sub">Credentials are stored for this session only</div>
+    </div>
+    <div class="sp-body">
+
+      <div class="sp-section">
+        <div class="sp-section-title">Claude AI</div>
+        <div>
+          <div class="lbl">API Key</div>
+          <input class="ci" type="password" id="cfgClaudeKey" placeholder="sk-ant-…" autocomplete="off">
+          <div class="key-note">Stored in sessionStorage only — cleared when tab closes</div>
+        </div>
+      </div>
+
+      <div class="sp-section">
+        <div class="sp-section-title">Business Central</div>
+        <div>
+          <div class="lbl">Tenant</div>
+          <input class="ci" id="cfgTenant" placeholder="dynamics.is" value="dynamics.is">
+        </div>
+        <div>
+          <div class="lbl">Environment</div>
+          <input class="ci" id="cfgEnv" placeholder="Production" value="Production">
+        </div>
+        <div>
+          <div class="lbl">Company GUID</div>
+          <input class="ci" id="cfgCompany" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        </div>
+        <div>
+          <div class="lbl">Client ID</div>
+          <input class="ci" id="cfgClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        </div>
+        <div>
+          <div class="lbl">Client Secret</div>
+          <input class="ci" type="password" id="cfgClientSecret" placeholder="your-client-secret" autocomplete="off">
+        </div>
+      </div>
+
+      <div>
+        <button class="save-btn" onclick="saveSettings()">Save &amp; Continue</button>
+        <div class="save-ok hidden" id="saveOk">✓ Settings saved</div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- ── MAIN AREA ─────────────────────────────────────────────────── -->
+  <div class="main-area" id="mainArea">
+
+    <!-- Chat panel (shown by default) -->
+    <div class="chat-panel" id="chatPanel">
+      <div class="chat-history" id="chatHistory">
+        <div class="msg assistant">
+          <div class="msg-bubble">Hello! I'm your Business Central sales order assistant.<br><br>
+Describe what you'd like to order — or drop a file (PDF, Excel, email) and I'll extract the order details for you.<br><br>
+<strong>Example:</strong> <em>"Create an order for Adatum Corporation — 10 units of item 1896-S and 5 units of ATHENS desk"</em></div>
+        </div>
+      </div>
+
+      <div id="uploadStatus" class="upload-status hidden">
+        <span class="spinner"></span><span id="uploadStatusText">Processing file…</span>
+      </div>
+
+      <div class="upload-zone" id="dropZone" title="Drop a file or click to browse">
+        <input type="file" id="fileInput" accept=".pdf,.xlsx,.xls,.eml,.msg,.jpg,.jpeg,.png" onchange="handleFileChange(event)">
+        📎 Drop PDF, Excel, email or image — or click to browse
+      </div>
+
+      <div class="chat-input-row">
+        <textarea class="chat-input" id="chatInput" placeholder="Describe the order…" onkeydown="onInputKeyDown(event)"></textarea>
+        <button class="send-btn" id="sendBtn" onclick="sendMessage()">Send</button>
+      </div>
+    </div>
+
+    <!-- Confirmation panel (hidden until pendingOrder arrives) -->
+    <div class="confirm-panel hidden" id="confirmPanel"></div>
+
+  </div>
+</div>
+
+<script>
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let messages     = [];      // conversation history sent to /api/chat
+let pendingOrder = null;    // proposed order waiting for user confirmation
+let isBusy       = false;
+
+// ── SETTINGS ──────────────────────────────────────────────────────────────────
+function loadSettings() {
+  const s = sessionStorage;
+  const set = (id, key) => { const v = s.getItem(key); if (v) document.getElementById(id).value = v; };
+  set('cfgClaudeKey',    'sa_claude_key');
+  set('cfgTenant',       'sa_bc_tenant');
+  set('cfgEnv',          'sa_bc_env');
+  set('cfgCompany',      'sa_bc_company');
+  set('cfgClientId',     'sa_bc_client_id');
+  set('cfgClientSecret', 'sa_bc_client_secret');
+}
+
+function saveSettings() {
+  const s = sessionStorage;
+  s.setItem('sa_claude_key',       document.getElementById('cfgClaudeKey').value.trim());
+  s.setItem('sa_bc_tenant',        document.getElementById('cfgTenant').value.trim());
+  s.setItem('sa_bc_env',           document.getElementById('cfgEnv').value.trim());
+  s.setItem('sa_bc_company',       document.getElementById('cfgCompany').value.trim());
+  s.setItem('sa_bc_client_id',     document.getElementById('cfgClientId').value.trim());
+  s.setItem('sa_bc_client_secret', document.getElementById('cfgClientSecret').value.trim());
+  const ok = document.getElementById('saveOk');
+  ok.classList.remove('hidden');
+  setTimeout(() => ok.classList.add('hidden'), 2500);
+}
+
+function toggleSettings() {
+  document.getElementById('settingsPanel').classList.toggle('hidden');
+}
+
+function getConfig() {
+  return {
+    apiKey: document.getElementById('cfgClaudeKey').value.trim(),
+    bcConfig: {
+      tenantId:     document.getElementById('cfgTenant').value.trim(),
+      environment:  document.getElementById('cfgEnv').value.trim(),
+      companyId:    document.getElementById('cfgCompany').value.trim(),
+      clientId:     document.getElementById('cfgClientId').value.trim(),
+      clientSecret: document.getElementById('cfgClientSecret').value.trim(),
+    },
+  };
+}
+
+function configOk() {
+  const c = getConfig();
+  return c.apiKey && c.bcConfig.tenantId && c.bcConfig.environment &&
+         c.bcConfig.companyId && c.bcConfig.clientId && c.bcConfig.clientSecret;
+}
+
+// ── CHAT RENDERING ────────────────────────────────────────────────────────────
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function renderMarkdown(text) {
+  // Minimal rendering: bold, inline code
+  return esc(text)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+function appendMessage(role, text) {
+  const history = document.getElementById('chatHistory');
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.innerHTML = `<div class="msg-bubble">${renderMarkdown(text)}</div>
+    <div class="msg-time">${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</div>`;
+  history.appendChild(div);
+  history.scrollTop = history.scrollHeight;
+}
+
+function showThinking(show) {
+  let el = document.getElementById('thinkingIndicator');
+  if (show && !el) {
+    el = document.createElement('div');
+    el.id = 'thinkingIndicator';
+    el.className = 'thinking';
+    el.innerHTML = '<span class="spinner"></span> Thinking…';
+    document.getElementById('chatHistory').appendChild(el);
+  } else if (!show && el) {
+    el.remove();
+  }
+  if (show) document.getElementById('chatHistory').scrollTop = Infinity;
+}
+
+// ── SEND MESSAGE ──────────────────────────────────────────────────────────────
+async function sendMessage(overrideText) {
+  if (isBusy) return;
+  if (!configOk()) {
+    document.getElementById('settingsPanel').classList.remove('hidden');
+    alert('Please fill in all settings before sending a message.');
+    return;
+  }
+
+  const input = document.getElementById('chatInput');
+  const text  = overrideText ?? input.value.trim();
+  if (!text) return;
+
+  if (!overrideText) {
+    input.value = '';
+    input.style.height = '40px';
+  }
+
+  appendMessage('user', text);
+  messages.push({ role: 'user', content: text });
+
+  isBusy = true;
+  document.getElementById('sendBtn').disabled = true;
+  showThinking(true);
+
+  try {
+    const cfg  = getConfig();
+    const body = { messages, apiKey: cfg.apiKey, bcConfig: cfg.bcConfig };
+    if (pendingOrder) body.pendingOrder = pendingOrder;
+
+    const res  = await fetch('/api/chat', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+    const data = await res.json();
+
+    showThinking(false);
+
+    if (!res.ok || data.error) {
+      appendMessage('assistant', `Error: ${data.error || 'Unknown error'}`);
+    } else {
+      if (data.reply) {
+        appendMessage('assistant', data.reply);
+        messages.push({ role: 'assistant', content: data.reply });
+      }
+      if (data.pendingOrder) {
+        pendingOrder = data.pendingOrder;
+        showConfirmPanel(pendingOrder);
+      }
+      if (data.orderNo) {
+        showSuccessBanner(data.orderNo);
+        pendingOrder = null;
+      }
+    }
+  } catch (e) {
+    showThinking(false);
+    appendMessage('assistant', `Network error: ${e.message}`);
+  } finally {
+    isBusy = false;
+    document.getElementById('sendBtn').disabled = false;
+  }
+}
+
+function onInputKeyDown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+// ── FILE UPLOAD ───────────────────────────────────────────────────────────────
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover',  (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop',      (e) => { e.preventDefault(); dropZone.classList.remove('drag-over'); const f = e.dataTransfer.files[0]; if (f) uploadFile(f); });
+
+function handleFileChange(e) {
+  const f = e.target.files[0];
+  if (f) uploadFile(f);
+  e.target.value = ''; // reset so same file can be re-uploaded
+}
+
+async function uploadFile(file) {
+  if (isBusy) return;
+  if (!configOk()) {
+    document.getElementById('settingsPanel').classList.remove('hidden');
+    alert('Please fill in all settings before uploading a file.');
+    return;
+  }
+
+  const cfg = getConfig();
+  const status   = document.getElementById('uploadStatus');
+  const statusTx = document.getElementById('uploadStatusText');
+  status.classList.remove('hidden');
+  statusTx.textContent = `Processing ${file.name}…`;
+  isBusy = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  try {
+    const form = new FormData();
+    form.append('file',     file);
+    form.append('apiKey',   cfg.apiKey);
+    form.append('mimeType', file.type || '');
+
+    const res  = await fetch('/api/upload', { method: 'POST', body: form });
+    const data = await res.json();
+
+    status.classList.add('hidden');
+
+    if (!res.ok || data.error) {
+      appendMessage('assistant', `File processing error: ${data.error || 'Unknown error'}`);
+      return;
+    }
+
+    const extracted = data.extractedData;
+    if (!extracted || extracted.intent === 'none') {
+      appendMessage('assistant', `I couldn't find any sales order intent in **${file.name}**. What would you like to do with this document?`);
+      messages.push({ role: 'assistant', content: `No order intent found in ${file.name}. What would you like to do?` });
+      return;
+    }
+
+    // Build a descriptive user message from the extracted data so Claude can proceed
+    const lines = (extracted.orderLines || [])
+      .map(l => `• ${l.quantity}x ${l.itemNo || l.description}${l.unitOfMeasure ? ' ' + l.unitOfMeasure : ''}`)
+      .join('\n');
+    const userMsg = `[File: ${file.name}]\nExtracted order intent:\nCustomer: ${extracted.customerName || extracted.customerNo || 'unknown'}\n${lines}${extracted.requestedDeliveryDate ? '\nDelivery: ' + extracted.requestedDeliveryDate : ''}${extracted.notes ? '\nNotes: ' + extracted.notes : ''}\n\nPlease look up the customer and items in BC and prepare the order.`;
+
+    appendMessage('user', userMsg);
+    messages.push({ role: 'user', content: userMsg });
+    await sendMessage(null); // will not re-add message, but need to call with current messages
+
+  } catch (e) {
+    status.classList.add('hidden');
+    appendMessage('assistant', `Upload error: ${e.message}`);
+  } finally {
+    isBusy = false;
+    document.getElementById('sendBtn').disabled = false;
+  }
+}
+
+// Workaround: uploadFile sets up the user message and calls backend directly
+// Override sendMessage to not add duplicate: instead call API directly
+async function uploadFile(file) {
+  if (!configOk()) {
+    document.getElementById('settingsPanel').classList.remove('hidden');
+    alert('Please fill in all settings before uploading a file.');
+    return;
+  }
+  if (isBusy) return;
+
+  const cfg    = getConfig();
+  const status = document.getElementById('uploadStatus');
+  const stTxt  = document.getElementById('uploadStatusText');
+  status.classList.remove('hidden');
+  stTxt.textContent = `Processing ${file.name}…`;
+  isBusy = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  try {
+    const form = new FormData();
+    form.append('file',     file);
+    form.append('apiKey',   cfg.apiKey);
+    form.append('mimeType', file.type || '');
+
+    const res  = await fetch('/api/upload', { method: 'POST', body: form });
+    const data = await res.json();
+    status.classList.add('hidden');
+
+    if (!res.ok || data.error) {
+      appendMessage('assistant', `File processing error: ${data.error || 'Unknown error'}`);
+      return;
+    }
+
+    const extracted = data.extractedData;
+    if (!extracted || extracted.intent === 'none') {
+      const msg = `I couldn't find any sales order intent in **${file.name}**. What would you like to do with it?`;
+      appendMessage('assistant', msg);
+      messages.push({ role: 'assistant', content: msg });
+      return;
+    }
+
+    const linesSummary = (extracted.orderLines || [])
+      .map(l => `• ${l.quantity ?? '?'}× ${l.itemNo ? l.itemNo + ' — ' : ''}${l.description || ''}${l.unitOfMeasure ? ' (' + l.unitOfMeasure + ')' : ''}`)
+      .join('\n');
+    const userMsg = `[From file: ${file.name}]\n\nCustomer: ${extracted.customerName || extracted.customerNo || 'unknown'}\nRequested delivery: ${extracted.requestedDeliveryDate || 'not specified'}\n\nOrder lines:\n${linesSummary || '(none found)'}${extracted.notes ? '\n\nNotes: ' + extracted.notes : ''}\n\nPlease look up the customer and items in Business Central and prepare the sales order for confirmation.`;
+
+    appendMessage('user', userMsg);
+    messages.push({ role: 'user', content: userMsg });
+
+    // Now call the chat API with the full context
+    isBusy = false; // allow sendMessage internals to proceed
+    await _callChatApi();
+
+  } catch (e) {
+    status.classList.add('hidden');
+    appendMessage('assistant', `Upload error: ${e.message}`);
+  } finally {
+    isBusy = false;
+    document.getElementById('sendBtn').disabled = false;
+  }
+}
+
+async function _callChatApi() {
+  isBusy = true;
+  document.getElementById('sendBtn').disabled = true;
+  showThinking(true);
+  try {
+    const cfg  = getConfig();
+    const body = { messages, apiKey: cfg.apiKey, bcConfig: cfg.bcConfig };
+    if (pendingOrder) body.pendingOrder = pendingOrder;
+
+    const res  = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    showThinking(false);
+
+    if (!res.ok || data.error) {
+      appendMessage('assistant', `Error: ${data.error || 'Unknown error'}`);
+    } else {
+      if (data.reply) {
+        appendMessage('assistant', data.reply);
+        messages.push({ role: 'assistant', content: data.reply });
+      }
+      if (data.pendingOrder) {
+        pendingOrder = data.pendingOrder;
+        showConfirmPanel(pendingOrder);
+      }
+      if (data.orderNo) {
+        showSuccessBanner(data.orderNo);
+        pendingOrder = null;
+      }
+    }
+  } catch (e) {
+    showThinking(false);
+    appendMessage('assistant', `Network error: ${e.message}`);
+  } finally {
+    isBusy = false;
+    document.getElementById('sendBtn').disabled = false;
+  }
+}
+
+// Override sendMessage to use the shared API caller
+async function sendMessage(overrideText) {
+  if (isBusy) return;
+  if (!configOk()) {
+    document.getElementById('settingsPanel').classList.remove('hidden');
+    alert('Please fill in all settings before sending a message.');
+    return;
+  }
+  const input = document.getElementById('chatInput');
+  const text  = overrideText !== undefined ? overrideText : input.value.trim();
+  if (!text) return;
+  if (overrideText === undefined) { input.value = ''; input.style.height = '40px'; }
+  appendMessage('user', text);
+  messages.push({ role: 'user', content: text });
+  await _callChatApi();
+}
+
+// ── CONFIRMATION PANEL ────────────────────────────────────────────────────────
+function fmt(n) {
+  if (n == null) return '—';
+  return Number(n).toLocaleString('is-IS', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+function fmtDec(n) {
+  if (n == null) return '—';
+  return Number(n).toLocaleString('is-IS', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function showConfirmPanel(order) {
+  const panel        = document.getElementById('confirmPanel');
+  const chatPanel    = document.getElementById('chatPanel');
+  chatPanel.classList.add('hidden');
+  panel.classList.remove('hidden');
+
+  const subtotal = order.lines.reduce((s, l) => s + (l.lineAmount ?? (l.unitPrice * l.quantity)), 0);
+  const vatPct   = 0.24;  // Iceland standard VAT — adjust if needed
+  const vatAmt   = subtotal * vatPct;
+  const total    = subtotal + vatAmt;
+
+  const hasStockWarn = order.lines.some(l => l.stockOk === false);
+
+  const lineRows = order.lines.map(l => {
+    const amt = l.lineAmount ?? (l.unitPrice * l.quantity);
+    const warn = l.stockOk === false;
+    return `<tr class="${warn ? 'warn' : ''}">
+      <td>${esc(l.itemNo)}</td>
+      <td>${esc(l.description)}</td>
+      <td style="text-align:right">${fmtDec(l.quantity)}</td>
+      <td>${esc(l.unitOfMeasureCode || '')}</td>
+      <td style="text-align:right">${fmtDec(l.unitPrice)}</td>
+      <td style="text-align:right">${fmtDec(amt)}</td>
+      <td>${warn ? '<span class="stock-warn">⚠ Low stock</span>' : ''}</td>
+    </tr>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div>
+      <div class="cp-title">Confirm Sales Order</div>
+      <div class="cp-sub">Review the proposed order before creating it in Business Central</div>
+    </div>
+    <div class="order-card">
+      <div class="oc-row">
+        <div class="oc-kv"><div class="oc-k">Customer</div><div class="oc-v">${esc(order.customerNo)} · ${esc(order.customerName)}</div></div>
+        ${order.requestedDeliveryDate ? `<div class="oc-kv"><div class="oc-k">Requested delivery</div><div class="oc-v">${esc(order.requestedDeliveryDate)}</div></div>` : ''}
+        ${order.notes ? `<div class="oc-kv"><div class="oc-k">Notes</div><div class="oc-v">${esc(order.notes)}</div></div>` : ''}
+      </div>
+      ${hasStockWarn ? '<div style="font-size:10px;color:var(--orange);margin-bottom:10px">⚠ One or more lines have insufficient stock — highlighted below</div>' : ''}
+      <table class="lines-table">
+        <thead><tr>
+          <th>Item No.</th><th>Description</th><th style="text-align:right">Qty</th>
+          <th>Unit</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Line Amount</th><th></th>
+        </tr></thead>
+        <tbody>${lineRows}</tbody>
+      </table>
+      <div class="totals-row">
+        <div class="total-line"><span class="k">Subtotal excl. VAT</span><span class="v">${fmtDec(subtotal)}</span></div>
+        <div class="total-line"><span class="k">VAT (24%)</span><span class="v">${fmtDec(vatAmt)}</span></div>
+        <div class="total-line grand"><span class="k">Total incl. VAT</span><span class="v">${fmtDec(total)}</span></div>
+      </div>
+    </div>
+    <div class="confirm-actions">
+      <button class="confirm-btn cancel" onclick="cancelOrder()">← Edit / Cancel</button>
+      <button class="confirm-btn ok" id="confirmBtn" onclick="confirmOrder()">✓ Confirm &amp; Create Order</button>
+    </div>`;
+}
+
+async function confirmOrder() {
+  if (!pendingOrder) return;
+  const btn = document.getElementById('confirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'Creating order…';
+
+  const confirmMsg = { role: 'user', content: '__CONFIRM_ORDER__' };
+  messages.push(confirmMsg);
+
+  try {
+    const cfg  = getConfig();
+    const res  = await fetch('/api/chat', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ messages, apiKey: cfg.apiKey, bcConfig: cfg.bcConfig, pendingOrder }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      btn.disabled = false;
+      btn.textContent = '✓ Confirm & Create Order';
+      alert(`Error creating order: ${data.error || 'Unknown error'}`);
+      return;
+    }
+
+    if (data.orderNo) {
+      showSuccessBanner(data.orderNo);
+      if (data.reply) messages.push({ role: 'assistant', content: data.reply });
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '✓ Confirm & Create Order';
+    alert(`Network error: ${e.message}`);
+  }
+}
+
+function cancelOrder() {
+  pendingOrder = null;
+  document.getElementById('confirmPanel').classList.add('hidden');
+  document.getElementById('chatPanel').classList.remove('hidden');
+  appendMessage('assistant', 'Order cancelled. How would you like to adjust it?');
+}
+
+function showSuccessBanner(orderNo) {
+  const panel = document.getElementById('confirmPanel');
+  panel.classList.remove('hidden');
+  document.getElementById('chatPanel').classList.add('hidden');
+  panel.innerHTML = `
+    <div>
+      <div class="cp-title">Order Created</div>
+      <div class="cp-sub">Your sales order has been created in Business Central</div>
+    </div>
+    <div class="success-banner">
+      <div>
+        <div class="msg-text">Sales Order created successfully</div>
+        <div class="order-no">${esc(orderNo)}</div>
+      </div>
+    </div>
+    <div class="confirm-actions">
+      <button class="confirm-btn ok" onclick="startNew()">Start New Order</button>
+    </div>`;
+}
+
+function startNew() {
+  messages     = [];
+  pendingOrder = null;
+  document.getElementById('confirmPanel').classList.add('hidden');
+  document.getElementById('chatPanel').classList.remove('hidden');
+  document.getElementById('chatHistory').innerHTML = `
+    <div class="msg assistant">
+      <div class="msg-bubble">Ready for a new order. What would you like to order?</div>
+    </div>`;
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+loadSettings();
+// If fully configured, collapse settings panel by default
+if (configOk()) {
+  document.getElementById('settingsPanel').classList.add('hidden');
+}
+</script>
+</body>
+</html>

@@ -81,6 +81,84 @@ Each requirement is stored in its own subfolder with complete implementation det
 
 ---
 
+### Requirement 3: Date Range Filter for Ledger Entries and Documents
+**Folder**: `requirement-3-date-filter-ledger-documents/`
+**Status**: ⏳ Ready for Implementation
+**Description**: Add From/To date range filter bars to the Ledger Entries and Documents tabs in the customer detail view, matching the UX pattern of the Sales History tab.
+
+**Key Features**:
+- Date pickers with last-12-months default
+- Server-side filtering via `startDateTime` / `endDateTime` on `Data.Records.Get`
+- Validation: From required, To ≤ today, From ≤ To
+- Empty-state subtitle when no records match the period
+- All new UI strings added to `UI_STRINGS` for translation
+
+**Files**:
+- `SPECIFICATION.md` - Complete implementation guide with API details and testing checklist
+
+---
+
+### Requirement 4: BC Cloud Events Explorer
+**Folder**: `requirement-4-cloud-events-explorer/`
+**Status**: ✅ Implemented
+**Description**: Developer tool for interactively composing, sending, and inspecting Business Central Cloud Events API messages. Browse all message types, compose JSON envelopes, inspect responses, and replay historical requests.
+
+**Key Features**:
+- All BC message types listed and grouped by namespace
+- Interactive JSON compose panel with source/subject/lcid/data fields
+- Live response inspector with Result, Request JSON, and Raw tabs
+- History replay via `/requests({id})/data` (direct, single-step)
+- Queue support: async message posting + GetStatus / RetryTask actions
+- PDF response rendering inline
+- Source filter for history
+
+**Files**:
+- `SPECIFICATION.md` - Complete implementation guide
+
+---
+
+### Requirement 5: BC Metadata Explorer
+**Folder**: `requirement-5-metadata-explorer/`
+**Status**: ✅ Implemented
+**Description**: Developer tool for browsing the complete table and field catalogue of a Business Central company. Shows field names, JSON keys, captions, types, enums, and permissions.
+
+**Key Features**:
+- All BC tables via `Help.Tables.Get` with search/filter
+- Field detail view: Name, JSON Key, Caption, Type, Len, Class, PK, Enum values + captions
+- Read/Write permission check via `Help.Permissions.Get` (parallel with field load)
+- Dynamic language selector populated from BC `Allowed Language` + `Language` tables
+- Results cached per table; cache invalidated on language change
+- Bulk export to YAML / JSON / CSV / Markdown
+
+**Files**:
+- `SPECIFICATION.md` - Complete implementation guide
+
+---
+
+### Requirement 6: AI Sales Order Assistant
+**Folder**: `requirement-6-sales-order-assistant/`
+**Status**: ✅ Implemented
+**Description**: Conversational AI assistant powered by Anthropic Claude for creating Business Central sales orders from natural language or uploaded documents (Excel, PDF, images, emails).
+
+**Key Features**:
+- Natural language order entry via multi-turn Claude conversation
+- Document upload: Excel, PDF, images, .eml, .msg parsed server-side
+- Real-time BC lookups: customer search, item search, availability, pricing, credit check
+- Agentic tool loop: 6 BC-integrated tools, up to 10 turns per message
+- Order confirmation panel with lines, stock warnings, VAT totals before committing
+- BC order creation via `Data.Records.Set` on Sales Header + Sales Lines
+
+**Technical Stack**:
+- Frontend: `sales-assistant.html`
+- API: `api/chat/index.js` (agentic loop), `api/upload/index.js` (file parsing), `api/shared/bcClient.js` (shared utilities)
+- AI Model: `claude-sonnet-4-20250514`
+- npm deps: `busboy`, `xlsx`, `msg-parser`
+
+**Files**:
+- `SPECIFICATION.md` - Complete implementation guide
+
+---
+
 ## Architecture Overview
 
 ### Cloud Events API Flow
