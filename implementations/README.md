@@ -57,7 +57,7 @@ Each requirement is stored in its own subfolder with complete implementation det
 
 ### Requirement 2: Sales History Tab
 **Folder**: `requirement-2-sales-history/`  
-**Status**: ✅ Ready for Implementation  
+**Status**: ✅ Implemented  
 **Description**: Display item-level sales history for selected customer in a new tab positioned between "Ledger Entries" and "Documents".
 
 **Key Features**:
@@ -77,14 +77,13 @@ Each requirement is stored in its own subfolder with complete implementation det
 - ✅ Translation strings added
 - ✅ Lazy loading implemented
 - ✅ Complete specification documented
-- ⏳ Core functionality pending implementation
+- ✅ Core functionality implemented
 
 ---
 
-### Requirement 3:
- Date Range Filter for Ledger Entries and Documents
+### Requirement 3: Date Range Filter for Ledger Entries and Documents
 **Folder**: `requirement-3-date-filter-ledger-documents/`
-**Status**: ⏳ Ready for Implementation
+**Status**: ✅ Implemented
 **Description**: Add From/To date range filter bars to the Ledger Entries and Documents tabs in the customer detail view, matching the UX pattern of the Sales History tab.
 
 **Key Features**:
