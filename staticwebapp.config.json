@@ -5,13 +5,21 @@
       "allowedRoles": ["anonymous"]
     },
     {
+      "route": "/.well-known/mcp.json",
+      "rewrite": "/.well-known/mcp.json",
+      "headers": {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    },
+    {
       "route": "/sales-assistant",
       "rewrite": "/sales-assistant.html"
     }
   ],
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/api/*"]
+    "exclude": ["/api/*", "/.well-known/*"]
   },
   "responseOverrides": {
     "404": {

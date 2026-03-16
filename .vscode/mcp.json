@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "bc-metadata": {
+      "type": "http",
+      "url": "https://dynamics.is/api/mcp"
+    }
+  }
+}

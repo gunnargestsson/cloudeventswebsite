@@ -783,6 +783,33 @@ Response:
 
 When no price list is configured, returns one line with `"priceListCode": "ITEM CARD"`.
 
+#### `Sales.Order.Post`
+
+Direction: **Inbound**. `subject` = sales order number or SystemId. Or pass `orderNo` in `data`.
+
+```json
+{ "specversion": "1.0", "type": "Sales.Order.Post", "source": "MyApp", "subject": "SO-001" }
+```
+
+Posts the order. The original order is deleted; a posted sales invoice is created.
+
+Success:
+```json
+{
+  "status": "Success",
+  "orderNo": "SO-001",
+  "postedInvoiceNo": "PI-001",
+  "customerNo": "10000",
+  "customerName": "Adatum Corporation",
+  "orderDate": "2026-03-10",
+  "postingDate": "2026-03-16",
+  "amount": 5000.00,
+  "amountIncludingVAT": 6200.00
+}
+```
+
+Errors: order not found, order has no lines, or any BC posting validation error — returned as `{ "status": "Error", "error": "…" }`.
+
 #### `Sales.Order.Release` / `Sales.Order.Reopen`
 
 Direction: **Inbound**. `subject` = sales order number or SystemId. Or pass `orderNo` in `data`.
@@ -896,6 +923,84 @@ window.open(url);  // or: downloadLink.href = url; downloadLink.click();
 
 Errors from the POST response are thrown as exceptions (not `{"status":"Error"}`):
 `"Subject parameter is required"`, `"Sales invoice 'X' not found"`.
+
+---
+
+### 7.4 PURCHASE ORDER OPERATIONS
+
+#### `Purchase.Order.Release` / `Purchase.Order.Reopen`
+
+Direction: **Inbound**. `subject` = purchase order number or SystemId. Or pass `orderNo` in `data`.
+
+```json
+{ "specversion": "1.0", "type": "Purchase.Order.Release", "source": "MyApp", "subject": "PO-001" }
+```
+
+Release returns `{ "status": "Success", "orderNo": "PO-001", "vendorNo": "10000", "vendorName": "Fabrikam Supplies", "statusAfter": "Released" }`.  
+Reopen returns `"statusAfter": "Open"`.
+
+Full response also includes: `documentType`, `statusBefore`, `orderDate`, `amount`, `amountIncludingVAT`.
+
+#### `Purchase.Order.Statistics`
+
+Direction: **Outbound**. `subject` = order number or SystemId. Or pass `orderNo` in `data`.
+
+```json
+{ "specversion": "1.0", "type": "Purchase.Order.Statistics", "source": "MyApp", "subject": "PO-001" }
+```
+
+Response:
+```json
+{
+  "status": "Success",
+  "orderNo": "PO-001",
+  "vendorNo": "10000",
+  "vendorName": "Fabrikam Supplies",
+  "currencyCode": "",
+  "orderDate": "2026-03-07",
+  "order": {
+    "amount": 1000.00,
+    "invoiceDiscountAmount": 50.00,
+    "totalExclVAT": 950.00,
+    "vatAmount": 104.50,
+    "totalInclVAT": 1054.50,
+    "quantity": 10,
+    "totalWeight": 25.5,
+    "totalVolume": 0.5,
+    "noOfVATLines": 1
+  },
+  "vat_totals": [
+    { "vatIdentifier": "NORM", "vatPct": 11, "lineAmount": 950.00, "vatAmount": 104.50, "amountInclVAT": 1054.50 }
+  ]
+}
+```
+
+#### `Purchase.Order.Post`
+
+Direction: **Inbound**. `subject` = purchase order number or SystemId. Or pass `orderNo` in `data`.
+
+```json
+{ "specversion": "1.0", "type": "Purchase.Order.Post", "source": "MyApp", "subject": "PO-001" }
+```
+
+Posts the order. The original order is deleted; a posted purchase invoice is created.
+
+Success:
+```json
+{
+  "status": "Success",
+  "orderNo": "PO-001",
+  "postedInvoiceNo": "PI-001",
+  "vendorNo": "10000",
+  "vendorName": "Fabrikam Supplies",
+  "orderDate": "2026-03-10",
+  "postingDate": "2026-03-16",
+  "amount": 5000.00,
+  "amountIncludingVAT": 6200.00
+}
+```
+
+Errors: order not found, order has no lines, or any BC posting validation error — returned as `{ "status": "Error", "error": "…" }`.
 
 ---
 
@@ -1279,9 +1384,7 @@ const customerTable = tableByName['Customer'];   // { id: 18, name: "Customer", 
 const tableNumber   = customerTable.id;          // 18 — use as tableNumber in Data.Records.Get
 ```
 
-`BC_Tables.json` (shipped alongside the portal codebase) is a **cached snapshot** of
-this call for the reference environment. Use it during development to look up table IDs
-without hitting BC. Always prefer a live `Help.Tables.Get` call at runtime.
+`bc-metadata-all-tables-is.md` (in the same folder as this SKILL.md) is a **complete reference** of all BC tables and their fields for this environment, including BC AL field names (`name`), JSON keys (`jsonName`), types, and captions. Consult it to look up exact field names and JSON keys before writing any `tableView`, `fieldNumbers`, `primaryKey`, or `fields` values. Always prefer a live `Help.Tables.Get` / `Help.Fields.Get` call at runtime, but use the reference file during development and code generation.
 
 **Key tables for common integration work:**
 

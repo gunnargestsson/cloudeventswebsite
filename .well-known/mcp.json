@@ -1,0 +1,7 @@
+{
+  "mcpVersion": "2024-11-05",
+  "name": "BC Metadata MCP Server",
+  "description": "Exposes Business Central table and field metadata via the Cloud Events API.",
+  "endpoint": "https://dynamics.is/api/mcp",
+  "transport": "http"
+}
