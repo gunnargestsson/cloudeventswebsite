@@ -1006,9 +1006,6 @@ case "set_translations":  content = await toolSetTranslations(args);  break;
 | 🟢 Low | §8 — markdown output format | ~1 h |
 | 🟢 Low | §9 — MCP Resources | ~2 h |
 | 🟢 Low | §10 — MCP Prompts (`describe_table`, `find_tables_for_entity`, `data_model_overview`, `sales_order_creation_workflow`, `customer_lookup_pattern`, `item_lookup_pattern`) | ~2 h |
-| 🟢 Low | §11a — API key auth | ~1 h |
-| 🟢 Low | §12 — token/company cache hardening | ~30 min |
-| 🟢 Low | §13 — well-known document update | ~15 min |
 | 🟡 Medium | §14 — translation tools (`list_translations`, `set_translations`) | ~1 h |
 
 ---

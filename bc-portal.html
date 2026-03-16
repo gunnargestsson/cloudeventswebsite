@@ -435,14 +435,14 @@
     <!-- CUSTOMER LIST -->
     <div id="view-customers">
       <div class="breadcrumb">
-        <span class="crumb" onclick="showCompanies()" data-t="Companies">Companies</span>
-        <span class="sep">/</span>
         <span id="crumb-company" style="color:var(--text)">—</span>
       </div>
       <div class="section-header">
         <div class="section-title"><small id="customers-company-label">—</small><span data-t="Customers">Customers</span></div>
-        <button class="btn-ghost" onclick="showCreateCustomer()" data-t="+ Create Customer" style="margin-left:auto">+ Create Customer</button>
-        <span class="badge" id="customer-count">—</span>
+        <div style="display:flex;align-items:center;gap:12px;margin-left:auto">
+          <span class="badge" id="customer-count">—</span>
+          <button class="btn-ghost" onclick="showCreateCustomer()" data-t="+ Create Customer">+ Create Customer</button>
+        </div>
       </div>
       <div class="search-wrap">
         <span class="search-icon">⌕</span>
@@ -457,8 +457,6 @@
     <!-- CUSTOMER DETAIL -->
     <div id="view-detail">
       <div class="breadcrumb">
-        <span class="crumb" onclick="showCompanies()" data-t="Companies">Companies</span>
-        <span class="sep">/</span>
         <span class="crumb" onclick="showCustomers()" id="crumb-company2">—</span>
         <span class="sep">/</span>
         <span id="crumb-customer" style="color:var(--text)">—</span>
@@ -550,8 +548,6 @@
     <!-- CREATE CUSTOMER -->
     <div id="view-create-customer" style="display:none">
       <div class="breadcrumb">
-        <span class="crumb" onclick="showCompanies()" data-t="Companies">Companies</span>
-        <span class="sep">/</span>
         <span class="crumb" onclick="showCustomers()" id="crumb-company3">—</span>
         <span class="sep">/</span>
         <span style="color:var(--text)" data-t="Create Customer">Create Customer</span>
