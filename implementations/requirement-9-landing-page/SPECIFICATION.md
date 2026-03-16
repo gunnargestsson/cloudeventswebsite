@@ -23,6 +23,8 @@ The landing page:
 | Q4 | Credential mode | **Toggle between server config and custom config.** Server config uses `/api/config` for display + `/api/companies` without headers. Custom config uses client-supplied credentials. |
 | Q5 | Auto-redirect when already configured | **Always show config page.** Config is re-shown on each visit; company is pre-selected, nav cards visible. |
 | Q6 | Back navigation on sub-pages | **← Home → `index.html`** on all sub-pages. |
+| Q7 | Entry to `bc-portal.html` when company already selected | **Skip the company grid.** If `bc_portal_company_id` is already in `localStorage` (user came from the landing page), `loadCompanies()` auto-calls `selectCompany()` and returns — the user lands directly on the Customers view. |
+| Q8 | Language selector in `bc-portal.html` header | **Removed.** Language is chosen on the landing page and stored as `bc_portal_lcid`. The portal reads that value on load via `selectedLcid`; no in-page language picker is shown. |
 
 ---
 

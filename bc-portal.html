@@ -82,16 +82,6 @@
   .status-dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
 
-  .lang-select {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 99px; color: var(--text-mid);
-    font-family: 'DM Mono', monospace; font-size: 0.72rem;
-    padding: 5px 12px; outline: none; cursor: pointer;
-    transition: border-color 0.2s, color 0.2s;
-    appearance: none; -webkit-appearance: none;
-  }
-  .lang-select:hover, .lang-select:focus { border-color: var(--accent); color: var(--text); }
-
   main { flex: 1; padding: 32px; max-width: 1300px; margin: 0 auto; width: 100%; }
 
   /* BREADCRUMB */
@@ -413,9 +403,6 @@
     </a>
     <div class="header-right">
       <a href="index.html" style="display:flex;align-items:center;gap:6px;padding:5px 14px;background:var(--surface);border:1px solid var(--border);border-radius:99px;font-size:0.72rem;color:var(--text-mid);text-decoration:none;transition:border-color 0.2s,color 0.2s" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-mid)'">← Home</a>
-      <div id="lang-wrap" style="display:none">
-        <select id="lang-select" class="lang-select" onchange="onLangChange(this.value)" title="Language"></select>
-      </div>
       <div class="status-pill">
         <div class="status-dot" id="status-dot"></div>
         <span id="status-label">Initialising...</span>
@@ -1000,40 +987,6 @@ function fmtDate(d) { if (!d || d === '0001-01-01') return '—'; return new Dat
 function initials(s) { if (!s) return '?'; return s.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase(); }
 
 // ---- LANGUAGE ----
-async function loadLanguages() {
-  try {
-    // Step 1: get allowed LCIDs for UI language selector
-    const allowedRes = await cePost(selectedCompany.id, {
-      specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
-      subject: 'Allowed Language'
-    });
-    const lcids = (allowedRes.result || []).map(r => parseInt(r.primaryKey.LanguageId, 10)).filter(Boolean);
-    const ids = lcids.length ? lcids : [1033];
-
-    // Step 2: fetch only those Language rows using FILTER with | as OR
-    const tableView = `WHERE(Windows Language ID=FILTER(${ids.join('|')}))`;
-    const langRes = await cePost(selectedCompany.id, {
-      specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
-      data: JSON.stringify({ tableName: 'Language', tableView })
-    });
-
-    // Build LCID → display name map from the Language table
-    const lcidToName = {};
-    for (const rec of (langRes.result || [])) {
-      const lcid = parseInt(rec.fields.WindowsLanguageID, 10);
-      if (lcid && rec.fields.Name) lcidToName[lcid] = rec.fields.Name.charAt(0).toUpperCase() + rec.fields.Name.slice(1).toLowerCase();
-    }
-
-    const sel = document.getElementById('lang-select');
-    sel.innerHTML = ids.map(id =>
-      `<option value="${id}" ${id === selectedLcid ? 'selected' : ''}>${lcidToName[id] || LCID_NAMES[id] || 'Language ' + id}</option>`
-    ).join('');
-    document.getElementById('lang-wrap').style.display = '';
-  } catch(e) {
-    // fall back silently — English is already the default
-  }
-}
-
 // Load ALL languages from Language table for customer dropdown
 async function loadAllLanguages() {
   try {
@@ -1050,32 +1003,6 @@ async function loadAllLanguages() {
   } catch(e) {
     console.error('Error loading all languages:', e);
     allLanguages = [];
-  }
-}
-
-async function onLangChange(value) {
-  selectedLcid = parseInt(value, 10);
-  localStorage.setItem('bc_portal_lcid', String(selectedLcid));  // sync for explorer pages
-  await loadUiTranslations();
-  applyUiTranslations();
-  const detail = document.getElementById('view-detail');
-  if (detail.style.display !== 'none') {
-    // Reload all data tabs (captions are LCID-keyed in fieldMetaCache)
-    loadLedger();
-    loadDocuments();
-    if (document.getElementById('sales-history-content')?.dataset.loaded) {
-      loadSalesHistory();
-    }
-    // Re-render items in place — no API needed, and avoids clearing the cart
-    filterItems();
-    updateSummary();
-  } else {
-    loadCustomers();
-  }
-  
-  // Reload customer creation form if it's open
-  if (typeof reloadCustomerFormForLanguage === 'function') {
-    await reloadCustomerFormForLanguage();
   }
 }
 
@@ -1154,6 +1081,13 @@ async function loadCompanies() {
     setStatus('connected');
     document.getElementById('company-count').textContent = companies.length + ' ' + t('companies');
 
+    // If the user came from the landing page with a company already selected, skip the grid
+    const _savedId = localStorage.getItem('bc_portal_company_id');
+    if (_savedId && companies.find(c => c.id === _savedId)) {
+      await selectCompany(_savedId);
+      return;
+    }
+
     if (!companies.length) {
       document.getElementById('company-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">🏢</div><p>${t('No companies found')}</p></div>`;
       return;
@@ -1194,7 +1128,6 @@ async function selectCompany(id) {
   document.getElementById('crumb-company2').textContent = name;
   document.getElementById('customers-company-label').textContent = name;
   show('view-customers');
-  await loadLanguages();         // Load allowed languages for UI selector
   await loadAllLanguages();      // Load all languages for customer dropdown
   await loadUiTranslations();
   applyUiTranslations();
