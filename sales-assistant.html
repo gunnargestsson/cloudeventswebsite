@@ -542,7 +542,7 @@ async function _callChatApi() {
   showThinking(true);
   try {
     const cfg  = getConfig();
-    const body = { messages, apiKey: cfg.apiKey, bcConfig: cfg.bcConfig };
+    const body = { messages, apiKey: cfg.apiKey, bcConfig: cfg.bcConfig, lcid: getActiveLcid() };
     if (pendingOrder) body.pendingOrder = pendingOrder;
 
     const res  = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

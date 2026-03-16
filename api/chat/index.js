@@ -8,7 +8,15 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-const SYSTEM_PROMPT = `You are a Business Central sales order assistant for dynamics.is.
+const LANGUAGE_NAMES = { 1039: 'Icelandic', 1030: 'Danish', 1044: 'Norwegian' };
+
+function buildSystemPrompt(lcid) {
+  const lang = LANGUAGE_NAMES[lcid];
+  const langInstruction = lang ? `\n\nIMPORTANT: The user has selected ${lang} as their language. Respond in ${lang} throughout this conversation.` : '';
+  return SYSTEM_PROMPT_BASE + langInstruction;
+}
+
+const SYSTEM_PROMPT_BASE = `You are a Business Central sales order assistant for dynamics.is.
 Your job is to help users create sales orders by understanding natural language requests and uploaded documents.
 
 WORKFLOW:
@@ -249,7 +257,7 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
 
 // ── Main agent loop ────────────────────────────────────────────────────────────
 
-async function runAgentLoop(apiKey, messages, tenantId, env, companyId, auth) {
+async function runAgentLoop(apiKey, messages, tenantId, env, companyId, auth, lcid) {
   let pendingOrder = null;
   const conversation = [...messages];
 
@@ -257,7 +265,7 @@ async function runAgentLoop(apiKey, messages, tenantId, env, companyId, auth) {
     const response = await callAnthropic(apiKey, {
       model:      "claude-sonnet-4-20250514",
       max_tokens: 4096,
-      system:     SYSTEM_PROMPT,
+      system:     buildSystemPrompt(lcid),
       tools:      TOOLS,
       messages:   conversation,
     });
@@ -355,7 +363,7 @@ module.exports = async function (context, req) {
   }
 
   const body = req.body || {};
-  const { messages, apiKey, bcConfig, pendingOrder } = body;
+  const { messages, apiKey, bcConfig, pendingOrder, lcid } = body;
 
   if (!apiKey)    { context.res = { status: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: "apiKey is required" }) }; return; }
   if (!messages)  { context.res = { status: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: "messages array is required" }) }; return; }
@@ -395,7 +403,7 @@ module.exports = async function (context, req) {
     }
 
     const { reply, pendingOrder: newPendingOrder } = await runAgentLoop(
-      apiKey, messages, tenantId, environment, companyId, auth,
+      apiKey, messages, tenantId, environment, companyId, auth, lcid,
     );
 
     context.res = {
