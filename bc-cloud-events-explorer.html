@@ -607,7 +607,9 @@ async function sendReq(){
   try{
     let result;
     if(endpoint==='queues'){
-      const res=await fetch(`${baseUrl()}/queues`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${g('cfgToken').trim()}`},body:JSON.stringify(env)});
+      const token = await getToken();
+      const res=await fetch(`${baseUrl()}/queues`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},body:JSON.stringify(env)});
+      if(!res.ok){ const t=await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0,300)}`); }
       result=await res.json();
       result._note='Queued asynchronously. Poll /queues({id})/Microsoft.NAV.GetStatus to check.';
     } else {
