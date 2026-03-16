@@ -157,7 +157,8 @@ async function toolListTables({ lcid = 1033 } = {}) {
     lcid,
   });
 
-  const tables = result.value || result.tables || (Array.isArray(result) ? result : []);
+  // BC returns { result: [{id, name, caption}, ...] }
+  const tables = result.result || result.value || result.tables || (Array.isArray(result) ? result : []);
   return { company: company.name, tableCount: tables.length, tables };
 }
 
@@ -176,7 +177,9 @@ async function toolGetTableInfo({ table, lcid = 1033 } = {}) {
     lcid,
   });
 
-  return { company: company.name, table: result };
+  // BC returns { result: [{id, name, caption}] } — unwrap single-table result
+  const tableData = (result.result && result.result[0]) || result;
+  return { company: company.name, table: tableData };
 }
 
 async function toolGetTableFields({ table, lcid = 1033 } = {}) {
@@ -191,7 +194,7 @@ async function toolGetTableFields({ table, lcid = 1033 } = {}) {
       specversion: "1.0",
       type:        "Help.Fields.Get",
       source:      "BC Metadata MCP v1.0",
-      subject:     String(table),
+      data:        JSON.stringify({ tableName: String(table) }),
       lcid,
     }),
     bcTask(tenantId, env, company.id, {
@@ -202,11 +205,19 @@ async function toolGetTableFields({ table, lcid = 1033 } = {}) {
     }).catch(() => null),
   ]);
 
-  const fields = fieldsResult.value || fieldsResult.fields || (Array.isArray(fieldsResult) ? fieldsResult : []);
+  // BC returns { result: [{number, name, jsonName, caption, type, length, class, isPartOfPrimaryKey, enum}, ...] }
+  const fields = fieldsResult.result || fieldsResult.value || fieldsResult.fields || (Array.isArray(fieldsResult) ? fieldsResult : []);
+
+  // BC permissions shape: { status: 'Success', permissions: { read: true, write: true } }
+  const rawPerms = permsResult ? (permsResult.permissions || permsResult) : null;
+  const permissions = rawPerms
+    ? { read: !!(rawPerms.read ?? rawPerms.readPermission), write: !!(rawPerms.write ?? rawPerms.writePermission) }
+    : null;
+
   return {
     company:     company.name,
     table:       String(table),
-    permissions: permsResult,
+    permissions,
     fieldCount:  fields.length,
     fields,
   };

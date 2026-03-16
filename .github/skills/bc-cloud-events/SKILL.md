@@ -10,8 +10,9 @@ description: >
   with fieldNumbers, tableView filtering and sorting in BC AL syntax (WHERE/FILTER/
   CONST/SORTING), UI translations via the Cloud Event Translation table, field metadata
   caching, lookup table patterns, duplicate checking, webhooks, special field
-  conversions (BLOB, Media, Dimension Set, Currency Code), and creating sales orders
-  via the generic Data.Records.Set workflow.
+  conversions (BLOB, Media, Dimension Set, Currency Code), creating sales orders
+  via the generic Data.Records.Set workflow, and using the BC Metadata MCP server
+  at https://dynamics.is/api/mcp to look up tables, fields, and permissions.
 ---
 
 # Cloud Events BC Integration Skill
@@ -2267,4 +2268,216 @@ if (exists) {
   showError(`A customer with registration number ${regNo} already exists.`);
   return;
 }
+```
+
+---
+
+## 23. BC Metadata MCP Server
+
+A Model Context Protocol (MCP) server is deployed at **`https://dynamics.is/api/mcp`**.
+It exposes Business Central table and field metadata as MCP tools so that AI assistants
+(Copilot, Claude, Cursor, etc.) can look up schema information on demand without any
+extra credentials — authentication uses the server-side `BC_TENANT_ID`, `BC_CLIENT_ID`,
+and `BC_CLIENT_SECRET` environment variables.
+
+The company is resolved automatically: on the first tool call the server fetches
+`GET /v2.0/{tenantId}/{env}/api/v2.0/companies` and caches the first company for the
+lifetime of the warm function instance.
+
+### 23.1 MCP Client Configuration
+
+Add this to your MCP client configuration (e.g. `.vscode/mcp.json`, Claude Desktop, Cursor):
+
+```json
+{
+  "servers": {
+    "bc-metadata": {
+      "type": "http",
+      "url": "https://dynamics.is/api/mcp"
+    }
+  }
+}
+```
+
+Auto-discovery is available at `https://dynamics.is/.well-known/mcp.json`.
+
+### 23.2 Available Tools
+
+#### `list_tables` — List all BC tables
+
+Returns the full table catalogue for the company with table numbers, AL names, and
+localized captions.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `lcid` | integer | `1033` | Language LCID for captions (1033 = English, 1039 = Icelandic, 1030 = Danish) |
+
+**Example request (JSON-RPC 2.0):**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "list_tables",
+    "arguments": { "lcid": 1033 }
+  }
+}
+```
+
+**Example response excerpt:**
+```json
+{
+  "company": "CRONUS International Ltd.",
+  "tableCount": 312,
+  "tables": [
+    { "id": 18,  "name": "Customer",  "caption": "Customer" },
+    { "id": 23,  "name": "Vendor",    "caption": "Vendor" },
+    { "id": 27,  "name": "Item",      "caption": "Item" }
+  ]
+}
+```
+
+---
+
+#### `get_table_info` — Get summary for one table
+
+Returns name, number, and caption for a single table identified by name or number.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `table` | string | ✅ | Table name (`"Customer"`) or number as string (`"18"`) |
+| `lcid` | integer | | Language LCID (default 1033) |
+
+**Example:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "get_table_info",
+    "arguments": { "table": "Customer" }
+  }
+}
+```
+
+---
+
+#### `get_table_fields` — Get all fields for a table
+
+Returns complete field metadata plus read/write permissions for the table.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `table` | string | ✅ | Table name (`"Customer"`) or number as string (`"18"`) |
+| `lcid` | integer | | Language LCID (default 1033) |
+
+**Example:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "get_table_fields",
+    "arguments": { "table": "Customer", "lcid": 1033 }
+  }
+}
+```
+
+**Response shape:**
+```json
+{
+  "company": "CRONUS International Ltd.",
+  "table": "Customer",
+  "permissions": { "read": true, "write": true },
+  "fieldCount": 148,
+  "fields": [
+    {
+      "id": 1,
+      "name": "No.",
+      "jsonName": "no",
+      "caption": "No.",
+      "type": "Code",
+      "len": 20,
+      "class": "Normal",
+      "isPartOfPrimaryKey": true
+    },
+    {
+      "id": 2,
+      "name": "Name",
+      "jsonName": "name",
+      "caption": "Name",
+      "type": "Text",
+      "len": 100,
+      "class": "Normal",
+      "isPartOfPrimaryKey": false
+    },
+    {
+      "id": 18,
+      "name": "Gen. Bus. Posting Group",
+      "jsonName": "genBusPostingGroup",
+      "caption": "Gen. Bus. Posting Group",
+      "type": "Code",
+      "len": 20,
+      "class": "Normal",
+      "isPartOfPrimaryKey": false
+    }
+  ]
+}
+```
+
+**Field object properties:**
+
+| Property | Description |
+|---|---|
+| `id` | BC field number |
+| `name` | AL field name (use in `tableView` WHERE clauses) |
+| `jsonName` | Normalized JSON key (use in `Data.Records.Get` / `Data.Records.Set`) |
+| `caption` | Localized display caption |
+| `type` | AL data type (`Text`, `Code`, `Integer`, `Decimal`, `Boolean`, `Date`, `DateTime`, `Option`, `Enum`, …) |
+| `len` | Field length (for Text/Code fields) |
+| `class` | `Normal` or `FlowField` |
+| `isPartOfPrimaryKey` | `true` if field is part of the primary key |
+| `enum` | Array of `{ value, caption }` for Option/Enum fields |
+
+### 23.3 Using MCP Metadata in Integration Code
+
+Before writing a `Data.Records.Get` or `Data.Records.Set` call against an unfamiliar
+table, ask the MCP server for the field list first:
+
+1. Call `get_table_fields` with the table name.
+2. Use `name` (not `jsonName`) for `tableView` WHERE clause field names.
+3. Use `jsonName` as the key in `Data.Records.Set` field objects and to read values
+   back from `Data.Records.Get` responses.
+4. Use `id` to build the `fieldNumbers` array in `Data.Records.Get` requests to
+   return only the fields you actually need (see §18).
+5. Check `permissions.write` before attempting `Data.Records.Set` — if `false`, BC
+   will reject the write.
+
+**Example — discover fields then read only what you need:**
+```javascript
+// Step 1 — ask MCP for Customer fields
+// (via MCP client, not direct fetch — shown here for illustration)
+const meta = await mcpClient.callTool('get_table_fields', { table: 'Customer' });
+const noField     = meta.fields.find(f => f.name === 'No.');
+const nameField   = meta.fields.find(f => f.name === 'Name');
+const emailField  = meta.fields.find(f => f.name === 'E-Mail');
+
+// Step 2 — use discovered field ids in the Cloud Events call
+const result = await cePost(companyId, {
+  type: 'Data.Records.Get',
+  data: JSON.stringify({
+    tableName: 'Customer',
+    fieldNumbers: [noField.id, nameField.id, emailField.id],
+    take: 50
+  })
+});
 ```
