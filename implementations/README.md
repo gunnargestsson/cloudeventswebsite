@@ -198,6 +198,34 @@ Each requirement is stored in its own subfolder with complete implementation det
 - Markdown table output format for better LLM readability
 - MCP Resources (`bc://tables`, `bc://tables/{name}`)
 - MCP Prompts (describe_table, find_related_tables)
+
+---
+
+### Requirement 9: Dedicated Connection Landing Page
+**Folder**: `requirement-9-landing-page/`
+**Status**: ⏳ Ready for Implementation (pending design decisions Q1–Q6)
+**Description**: Restructure the site so that `index.html` becomes a dedicated connection/configuration landing page. The existing BC Portal content moves to `bc-portal.html`. The landing page presents a credential form (using `settings.js`), a company dropdown, and a language selector. Once connected, a navigation card grid leads users to all available tools.
+
+**Key Features**:
+- Credential form on `index.html` using `bcSettingsLoad/Save/Clear()` from `settings.js`
+- Company dropdown populated via `GET /api/companies` (Requirement 7 endpoint)
+- Language selector persisted to `bc_portal_lcid`
+- Navigation card grid (BC Portal, Cloud Events Explorer, Metadata Explorer, AI Sales Assistant)
+- Cards shown only after `bcSettingsReady()` is true
+- "← Home" navigation link on all sub-pages replacing the three-pill header toolbar
+- `bc-portal.html` — current `index.html` BC Portal content moved with minimal changes
+- Optional guard redirect on sub-pages when settings are missing
+
+**Open Design Decisions**:
+- Q1: What defines "connected" — local validation only vs. live API verification?
+- Q2: Fate of settings panels on sub-pages — remove, keep as fallback, or keep gated?
+- Q3: Scope of the single menu — landing page only vs. all pages?
+- Q4: `bc-portal.html` credential mode — server-side (env vars) or client-supplied?
+- Q5: Auto-redirect when already configured — always show config, auto-jump, or jump with override?
+- Q6: Back navigation target — `index.html` (home), `bc-portal.html`, or both?
+
+**Files**:
+- `SPECIFICATION.md` - Architecture, layout wireframe, HTML skeleton, JS logic, CSS, testing checklist
 - Optional `MCP_API_KEY` bearer token auth
 - Table name input validation to prevent injection
 - `BC_COMPANY_ID` / `BC_COMPANY_NAME` env vars for explicit company targeting
