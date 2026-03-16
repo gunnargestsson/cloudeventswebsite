@@ -415,7 +415,7 @@ skip:   { type: "integer", description: "Number of tables to skip for paging (de
 ---
 
 ### 8. Markdown output format
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🟢 Low  
 **File:** `api/mcp/index.js` — `toolGetTableFields()` and `toolGetRecords()`
 

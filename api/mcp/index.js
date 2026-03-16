@@ -314,7 +314,7 @@ async function toolListMessageTypes({ filter } = {}) {
   return { company: company.name, typeCount: types.length, types };
 }
 
-async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid = 1033 } = {}) {
+async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid = 1033, format = "json" } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   validateTableName(table);
   take = Math.min(Number(take) || 50, 200);
@@ -337,6 +337,20 @@ async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid
   });
 
   const records = result.result || result.value || (Array.isArray(result) ? result : []);
+
+  if (format === "markdown") {
+    // Flatten each record: merge primaryKey + fields into a single object
+    const flat = records.map(r => {
+      if (r && (r.primaryKey || r.fields)) {
+        return { ...(r.primaryKey || {}), ...(r.fields || {}) };
+      }
+      return r || {};
+    });
+    const headers = flat.length ? [...new Set(flat.flatMap(r => Object.keys(r)))] : [];
+    const md = toMarkdownTable(headers, flat.map(r => headers.map(h => r[h])));
+    return { company: company.name, table: String(table), skip, take, count: records.length, markdown: md };
+  }
+
   return { company: company.name, table: String(table), skip, take, count: records.length, records };
 }
 
@@ -519,6 +533,7 @@ const TOOLS = [
         skip:   { type: "integer", description: "Records to skip for paging (default 0)." },
         take:   { type: "integer", description: "Max records to return (default 50, max 200)." },
         lcid:   { type: "integer", description: "Language LCID for enum captions (default 1033)." },
+        format: { type: "string",  enum: ["json", "markdown"], description: "Output format: 'json' (default) or 'markdown' for LLM-friendly table output." },
       },
       required: ["table"],
     },
