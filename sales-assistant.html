@@ -145,12 +145,12 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
     <div class="logo-icon"><img src="origo.jpeg" alt="Origo"></div>
   </a>
   <div>
-    <div class="htitle">AI Sales Assistant</div>
+    <div class="htitle" data-t="AI Sales Assistant">AI Sales Assistant</div>
     <div class="hsub">Origo · Business Central · Claude</div>
   </div>
   <div class="hsp"></div>
-  <button class="hpill" onclick="toggleSettings()" id="settingsToggle">⚙ API Key</button>
-  <a href="index.html" class="hpill">← Home</a>
+  <button class="hpill" onclick="toggleSettings()" id="settingsToggle" data-t="⚙ Language / Key">⚙ Language / Key</button>
+  <a href="index.html" class="hpill" data-t="← Home">← Home</a>
 </header>
 
 <div class="workspace">
@@ -158,18 +158,27 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
   <!-- ── SETTINGS PANEL ─────────────────────────────────────────────── -->
   <aside class="settings-panel" id="settingsPanel">
     <div class="sp-head">
-      <div class="sp-title">Claude API Key</div>
-      <div class="sp-sub">Stored in localStorage — never sent to our server</div>
+      <div class="sp-title" data-t="Claude API Key">Claude API Key</div>
+      <div class="sp-sub" data-t="Stored in localStorage — never sent to our server">Stored in localStorage — never sent to our server</div>
     </div>
     <div class="sp-body">
       <div class="sp-section">
         <div>
-          <div class="lbl">API Key</div>
-          <input class="ci" type="password" id="cfgClaudeKey" placeholder="sk-ant-…" autocomplete="off">
-          <div class="key-note">Stored in localStorage — persists across sessions</div>
+          <div class="lbl" data-t="Language">Language</div>
+          <select class="ci" id="cfgLcid" onchange="onLcidSelect()">
+            <option value="1033">English</option>
+            <option value="1039">Icelandic</option>
+            <option value="1030">Danish</option>
+            <option value="1044">Norwegian</option>
+          </select>
         </div>
-        <button class="save-btn" onclick="saveClaudeKey()">Save Key</button>
-        <div class="save-ok hidden" id="saveOk">✓ Key saved</div>
+        <div>
+          <div class="lbl" data-t="API Key">API Key</div>
+          <input class="ci" type="password" id="cfgClaudeKey" placeholder="sk-ant-…" autocomplete="off">
+          <div class="key-note" data-t="Stored in localStorage — persists across sessions">Stored in localStorage — persists across sessions</div>
+        </div>
+        <button class="save-btn" onclick="saveClaudeKey()" data-t="Save Key">Save Key</button>
+        <div class="save-ok hidden" id="saveOk" data-t="✓ Key saved">✓ Key saved</div>
       </div>
     </div>
   </aside>
@@ -181,24 +190,26 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
     <div class="chat-panel" id="chatPanel">
       <div class="chat-history" id="chatHistory">
         <div class="msg assistant">
-          <div class="msg-bubble">Hello! I'm your Business Central sales order assistant.<br><br>
-Describe what you'd like to order — or drop a file (PDF, Excel, email) and I'll extract the order details for you.<br><br>
-<strong>Example:</strong> <em>"Create an order for Adatum Corporation — 10 units of item 1896-S and 5 units of ATHENS desk"</em></div>
+          <div class="msg-bubble" id="welcomeMsg">
+            <span data-t="Hello! I'm your Business Central sales order assistant.">Hello! I'm your Business Central sales order assistant.</span><br><br>
+            <span data-t="Describe what you'd like to order — or drop a file (PDF, Excel, email) and I'll extract the order details for you.">Describe what you'd like to order — or drop a file (PDF, Excel, email) and I'll extract the order details for you.</span><br><br>
+            <strong data-t="Example:">Example:</strong> <em data-t="Create an order for Adatum Corporation — 10 units of item 1896-S and 5 units of ATHENS desk">Create an order for Adatum Corporation — 10 units of item 1896-S and 5 units of ATHENS desk</em>
+          </div>
         </div>
       </div>
 
       <div id="uploadStatus" class="upload-status hidden">
-        <span class="spinner"></span><span id="uploadStatusText">Processing file…</span>
+        <span class="spinner"></span><span id="uploadStatusText" data-t="Processing file…">Processing file…</span>
       </div>
 
       <div class="upload-zone" id="dropZone" title="Drop a file or click to browse">
         <input type="file" id="fileInput" accept=".pdf,.xlsx,.xls,.eml,.msg,.jpg,.jpeg,.png" onchange="handleFileChange(event)">
-        📎 Drop PDF, Excel, email or image — or click to browse
+        <span data-t="📎 Drop PDF, Excel, email or image — or click to browse">📎 Drop PDF, Excel, email or image — or click to browse</span>
       </div>
 
       <div class="chat-input-row">
-        <textarea class="chat-input" id="chatInput" placeholder="Describe the order…" onkeydown="onInputKeyDown(event)"></textarea>
-        <button class="send-btn" id="sendBtn" onclick="sendMessage()">Send</button>
+        <textarea class="chat-input" id="chatInput" data-tp="Describe the order…" placeholder="Describe the order…" onkeydown="onInputKeyDown(event)"></textarea>
+        <button class="send-btn" id="sendBtn" onclick="sendMessage()" data-t="Send">Send</button>
       </div>
     </div>
 
@@ -214,12 +225,85 @@ let messages     = [];      // conversation history sent to /api/chat
 let pendingOrder = null;    // proposed order waiting for user confirmation
 let isBusy       = false;
 
-// ── SETTINGS ──────────────────────────────────────────────────────────────────
+// ── TRANSLATION ───────────────────────────────────────────────────────────────
 const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',1036:'French',1034:'Spanish',1043:'Dutch',1053:'Swedish',1044:'Norwegian'};
+
+const UI_STRINGS = [
+  // Header
+  'AI Sales Assistant', '⚙ Language / Key', '← Home',
+  // Settings panel
+  'Claude API Key', 'Stored in localStorage — never sent to our server',
+  'API Key', 'Stored in localStorage — persists across sessions',
+  'Save Key', '✓ Key saved',
+  'Language',
+  // Upload zone
+  '📎 Drop PDF, Excel, email or image — or click to browse',
+  'Processing file…',
+  // Chat input
+  'Describe the order…', 'Send',
+  // Welcome message
+  "Hello! I'm your Business Central sales order assistant.",
+  "Describe what you'd like to order — or drop a file (PDF, Excel, email) and I'll extract the order details for you.",
+  'Example:',
+  'Create an order for Adatum Corporation — 10 units of item 1896-S and 5 units of ATHENS desk',
+  // Thinking indicator
+  'Thinking…',
+  // Confirmation panel
+  'Confirm Sales Order',
+  'Review the proposed order before creating it in Business Central',
+  'Customer', 'Requested delivery', 'Notes',
+  '⚠ One or more lines have insufficient stock — highlighted below',
+  'Item No.', 'Description', 'Qty', 'Unit', 'Unit Price', 'Line Amount',
+  '⚠ Low stock',
+  'Subtotal excl. VAT', 'VAT (24%)', 'Total incl. VAT',
+  '← Edit / Cancel', '✓ Confirm & Create Order',
+  'Creating order…',
+  // Success banner
+  'Order Created',
+  'Your sales order has been created in Business Central',
+  'Sales Order created successfully',
+  'Start New Order',
+  // New order message
+  'Ready for a new order. What would you like to order?',
+  // Error messages (used in t() calls)
+  'Please enter your Claude API key first.',
+  'Order cancelled. How would you like to adjust it?',
+  'Error creating order: {0}',
+  'Network error: {0}',
+  'File processing error: {0}',
+  'Upload error: {0}',
+];
+
+function t(s) { return (typeof _uiTranslations !== 'undefined' && _uiTranslations[s]) || s; }
+
+// Load translations from BC via the /api/explorer endpoint (same pattern as settings.js bcLoadTranslations)
+async function loadUiTranslations() {
+  if (typeof _uiTranslations !== 'undefined') _uiTranslations = {};
+  const lcid = getActiveLcid();
+  if (lcid === 1033) return; // English — no fetch needed
+  const h = bcSettingsHeaders();
+  if (!h) return;
+  try {
+    await bcLoadTranslations(h['x-bc-company'], lcid, UI_STRINGS, h);
+  } catch (_) { /* fall back to English */ }
+}
+
+function applyUiTranslations() {
+  document.querySelectorAll('[data-t]').forEach(el  => { el.textContent = t(el.dataset.t); });
+  document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
+}
+
+function getActiveLcid() {
+  return parseInt(localStorage.getItem('bc_portal_lcid') || '1033', 10);
+}
 
 function loadSettings() {
   const saved = localStorage.getItem('sa_claude_key');
   if (saved) document.getElementById('cfgClaudeKey').value = saved;
+  const savedLcid = localStorage.getItem('bc_portal_lcid');
+  if (savedLcid && document.getElementById('cfgLcid')) {
+    document.getElementById('cfgLcid').value = savedLcid;
+  }
 }
 
 function saveClaudeKey() {
@@ -294,6 +378,7 @@ function onCompanySelect() {
 function onLcidSelect() {
   const lcid = parseInt(document.getElementById('cfgLcid')?.value || '1033', 10);
   bcSettingsSave({ lcid });
+  loadUiTranslations().then(applyUiTranslations);
 }
 
 function toggleSettings() {
@@ -347,7 +432,7 @@ function showThinking(show) {
     el = document.createElement('div');
     el.id = 'thinkingIndicator';
     el.className = 'thinking';
-    el.innerHTML = '<span class="spinner"></span> Thinking…';
+    el.innerHTML = `<span class="spinner"></span> ${t('Thinking…')}`;
     document.getElementById('chatHistory').appendChild(el);
   } else if (!show && el) {
     el.remove();
@@ -360,63 +445,16 @@ async function sendMessage(overrideText) {
   if (isBusy) return;
   if (!configOk()) {
     document.getElementById('settingsPanel').classList.remove('hidden');
-    alert('Please enter your Claude API key first.');
+    alert(t('Please enter your Claude API key first.'));
     return;
   }
-
   const input = document.getElementById('chatInput');
-  const text  = overrideText ?? input.value.trim();
+  const text  = overrideText !== undefined ? overrideText : input.value.trim();
   if (!text) return;
-
-  if (!overrideText) {
-    input.value = '';
-    input.style.height = '40px';
-  }
-
+  if (overrideText === undefined) { input.value = ''; input.style.height = '40px'; }
   appendMessage('user', text);
   messages.push({ role: 'user', content: text });
-
-  isBusy = true;
-  document.getElementById('sendBtn').disabled = true;
-  showThinking(true);
-
-  try {
-    const cfg  = getConfig();
-    const body = { messages, apiKey: cfg.apiKey, bcConfig: cfg.bcConfig };
-    if (pendingOrder) body.pendingOrder = pendingOrder;
-
-    const res  = await fetch('/api/chat', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(body),
-    });
-    const data = await res.json();
-
-    showThinking(false);
-
-    if (!res.ok || data.error) {
-      appendMessage('assistant', `Error: ${data.error || 'Unknown error'}`);
-    } else {
-      if (data.reply) {
-        appendMessage('assistant', data.reply);
-        messages.push({ role: 'assistant', content: data.reply });
-      }
-      if (data.pendingOrder) {
-        pendingOrder = data.pendingOrder;
-        showConfirmPanel(pendingOrder);
-      }
-      if (data.orderNo) {
-        showSuccessBanner(data.orderNo);
-        pendingOrder = null;
-      }
-    }
-  } catch (e) {
-    showThinking(false);
-    appendMessage('assistant', `Network error: ${e.message}`);
-  } finally {
-    isBusy = false;
-    document.getElementById('sendBtn').disabled = false;
-  }
+  await _callChatApi();
 }
 
 function onInputKeyDown(e) {
@@ -439,69 +477,9 @@ function handleFileChange(e) {
 }
 
 async function uploadFile(file) {
-  if (isBusy) return;
   if (!configOk()) {
     document.getElementById('settingsPanel').classList.remove('hidden');
-    alert('Please enter your Claude API key first.');
-    return;
-  }
-
-  const cfg = getConfig();
-  const status   = document.getElementById('uploadStatus');
-  const statusTx = document.getElementById('uploadStatusText');
-  status.classList.remove('hidden');
-  statusTx.textContent = `Processing ${file.name}…`;
-  isBusy = true;
-  document.getElementById('sendBtn').disabled = true;
-
-  try {
-    const form = new FormData();
-    form.append('file',     file);
-    form.append('apiKey',   cfg.apiKey);
-    form.append('mimeType', file.type || '');
-
-    const res  = await fetch('/api/upload', { method: 'POST', body: form });
-    const data = await res.json();
-
-    status.classList.add('hidden');
-
-    if (!res.ok || data.error) {
-      appendMessage('assistant', `File processing error: ${data.error || 'Unknown error'}`);
-      return;
-    }
-
-    const extracted = data.extractedData;
-    if (!extracted || extracted.intent === 'none') {
-      appendMessage('assistant', `I couldn't find any sales order intent in **${file.name}**. What would you like to do with this document?`);
-      messages.push({ role: 'assistant', content: `No order intent found in ${file.name}. What would you like to do?` });
-      return;
-    }
-
-    // Build a descriptive user message from the extracted data so Claude can proceed
-    const lines = (extracted.orderLines || [])
-      .map(l => `• ${l.quantity}x ${l.itemNo || l.description}${l.unitOfMeasure ? ' ' + l.unitOfMeasure : ''}`)
-      .join('\n');
-    const userMsg = `[File: ${file.name}]\nExtracted order intent:\nCustomer: ${extracted.customerName || extracted.customerNo || 'unknown'}\n${lines}${extracted.requestedDeliveryDate ? '\nDelivery: ' + extracted.requestedDeliveryDate : ''}${extracted.notes ? '\nNotes: ' + extracted.notes : ''}\n\nPlease look up the customer and items in BC and prepare the order.`;
-
-    appendMessage('user', userMsg);
-    messages.push({ role: 'user', content: userMsg });
-    await sendMessage(null); // will not re-add message, but need to call with current messages
-
-  } catch (e) {
-    status.classList.add('hidden');
-    appendMessage('assistant', `Upload error: ${e.message}`);
-  } finally {
-    isBusy = false;
-    document.getElementById('sendBtn').disabled = false;
-  }
-}
-
-// Workaround: uploadFile sets up the user message and calls backend directly
-// Override sendMessage to not add duplicate: instead call API directly
-async function uploadFile(file) {
-  if (!configOk()) {
-    document.getElementById('settingsPanel').classList.remove('hidden');
-    alert('Please enter your Claude API key first.');
+    alert(t('Please enter your Claude API key first.'));
     return;
   }
   if (isBusy) return;
@@ -510,7 +488,7 @@ async function uploadFile(file) {
   const status = document.getElementById('uploadStatus');
   const stTxt  = document.getElementById('uploadStatusText');
   status.classList.remove('hidden');
-  stTxt.textContent = `Processing ${file.name}…`;
+  stTxt.textContent = `${t('Processing file…').replace('…', '')} ${file.name}…`;
   isBusy = true;
   document.getElementById('sendBtn').disabled = true;
 
@@ -601,9 +579,10 @@ async function sendMessage(overrideText) {
   if (isBusy) return;
   if (!configOk()) {
     document.getElementById('settingsPanel').classList.remove('hidden');
-    alert('Please enter your Claude API key first.');
+    alert(t('Please enter your Claude API key first.'));
     return;
   }
+
   const input = document.getElementById('chatInput');
   const text  = overrideText !== undefined ? overrideText : input.value.trim();
   if (!text) return;
@@ -646,38 +625,38 @@ function showConfirmPanel(order) {
       <td>${esc(l.unitOfMeasureCode || '')}</td>
       <td style="text-align:right">${fmtDec(l.unitPrice)}</td>
       <td style="text-align:right">${fmtDec(amt)}</td>
-      <td>${warn ? '<span class="stock-warn">⚠ Low stock</span>' : ''}</td>
+      <td>${warn ? `<span class="stock-warn">${t('⚠ Low stock')}</span>` : ''}</td>
     </tr>`;
   }).join('');
 
   panel.innerHTML = `
     <div>
-      <div class="cp-title">Confirm Sales Order</div>
-      <div class="cp-sub">Review the proposed order before creating it in Business Central</div>
+      <div class="cp-title">${t('Confirm Sales Order')}</div>
+      <div class="cp-sub">${t('Review the proposed order before creating it in Business Central')}</div>
     </div>
     <div class="order-card">
       <div class="oc-row">
-        <div class="oc-kv"><div class="oc-k">Customer</div><div class="oc-v">${esc(order.customerNo)} · ${esc(order.customerName)}</div></div>
-        ${order.requestedDeliveryDate ? `<div class="oc-kv"><div class="oc-k">Requested delivery</div><div class="oc-v">${esc(order.requestedDeliveryDate)}</div></div>` : ''}
-        ${order.notes ? `<div class="oc-kv"><div class="oc-k">Notes</div><div class="oc-v">${esc(order.notes)}</div></div>` : ''}
+        <div class="oc-kv"><div class="oc-k">${t('Customer')}</div><div class="oc-v">${esc(order.customerNo)} · ${esc(order.customerName)}</div></div>
+        ${order.requestedDeliveryDate ? `<div class="oc-kv"><div class="oc-k">${t('Requested delivery')}</div><div class="oc-v">${esc(order.requestedDeliveryDate)}</div></div>` : ''}
+        ${order.notes ? `<div class="oc-kv"><div class="oc-k">${t('Notes')}</div><div class="oc-v">${esc(order.notes)}</div></div>` : ''}
       </div>
-      ${hasStockWarn ? '<div style="font-size:10px;color:var(--orange);margin-bottom:10px">⚠ One or more lines have insufficient stock — highlighted below</div>' : ''}
+      ${hasStockWarn ? `<div style="font-size:10px;color:var(--orange);margin-bottom:10px">${t('⚠ One or more lines have insufficient stock — highlighted below')}</div>` : ''}
       <table class="lines-table">
         <thead><tr>
-          <th>Item No.</th><th>Description</th><th style="text-align:right">Qty</th>
-          <th>Unit</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Line Amount</th><th></th>
+          <th>${t('Item No.')}</th><th>${t('Description')}</th><th style="text-align:right">${t('Qty')}</th>
+          <th>${t('Unit')}</th><th style="text-align:right">${t('Unit Price')}</th><th style="text-align:right">${t('Line Amount')}</th><th></th>
         </tr></thead>
         <tbody>${lineRows}</tbody>
       </table>
       <div class="totals-row">
-        <div class="total-line"><span class="k">Subtotal excl. VAT</span><span class="v">${fmtDec(subtotal)}</span></div>
-        <div class="total-line"><span class="k">VAT (24%)</span><span class="v">${fmtDec(vatAmt)}</span></div>
-        <div class="total-line grand"><span class="k">Total incl. VAT</span><span class="v">${fmtDec(total)}</span></div>
+        <div class="total-line"><span class="k">${t('Subtotal excl. VAT')}</span><span class="v">${fmtDec(subtotal)}</span></div>
+        <div class="total-line"><span class="k">${t('VAT (24%)')}</span><span class="v">${fmtDec(vatAmt)}</span></div>
+        <div class="total-line grand"><span class="k">${t('Total incl. VAT')}</span><span class="v">${fmtDec(total)}</span></div>
       </div>
     </div>
     <div class="confirm-actions">
-      <button class="confirm-btn cancel" onclick="cancelOrder()">← Edit / Cancel</button>
-      <button class="confirm-btn ok" id="confirmBtn" onclick="confirmOrder()">✓ Confirm &amp; Create Order</button>
+      <button class="confirm-btn cancel" onclick="cancelOrder()">${t('← Edit / Cancel')}</button>
+      <button class="confirm-btn ok" id="confirmBtn" onclick="confirmOrder()">${t('✓ Confirm & Create Order')}</button>
     </div>`;
 }
 
@@ -685,7 +664,7 @@ async function confirmOrder() {
   if (!pendingOrder) return;
   const btn = document.getElementById('confirmBtn');
   btn.disabled = true;
-  btn.textContent = 'Creating order…';
+  btn.textContent = t('Creating order…');
 
   const confirmMsg = { role: 'user', content: '__CONFIRM_ORDER__' };
   messages.push(confirmMsg);
@@ -701,8 +680,8 @@ async function confirmOrder() {
 
     if (!res.ok || data.error) {
       btn.disabled = false;
-      btn.textContent = '✓ Confirm & Create Order';
-      alert(`Error creating order: ${data.error || 'Unknown error'}`);
+      btn.textContent = t('✓ Confirm & Create Order');
+      alert(t('Error creating order: {0}').replace('{0}', data.error || 'Unknown error'));
       return;
     }
 
@@ -712,8 +691,8 @@ async function confirmOrder() {
     }
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = '✓ Confirm & Create Order';
-    alert(`Network error: ${e.message}`);
+    btn.textContent = t('✓ Confirm & Create Order');
+    alert(t('Network error: {0}').replace('{0}', e.message));
   }
 }
 
@@ -721,7 +700,7 @@ function cancelOrder() {
   pendingOrder = null;
   document.getElementById('confirmPanel').classList.add('hidden');
   document.getElementById('chatPanel').classList.remove('hidden');
-  appendMessage('assistant', 'Order cancelled. How would you like to adjust it?');
+  appendMessage('assistant', t('Order cancelled. How would you like to adjust it?'));
 }
 
 function showSuccessBanner(orderNo) {
@@ -730,17 +709,17 @@ function showSuccessBanner(orderNo) {
   document.getElementById('chatPanel').classList.add('hidden');
   panel.innerHTML = `
     <div>
-      <div class="cp-title">Order Created</div>
-      <div class="cp-sub">Your sales order has been created in Business Central</div>
+      <div class="cp-title">${t('Order Created')}</div>
+      <div class="cp-sub">${t('Your sales order has been created in Business Central')}</div>
     </div>
     <div class="success-banner">
       <div>
-        <div class="msg-text">Sales Order created successfully</div>
+        <div class="msg-text">${t('Sales Order created successfully')}</div>
         <div class="order-no">${esc(orderNo)}</div>
       </div>
     </div>
     <div class="confirm-actions">
-      <button class="confirm-btn ok" onclick="startNew()">Start New Order</button>
+      <button class="confirm-btn ok" onclick="startNew()">${t('Start New Order')}</button>
     </div>`;
 }
 
@@ -749,9 +728,10 @@ function startNew() {
   pendingOrder = null;
   document.getElementById('confirmPanel').classList.add('hidden');
   document.getElementById('chatPanel').classList.remove('hidden');
+  const welcomeText = t('Ready for a new order. What would you like to order?');
   document.getElementById('chatHistory').innerHTML = `
     <div class="msg assistant">
-      <div class="msg-bubble">Ready for a new order. What would you like to order?</div>
+      <div class="msg-bubble">${esc(welcomeText)}</div>
     </div>`;
 }
 
@@ -759,6 +739,13 @@ function startNew() {
 (function(){
   if(!bcSettingsReady()){ location.href='index.html'; return; }
   loadSettings();
+  // Restore saved language selection
+  const savedLcid = localStorage.getItem('bc_portal_lcid');
+  if (savedLcid && document.getElementById('cfgLcid')) {
+    document.getElementById('cfgLcid').value = savedLcid;
+  }
+  // Load translations then apply them
+  loadUiTranslations().then(applyUiTranslations);
   // Auto-collapse key panel if key is already saved
   if (localStorage.getItem('sa_claude_key')) {
     document.getElementById('settingsPanel').classList.add('hidden');
