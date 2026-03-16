@@ -147,6 +147,8 @@ textarea{resize:vertical;min-height:68px;line-height:1.5}
 .hist-item{display:flex;flex-direction:column;gap:2px;padding:8px 13px;cursor:pointer;border-left:2px solid transparent;transition:all .15s;border-bottom:1px solid rgba(255,255,255,.03)}.hist-item:hover{background:var(--bg3);border-left-color:var(--border2)}.hist-item.active{background:var(--bg4);border-left-color:var(--accent)}
 .hist-row1{display:flex;align-items:center;gap:5px}.hist-type{font-size:10px;color:var(--text);font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hist-ep{font-size:7.5px;padding:2px 5px;font-weight:700;letter-spacing:.5px;flex-shrink:0}.hist-ep.ep-t{background:rgba(0,212,255,.1);color:var(--accent)}.hist-ep.ep-q{background:rgba(255,140,66,.12);color:var(--orange)}
 .hist-time{font-size:9px;color:var(--text3)}.hist-subj{font-size:9.5px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hist-sources{display:flex;flex-wrap:wrap;gap:4px;padding:6px 9px;border-bottom:1px solid var(--border);background:var(--bg3)}
+.src-pill{background:none;border:1px solid var(--border2);color:var(--text3);font-family:inherit;font-size:8px;padding:2px 7px;cursor:pointer;transition:all .15s;letter-spacing:.5px;text-overflow:ellipsis;overflow:hidden;max-width:100%}.src-pill:hover{border-color:var(--accent2);color:var(--text2)}.src-pill.active{background:rgba(0,212,255,.1);border-color:var(--accent);color:var(--accent)}
 </style>
 </head>
 <body>
@@ -245,6 +247,7 @@ let currentPage = 0;let lastQueueId = null;const PAGE_SIZE = 50;
 const docsCache = {};
 let historyItems = [];
 let historyLoaded = false;
+let historySourceFilter = null;
 
 // ── NETWORK ───────────────────────────────────────────────────────────────────
 function g(id){ return (document.getElementById(id)||{}).value||''; }
@@ -796,6 +799,7 @@ async function loadHistory(){
     const res = await ceHistory();
     historyItems = res.items || [];
     historyLoaded = true;
+    historySourceFilter = null;
     renderHistoryList();
   } catch(e){
     historyLoaded = false;
@@ -809,9 +813,33 @@ function renderHistoryList(){
     cont.innerHTML = `<div class="hist-hdr">No history<button class="hist-hdr-btn" onclick="loadHistory()">↺ Refresh</button></div><div class="sb-empty">No tasks or queues found.<br>Send a request first, then refresh.</div>`;
     return;
   }
-  let html = `<div class="hist-hdr">${historyItems.length} recent<button class="hist-hdr-btn" onclick="loadHistory()">↺ Refresh</button></div>`;
+
+  // Distinct sources, sorted by frequency
+  const srcCount = {};
+  for(const item of historyItems){ const s=item.source||''; if(s) srcCount[s]=(srcCount[s]||0)+1; }
+  const sources = Object.keys(srcCount).sort((a,b)=>srcCount[b]-srcCount[a]);
+
+  // Apply filter
+  const filtered = historySourceFilter
+    ? historyItems.filter(i=>i.source===historySourceFilter)
+    : historyItems;
+
+  let html = `<div class="hist-hdr">${filtered.length}${historySourceFilter?' filtered':' recent'}<button class="hist-hdr-btn" onclick="loadHistory()">↺ Refresh</button></div>`;
+
+  // Source pills (only if >1 distinct source)
+  if(sources.length > 1){
+    html += `<div class="hist-sources">`;
+    html += `<button class="src-pill${!historySourceFilter?' active':''}" onclick="filterHistorySource(null)" title="All sources">All (${historyItems.length})</button>`;
+    for(const s of sources){
+      const active = historySourceFilter===s;
+      html += `<button class="src-pill${active?' active':''}" onclick="filterHistorySource(${eA(s)})" title="${esc(s)}">${esc(s)} (${srcCount[s]})</button>`;
+    }
+    html += `</div>`;
+  }
+
   for(let i=0; i<historyItems.length; i++){
     const item = historyItems[i];
+    if(historySourceFilter && item.source!==historySourceFilter) continue;
     const isQ  = item._endpoint==='queues';
     html += `<div class="hist-item" id="hi-${i}" onclick="openHistoryItem(${i})">
       <div class="hist-row1">
@@ -823,6 +851,11 @@ function renderHistoryList(){
     </div>`;
   }
   cont.innerHTML = html;
+}
+
+function filterHistorySource(src){
+  historySourceFilter = src;
+  renderHistoryList();
 }
 
 function fmtTime(isoStr){
