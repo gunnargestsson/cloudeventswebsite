@@ -800,6 +800,8 @@ let customerCredit = null;
 let itemPrices = {};       // keyed by item.id; value = best priceListLine — always fetched fresh on interaction
 let itemPictures = {};     // keyed by item.id; value = Media array or null once loaded, undefined = not yet fetched
 let selectedLcid = 1033;
+// Restore last-used LCID from shared localStorage settings
+{ const _saved = parseInt(localStorage.getItem('bc_portal_lcid') || '1033', 10); if (_saved) selectedLcid = _saved; }
 let allLanguages = [];     // All languages from Language table for customer dropdown
 
 // Field metadata cache — keyed by "companyId:lcid:tableName"
@@ -1054,6 +1056,7 @@ async function loadAllLanguages() {
 
 async function onLangChange(value) {
   selectedLcid = parseInt(value, 10);
+  localStorage.setItem('bc_portal_lcid', String(selectedLcid));  // sync for explorer pages
   await loadUiTranslations();
   applyUiTranslations();
   const detail = document.getElementById('view-detail');
@@ -1184,6 +1187,9 @@ async function selectCompany(id) {
   fieldMetaCache = {};        // new company — discard all cached field metadata
   blockedEnumCaptions = {};
   uiTranslations = {};
+  // Sync selected company to shared localStorage settings so explorer pages can reuse it
+  localStorage.setItem('bc_portal_company_id',   selectedCompany.id);
+  localStorage.setItem('bc_portal_company_name', selectedCompany.displayName || selectedCompany.name || '');
   const name = selectedCompany.displayName || selectedCompany.name;
   document.getElementById('crumb-company').textContent = name;
   document.getElementById('crumb-company2').textContent = name;

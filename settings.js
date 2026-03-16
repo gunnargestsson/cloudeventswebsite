@@ -1,0 +1,105 @@
+// settings.js — Shared BC Portal connection settings
+// Persists credentials in localStorage under bc_portal_* keys.
+// Loaded by: bc-metadata-explorer.html, bc-cloud-events-explorer.html, sales-assistant.html
+"use strict";
+
+const _PFX  = 'bc_portal_';
+const _KEYS = {
+  tenant:       'tenant',
+  env:          'env',
+  clientId:     'client_id',
+  clientSecret: 'client_secret',
+  companyId:    'company_id',
+  companyName:  'company_name',
+  lcid:         'lcid',
+};
+
+function bcSettingsLoad() {
+  const out = {};
+  for (const [prop, key] of Object.entries(_KEYS))
+    out[prop] = localStorage.getItem(_PFX + key) || '';
+  return out;
+}
+
+function bcSettingsSave(obj) {
+  for (const [prop, key] of Object.entries(_KEYS))
+    if (obj[prop] !== undefined) localStorage.setItem(_PFX + key, String(obj[prop]));
+}
+
+function bcSettingsClear() {
+  for (const key of Object.values(_KEYS))
+    localStorage.removeItem(_PFX + key);
+}
+
+function bcSettingsReady() {
+  const s = bcSettingsLoad();
+  return !!(s.tenant && s.env && s.clientId && s.clientSecret && s.companyId);
+}
+
+function bcSettingsHeaders() {
+  const s = bcSettingsLoad();
+  if (!s.tenant || !s.env || !s.clientId || !s.clientSecret || !s.companyId) return null;
+  return {
+    'x-bc-tenant':        s.tenant,
+    'x-bc-client-id':     s.clientId,
+    'x-bc-client-secret': s.clientSecret,
+    'x-bc-environment':   s.env,
+    'x-bc-company':       s.companyId,
+  };
+}
+
+// ── Translation ───────────────────────────────────────────────────────────────
+let _uiTranslations = {};
+
+function t(s) { return _uiTranslations[s] || s; }
+
+function applyUiTranslations() {
+  document.querySelectorAll('[data-t]').forEach(el  => { el.textContent = t(el.dataset.t); });
+  document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
+}
+
+async function bcLoadTranslations(companyId, lcid, uiStrings, headers) {
+  _uiTranslations = {};
+  if (!lcid || lcid === 1033) return;  // English — no fetch needed
+  try {
+    const res = await fetch('/api/explorer', {
+      method: 'POST',
+      headers: { ...headers, 'x-bc-endpoint': 'tasks', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        specversion: '1.0', type: 'Data.Records.Get', source: 'BC Portal',
+        subject: 'Cloud Event Translation',
+        data: JSON.stringify({
+          tableView: `WHERE(Windows Language ID=CONST(${lcid}),Source=CONST(BC Portal))`,
+          take: uiStrings.length + 50,
+        }),
+      }),
+    }).then(r => r.json());
+
+    const rows = res.result || [];
+    for (const rec of rows) {
+      const src = (rec.primaryKey || {}).SourceText;
+      const tgt = (rec.fields    || {}).TargetText;
+      if (src && tgt) _uiTranslations[src] = tgt;
+    }
+
+    // Auto-create placeholder records for strings not yet in the translation table
+    const existing = new Set(rows.map(r => (r.primaryKey || {}).SourceText));
+    const missing  = uiStrings.filter(s => !existing.has(s));
+    if (missing.length) {
+      await fetch('/api/explorer', {
+        method: 'POST',
+        headers: { ...headers, 'x-bc-endpoint': 'tasks', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          specversion: '1.0', type: 'Data.Records.Set', source: 'BC Portal',
+          subject: 'Cloud Event Translation',
+          data: JSON.stringify({
+            data: missing.map(s => ({
+              primaryKey: { Source: 'BC Portal', WindowsLanguageID: String(lcid), SourceText: s },
+              fields:     { TargetText: '' },
+            })),
+          }),
+        }),
+      });
+    }
+  } catch (_) { /* silently fall back to English on any error */ }
+}

@@ -150,7 +150,10 @@ textarea{resize:vertical;min-height:68px;line-height:1.5}
 .hist-time{font-size:9px;color:var(--text3)}.hist-subj{font-size:9.5px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hist-sources{display:flex;flex-wrap:wrap;gap:4px;padding:6px 9px;border-bottom:1px solid var(--border);background:var(--bg3)}
 .src-pill{background:none;border:1px solid var(--border2);color:var(--text3);font-family:inherit;font-size:8px;padding:2px 7px;cursor:pointer;transition:all .15s;letter-spacing:.5px;text-overflow:ellipsis;overflow:hidden;max-width:100%}.src-pill:hover{border-color:var(--accent2);color:var(--text2)}.src-pill.active{background:rgba(0,212,255,.1);border-color:var(--accent);color:var(--accent)}
+/* SETTINGS PANEL */
+.settings-sum{display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--text2);font-weight:600;padding:12px 14px;border-bottom:1px solid var(--border);user-select:none}.settings-sum::-webkit-details-marker{display:none}details[open] .settings-sum{color:var(--accent);border-bottom-color:var(--border2)}.settings-body{padding:12px 14px;display:flex;flex-direction:column;gap:9px}
 </style>
+<script src="settings.js"></script>
 </head>
 <body>
 <header>
@@ -168,13 +171,30 @@ textarea{resize:vertical;min-height:68px;line-height:1.5}
 <div class="app">
   <!-- SIDEBAR -->
   <aside class="sb">
-    <div class="sb-cfg">
-      <div><div class="lbl">Tenant</div><input class="ci" id="cfgTenant" placeholder="dynamics.is"></div>
-      <div><div class="lbl">Environment</div><input class="ci" id="cfgEnv" placeholder="UAT"></div>
-      <div><div class="lbl">Company GUID</div><input class="ci" id="cfgCompany" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
-      <div><div class="lbl">Client ID</div><input class="ci" id="cfgClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
-      <div><div class="lbl">Client Secret</div><input class="ci" id="cfgClientSecret" type="password" placeholder="your-client-secret"></div>
-      <button class="btn-conn" id="connBtn" onclick="connectAndLoad()">Connect &amp; Load Types</button>
+    <div class="sb-cfg" style="padding:0;gap:0">
+      <details id="settingsPanel" open>
+        <summary class="settings-sum"><span data-t="⚙ Connection">⚙ Connection</span></summary>
+        <div class="settings-body">
+          <div><div class="lbl" data-t="Tenant">Tenant</div><input class="ci" id="cfgTenant" placeholder="dynamics.is" oninput="onSettingInput()"></div>
+          <div><div class="lbl" data-t="Environment">Environment</div><input class="ci" id="cfgEnv" placeholder="UAT" oninput="onSettingInput()"></div>
+          <div><div class="lbl" data-t="Client ID">Client ID</div><input class="ci" id="cfgClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" oninput="onSettingInput()"></div>
+          <div><div class="lbl" data-t="Client Secret">Client Secret</div><input class="ci" id="cfgClientSecret" type="password" placeholder="your-client-secret" oninput="onSettingInput()"></div>
+          <div style="display:flex;gap:6px;align-items:flex-end">
+            <div style="flex:1"><div class="lbl" data-t="Company">Company</div><select class="ci" id="cfgCompany" onchange="onCompanySelect()"><option value="">— load companies —</option></select></div>
+            <button class="btn-conn" onclick="loadSettingsCompanies()" style="height:28px;padding:0 9px;width:auto;font-size:9px;flex-shrink:0" data-t="Load">Load</button>
+          </div>
+          <div><div class="lbl" data-t="Language">Language</div>
+            <select class="ci" id="cfgLcid" onchange="onLcidSelect()">
+              <option value="1033">English</option>
+            </select>
+          </div>
+          <div id="settingsStatus" style="font-size:9px;color:var(--text3);min-height:12px"></div>
+          <div style="display:flex;gap:6px">
+            <button class="btn-conn" id="connBtn" onclick="connectAndLoad()" style="flex:1" data-t="Connect &amp; Load Types">Connect &amp; Load Types</button>
+            <button class="btn-conn" onclick="bcSettingsClear();location.reload()" style="width:auto;padding:0 9px;background:var(--bg3);color:var(--text3);font-size:9px" data-t="Clear">Clear</button>
+          </div>
+        </div>
+      </details>
     </div>
     <div class="sb-tab-bar">
       <button class="sb-tab-btn active" id="sbTabTypes" onclick="switchSbTab('types')">Types</button>
@@ -1093,6 +1113,9 @@ function mdToHtml(md){
 document.addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&e.key==='Enter'&&currentType&&!document.getElementById('sendBtn').disabled) sendReq();
 });
+
+// ── INIT ─────────────────────────────────────────────────────────────────────
+initSettings();
 </script>
 </body>
 </html>

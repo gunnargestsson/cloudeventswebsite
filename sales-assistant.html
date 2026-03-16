@@ -133,7 +133,10 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
 /* ── MARKDOWN-ish rendering in chat ── */
 .msg-bubble strong{color:#fff;font-weight:700}
 .msg-bubble code{background:var(--bg4);padding:1px 5px;font-size:10px;font-family:inherit}
+/* SETTINGS PANEL */
+.settings-sum{display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--text2);font-weight:600;padding:11px 16px;border-bottom:1px solid var(--border);user-select:none}.settings-sum::-webkit-details-marker{display:none}details[open] .settings-sum{color:var(--accent);border-bottom-color:var(--border2)}.sp-details-body{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
 </style>
+<script src="settings.js"></script>
 </head>
 <body>
 
@@ -156,7 +159,7 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
   <aside class="settings-panel" id="settingsPanel">
     <div class="sp-head">
       <div class="sp-title">Configuration</div>
-      <div class="sp-sub">Credentials are stored for this session only</div>
+      <div class="sp-sub">Credentials stored in localStorage</div>
     </div>
     <div class="sp-body">
 
@@ -165,7 +168,7 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
         <div>
           <div class="lbl">API Key</div>
           <input class="ci" type="password" id="cfgClaudeKey" placeholder="sk-ant-…" autocomplete="off">
-          <div class="key-note">Stored in sessionStorage only — cleared when tab closes</div>
+          <div class="key-note">Stored in localStorage — persists across sessions</div>
         </div>
       </div>
 
@@ -173,24 +176,36 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
         <div class="sp-section-title">Business Central</div>
         <div>
           <div class="lbl">Tenant</div>
-          <input class="ci" id="cfgTenant" placeholder="dynamics.is" value="dynamics.is">
+          <input class="ci" id="cfgTenant" placeholder="dynamics.is" oninput="onSettingInput()">
         </div>
         <div>
           <div class="lbl">Environment</div>
-          <input class="ci" id="cfgEnv" placeholder="Production" value="Production">
-        </div>
-        <div>
-          <div class="lbl">Company GUID</div>
-          <input class="ci" id="cfgCompany" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          <input class="ci" id="cfgEnv" placeholder="Production" oninput="onSettingInput()">
         </div>
         <div>
           <div class="lbl">Client ID</div>
-          <input class="ci" id="cfgClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          <input class="ci" id="cfgClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" oninput="onSettingInput()">
         </div>
         <div>
           <div class="lbl">Client Secret</div>
-          <input class="ci" type="password" id="cfgClientSecret" placeholder="your-client-secret" autocomplete="off">
+          <input class="ci" type="password" id="cfgClientSecret" placeholder="your-client-secret" autocomplete="off" oninput="onSettingInput()">
         </div>
+        <div>
+          <div style="display:flex;gap:6px;align-items:flex-end">
+            <div style="flex:1">
+              <div class="lbl">Company</div>
+              <select class="ci" id="cfgCompany" onchange="onCompanySelect()"><option value="">— load companies —</option></select>
+            </div>
+            <button class="save-btn" onclick="loadSettingsCompanies()" style="width:auto;padding:5px 11px;flex-shrink:0">Load</button>
+          </div>
+        </div>
+        <div>
+          <div class="lbl">Language</div>
+          <select class="ci" id="cfgLcid" onchange="onLcidSelect()">
+            <option value="1033">English</option>
+          </select>
+        </div>
+        <div id="settingsStatus" style="font-size:9px;color:var(--text3);min-height:12px"></div>
       </div>
 
       <div>
@@ -242,28 +257,92 @@ let pendingOrder = null;    // proposed order waiting for user confirmation
 let isBusy       = false;
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
+const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',1036:'French',1034:'Spanish',1043:'Dutch',1053:'Swedish',1044:'Norwegian'};
+
 function loadSettings() {
-  const s = sessionStorage;
-  const set = (id, key) => { const v = s.getItem(key); if (v) document.getElementById(id).value = v; };
-  set('cfgClaudeKey',    'sa_claude_key');
-  set('cfgTenant',       'sa_bc_tenant');
-  set('cfgEnv',          'sa_bc_env');
-  set('cfgCompany',      'sa_bc_company');
-  set('cfgClientId',     'sa_bc_client_id');
-  set('cfgClientSecret', 'sa_bc_client_secret');
+  const s = bcSettingsLoad();
+  if (s.tenant)       document.getElementById('cfgTenant').value       = s.tenant;
+  if (s.env)          document.getElementById('cfgEnv').value          = s.env;
+  if (s.clientId)     document.getElementById('cfgClientId').value     = s.clientId;
+  if (s.clientSecret) document.getElementById('cfgClientSecret').value = s.clientSecret;
+  const claudeKey = localStorage.getItem('sa_claude_key');
+  if (claudeKey)      document.getElementById('cfgClaudeKey').value    = claudeKey;
+  if (s.companyId && s.companyName) {
+    const sel = document.getElementById('cfgCompany');
+    sel.innerHTML = `<option value="${s.companyId}">${s.companyName}</option>`;
+  }
+  const lcidSel = document.getElementById('cfgLcid');
+  if (s.lcid) {
+    let opt = lcidSel.querySelector(`option[value="${s.lcid}"]`);
+    if (!opt) { opt = document.createElement('option'); opt.value = s.lcid; opt.textContent = LCID_NAMES[parseInt(s.lcid,10)] || s.lcid; lcidSel.appendChild(opt); }
+    lcidSel.value = s.lcid;
+  }
 }
 
 function saveSettings() {
-  const s = sessionStorage;
-  s.setItem('sa_claude_key',       document.getElementById('cfgClaudeKey').value.trim());
-  s.setItem('sa_bc_tenant',        document.getElementById('cfgTenant').value.trim());
-  s.setItem('sa_bc_env',           document.getElementById('cfgEnv').value.trim());
-  s.setItem('sa_bc_company',       document.getElementById('cfgCompany').value.trim());
-  s.setItem('sa_bc_client_id',     document.getElementById('cfgClientId').value.trim());
-  s.setItem('sa_bc_client_secret', document.getElementById('cfgClientSecret').value.trim());
+  bcSettingsSave({
+    tenant:       document.getElementById('cfgTenant').value.trim(),
+    env:          document.getElementById('cfgEnv').value.trim(),
+    clientId:     document.getElementById('cfgClientId').value.trim(),
+    clientSecret: document.getElementById('cfgClientSecret').value.trim(),
+  });
+  const claudeVal = document.getElementById('cfgClaudeKey').value.trim();
+  if (claudeVal) localStorage.setItem('sa_claude_key', claudeVal);
   const ok = document.getElementById('saveOk');
   ok.classList.remove('hidden');
   setTimeout(() => ok.classList.add('hidden'), 2500);
+}
+
+function onSettingInput() {
+  bcSettingsSave({
+    tenant:       document.getElementById('cfgTenant').value.trim(),
+    env:          document.getElementById('cfgEnv').value.trim(),
+    clientId:     document.getElementById('cfgClientId').value.trim(),
+    clientSecret: document.getElementById('cfgClientSecret').value.trim(),
+  });
+}
+
+async function loadSettingsCompanies() {
+  const s = bcSettingsLoad();
+  if (!s.tenant || !s.env || !s.clientId || !s.clientSecret) {
+    document.getElementById('settingsStatus').textContent = 'Fill in tenant, env, client ID, and secret first.';
+    return;
+  }
+  document.getElementById('settingsStatus').textContent = 'Loading companies…';
+  try {
+    const res = await fetch('/api/companies', {
+      headers: {
+        'x-bc-tenant':        s.tenant,
+        'x-bc-client-id':     s.clientId,
+        'x-bc-client-secret': s.clientSecret,
+        'x-bc-environment':   s.env,
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const companies = data.companies || [];
+    const sel = document.getElementById('cfgCompany');
+    const prevId = bcSettingsLoad().companyId;
+    sel.innerHTML = `<option value="">— select a company —</option>` +
+      companies.map(c => `<option value="${c.id}"${c.id === prevId ? ' selected' : ''}>${c.name}</option>`).join('');
+    if (!prevId && companies.length === 1) { sel.value = companies[0].id; onCompanySelect(); }
+    document.getElementById('settingsStatus').textContent = `${companies.length} companies loaded`;
+  } catch (e) {
+    document.getElementById('settingsStatus').textContent = `Error: ${e.message}`;
+  }
+}
+
+function onCompanySelect() {
+  const sel = document.getElementById('cfgCompany');
+  const companyId   = sel.value;
+  const companyName = sel.options[sel.selectedIndex]?.text || '';
+  bcSettingsSave({ companyId, companyName });
+  document.getElementById('settingsStatus').textContent = companyId ? `Company: ${companyName}` : '';
+}
+
+function onLcidSelect() {
+  const lcid = parseInt(document.getElementById('cfgLcid')?.value || '1033', 10);
+  bcSettingsSave({ lcid });
 }
 
 function toggleSettings() {
