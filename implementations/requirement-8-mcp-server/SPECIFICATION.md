@@ -522,6 +522,9 @@ capabilities: { tools: {}, resources: {} },
 | `describe_table` | `table` (required), `lcid` | Full field schema as a structured prompt |
 | `find_tables_for_entity` | `entity` (required) | Filters the table list to match a business concept |
 | `data_model_overview` | — | Groups all tables by functional namespace |
+| `sales_order_creation_workflow` | `lcid` (optional) | 3-step sales order creation recipe with live Sales Header / Sales Line field names |
+| `customer_lookup_pattern` | — | Customer lookup guide with live Customer field table for this BC instance |
+| `item_lookup_pattern` | — | Item lookup guide with live Item field table for this BC instance |
 
 **Implementation — add to `handleMessage()` switch:**
 ```js
@@ -548,6 +551,23 @@ case "prompts/list":
           description: "Provides a high-level overview of BC tables grouped by namespace.",
           arguments: [],
         },
+        {
+          name: "sales_order_creation_workflow",
+          description: "Returns a step-by-step sales order creation recipe pre-populated with the live Sales Header and Sales Line field names for this BC instance.",
+          arguments: [
+            { name: "lcid", description: "Language LCID for field captions (default 1033)", required: false },
+          ],
+        },
+        {
+          name: "customer_lookup_pattern",
+          description: "Returns a customer lookup guide with the complete live Customer field table for this BC instance.",
+          arguments: [],
+        },
+        {
+          name: "item_lookup_pattern",
+          description: "Returns an item lookup guide with the complete live Item field table for this BC instance.",
+          arguments: [],
+        },
       ],
     },
   };
@@ -570,6 +590,49 @@ case "prompts/get": {
       (groups[ns] = groups[ns] || []).push(t.name);
     }
     text = "## BC Data Model Overview\n\n" + Object.entries(groups).map(([ns, names]) => `### ${ns}\n${names.join(", ")}`).join("\n\n");
+  } else if (promptName === "sales_order_creation_workflow") {
+    const lcid = Number(promptArgs.lcid) || 1033;
+    const [headerData, lineData] = await Promise.all([
+      toolGetTableFields({ table: "Sales Header", lcid, format: "markdown" }),
+      toolGetTableFields({ table: "Sales Line",   lcid, format: "markdown" }),
+    ]);
+    text = `## Sales Order Creation Workflow\n\n` +
+      `Company: **${headerData.company}**\n\n` +
+      `This requires three \`Data.Records.Set\` calls via the Cloud Events API.\n\n` +
+      `### Step 1 — Create the Sales Header\n` +
+      `Send \`Data.Records.Set\` with \`tableName: "Sales Header"\` and \`mode: "insert"\`.\n` +
+      `Key fields: \`sellToCustomerNo\` (customer No.), \`orderDate\`, \`documentType\` = \`"Order"\`.\n\n` +
+      `**All Sales Header fields (${headerData.company}):**\n${headerData.markdown}\n\n` +
+      `### Step 2 — Read back the assigned No.\n` +
+      `The response record contains the full header. Read \`fields.no\` — this is the document number used in steps 3+.\n\n` +
+      `### Step 3 — Create Sales Lines\n` +
+      `For each product line, send \`Data.Records.Set\` with \`tableName: "Sales Line"\`, \`mode: "insert"\`.\n` +
+      `Key fields: \`documentType\` = \`"Order"\`, \`documentNo\` (from step 2), \`lineNo\` (10000, 20000, …), \`type\` = \`"Item"\`, \`no\` (item No.), \`quantity\`.\n\n` +
+      `**All Sales Line fields (${headerData.company}):**\n${lineData.markdown}`;
+  } else if (promptName === "customer_lookup_pattern") {
+    const data = await toolGetTableFields({ table: "Customer", format: "markdown" });
+    text = `## Customer Lookup Pattern\n\n` +
+      `Company: **${data.company}**\n\n` +
+      `Use \`Data.Records.Get\` with \`tableName: "Customer"\`.\n\n` +
+      `**tableView filter examples:**\n` +
+      `- By No. (exact): \`WHERE(No.=FILTER(C00001))\`\n` +
+      `- By name (wildcard): \`WHERE(Name=FILTER(*Cannon*))\`\n` +
+      `- Either: \`WHERE(No.=FILTER(C*)|Name=FILTER(*Cannon*))\`\n` +
+      `- Unblocked only: \`WHERE(Blocked=CONST( ))\`\n\n` +
+      `To limit fields returned, pass a \`fieldNumbers\` array (e.g. \`[1,2,5,8,23,35]\` for No., Name, Address, Phone, Contact, Country).\n\n` +
+      `**All Customer fields in this BC instance:**\n${data.markdown}`;
+  } else if (promptName === "item_lookup_pattern") {
+    const data = await toolGetTableFields({ table: "Item", format: "markdown" });
+    text = `## Item Lookup Pattern\n\n` +
+      `Company: **${data.company}**\n\n` +
+      `Use \`Data.Records.Get\` with \`tableName: "Item"\`.\n\n` +
+      `**tableView filter examples:**\n` +
+      `- By No. (exact): \`WHERE(No.=FILTER(70000))\`\n` +
+      `- By description (wildcard): \`WHERE(Description=FILTER(*chair*))\`\n` +
+      `- Either: \`WHERE(No.=FILTER(7*)|Description=FILTER(*chair*))\`\n` +
+      `- In stock only: \`WHERE(Inventory=FILTER(>0))\`\n\n` +
+      `To limit fields returned, pass \`fieldNumbers\` (e.g. \`[1,3,8,18,21,54]\` for No., Description, Base Unit of Measure, Unit Price, Inventory, Blocked).\n\n` +
+      `**All Item fields in this BC instance:**\n${data.markdown}`;
   } else {
     return { jsonrpc: "2.0", id, error: { code: -32602, message: `Unknown prompt: ${promptName}` } };
   }
@@ -729,6 +792,14 @@ async function getCompany() {
     "get_records",
     "search_customers",
     "search_items"
+  ],
+  "prompts": [
+    "describe_table",
+    "find_tables_for_entity",
+    "data_model_overview",
+    "sales_order_creation_workflow",
+    "customer_lookup_pattern",
+    "item_lookup_pattern"
   ]
 }
 ```
@@ -750,7 +821,7 @@ async function getCompany() {
 | 🟡 Medium | §7 — filter/paging on `list_tables` | ~30 min |
 | 🟢 Low | §8 — markdown output format | ~1 h |
 | 🟢 Low | §9 — MCP Resources | ~2 h |
-| 🟢 Low | §10 — MCP Prompts | ~1 h |
+| 🟢 Low | §10 — MCP Prompts (`describe_table`, `find_tables_for_entity`, `data_model_overview`, `sales_order_creation_workflow`, `customer_lookup_pattern`, `item_lookup_pattern`) | ~2 h |
 | 🟢 Low | §11a — API key auth | ~1 h |
 | 🟢 Low | §12 — token/company cache hardening | ~30 min |
 | 🟢 Low | §13 — well-known document update | ~15 min |
