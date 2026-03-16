@@ -791,7 +791,9 @@ async function getCompany() {
     "list_message_types",
     "get_records",
     "search_customers",
-    "search_items"
+    "search_items",
+    "list_translations",
+    "set_translations"
   ],
   "prompts": [
     "describe_table",
@@ -803,6 +805,188 @@ async function getCompany() {
   ]
 }
 ```
+
+---
+
+### 14. Translation tools: `list_translations` and `set_translations`
+**Status:** ❌ Not Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Background:** Business Central stores UI translations in a table called **Cloud Event Translation**
+with a three-field primary key:
+
+| Primary key field | Value |
+|---|---|
+| `Source` | Application name that owns the string (e.g. `"BC Portal"`) |
+| `WindowsLanguageID` | LCID as a string (e.g. `"1039"` for Icelandic) |
+| `SourceText` | The English source string |
+
+A single non-key field `TargetText` holds the translation. Records with a blank `TargetText`
+are placeholder rows that exist in BC but have not been translated yet.
+
+---
+
+#### `list_translations`
+
+**Description:** Returns all translation records for a given source application and language.
+Pass `missingOnly: true` to return only records where `TargetText` is blank — the rows an AI
+assistant should fill in.
+
+**Implementation — add tool function:**
+```js
+async function toolListTranslations({ source, lcid, missingOnly = false } = {}) {
+  if (!source) throw new Error("Parameter 'source' is required");
+  if (!lcid)   throw new Error("Parameter 'lcid' is required");
+
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const company  = await getCompany();
+
+  const tableView = `WHERE(Windows Language ID=CONST(${Number(lcid)}),Source=CONST(${source}))`;
+  const result = await bcTask(tenantId, env, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Get",
+    source:      "BC Metadata MCP v1.0",
+    subject:     "Cloud Event Translation",
+    data:        JSON.stringify({ tableView, take: 500 }),
+  });
+
+  let records = (result.result || []).map(r => ({
+    sourceText: (r.primaryKey || {}).SourceText || "",
+    targetText: (r.fields    || {}).TargetText  || "",
+  }));
+
+  if (missingOnly) records = records.filter(r => !r.targetText.trim());
+
+  return {
+    company:     company.name,
+    source,
+    lcid:        Number(lcid),
+    total:       records.length,
+    missing:     records.filter(r => !r.targetText.trim()).length,
+    translations: records,
+  };
+}
+```
+
+**Add to `TOOLS` array:**
+```js
+{
+  name:        "list_translations",
+  description: "Lists Cloud Event Translation records for a given source application and language LCID. Pass missingOnly=true to return only untranslated (blank) entries.",
+  inputSchema: {
+    type:       "object",
+    properties: {
+      source:      { type: "string",  description: "Translation source name (e.g. 'BC Portal')." },
+      lcid:        { type: "integer", description: "Windows Language ID / LCID (e.g. 1039 for Icelandic, 1030 for Danish)." },
+      missingOnly: { type: "boolean", description: "When true, returns only records where TargetText is blank (default false)." },
+    },
+    required: ["source", "lcid"],
+  },
+},
+```
+
+**Returns:**
+```jsonc
+{
+  "company": "CRONUS",
+  "source": "BC Portal",
+  "lcid": 1039,
+  "total": 42,
+  "missing": 5,
+  "translations": [
+    { "sourceText": "Customers",  "targetText": "Viðskiptamenn" },
+    { "sourceText": "Loading...", "targetText": "" }
+  ]
+}
+```
+
+---
+
+#### `set_translations`
+
+**Description:** Creates or updates translation records in the Cloud Event Translation table.
+Each item in the `translations` array is an `{sourceText, targetText}` pair. Uses
+`Data.Records.Set` with the full primary key — BC treats this as an upsert: insert if the
+record does not exist, modify if it does.
+
+**Implementation — add tool function:**
+```js
+async function toolSetTranslations({ source, lcid, translations } = {}) {
+  if (!source)       throw new Error("Parameter 'source' is required");
+  if (!lcid)         throw new Error("Parameter 'lcid' is required");
+  if (!Array.isArray(translations) || !translations.length)
+    throw new Error("Parameter 'translations' must be a non-empty array");
+
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const company  = await getCompany();
+
+  const data = translations.map(t => ({
+    primaryKey: {
+      Source:            source,
+      WindowsLanguageID: String(Number(lcid)),
+      SourceText:        String(t.sourceText),
+    },
+    fields: { TargetText: String(t.targetText || "") },
+  }));
+
+  await bcTask(tenantId, env, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Set",
+    source:      "BC Metadata MCP v1.0",
+    subject:     "Cloud Event Translation",
+    data:        JSON.stringify({ data }),
+  });
+
+  return { company: company.name, source, lcid: Number(lcid), written: translations.length };
+}
+```
+
+**Add to `TOOLS` array:**
+```js
+{
+  name:        "set_translations",
+  description: "Creates or updates Cloud Event Translation records. Each item is a {sourceText, targetText} pair. Uses upsert semantics — inserts new rows and updates existing ones.",
+  inputSchema: {
+    type:       "object",
+    properties: {
+      source:       { type: "string",  description: "Translation source name (e.g. 'BC Portal')." },
+      lcid:         { type: "integer", description: "Windows Language ID / LCID." },
+      translations: {
+        type:  "array",
+        items: {
+          type:       "object",
+          properties: {
+            sourceText: { type: "string", description: "The English source string." },
+            targetText: { type: "string", description: "The translated string." },
+          },
+          required: ["sourceText", "targetText"],
+        },
+        description: "Array of translation pairs to write.",
+      },
+    },
+    required: ["source", "lcid", "translations"],
+  },
+},
+```
+
+**Add to `tools/call` switch:**
+```js
+case "list_translations": content = await toolListTranslations(args); break;
+case "set_translations":  content = await toolSetTranslations(args);  break;
+```
+
+**Returns:**
+```jsonc
+{ "company": "CRONUS", "source": "BC Portal", "lcid": 1039, "written": 5 }
+```
+
+**Typical AI workflow:**
+1. Call `list_translations({ source: "BC Portal", lcid: 1039, missingOnly: true })` to get untranslated strings
+2. Translate each `sourceText` into the target language
+3. Call `set_translations({ source: "BC Portal", lcid: 1039, translations: [{sourceText, targetText}, ...] })` to write them back
 
 ---
 
@@ -825,6 +1009,7 @@ async function getCompany() {
 | 🟢 Low | §11a — API key auth | ~1 h |
 | 🟢 Low | §12 — token/company cache hardening | ~30 min |
 | 🟢 Low | §13 — well-known document update | ~15 min |
+| 🟡 Medium | §14 — translation tools (`list_translations`, `set_translations`) | ~1 h |
 
 ---
 

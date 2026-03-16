@@ -385,6 +385,70 @@ async function toolSearchItems({ query, take = 10 } = {}) {
   return { company: company.name, query, count: records.length, items: records };
 }
 
+async function toolListTranslations({ source, lcid, missingOnly = false } = {}) {
+  if (!source) throw new Error("Parameter 'source' is required");
+  if (!lcid)   throw new Error("Parameter 'lcid' is required");
+
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const company  = await getCompany();
+
+  const tableView = `WHERE(Windows Language ID=CONST(${Number(lcid)}),Source=CONST(${source}))`;
+  const result = await bcTask(tenantId, env, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Get",
+    source:      "BC Metadata MCP v1.0",
+    subject:     "Cloud Event Translation",
+    data:        JSON.stringify({ tableView, take: 500 }),
+  });
+
+  let records = (result.result || []).map(r => ({
+    sourceText: (r.primaryKey || {}).SourceText || "",
+    targetText: (r.fields    || {}).TargetText  || "",
+  }));
+
+  if (missingOnly) records = records.filter(r => !r.targetText.trim());
+
+  return {
+    company:      company.name,
+    source,
+    lcid:         Number(lcid),
+    total:        records.length,
+    missing:      records.filter(r => !r.targetText.trim()).length,
+    translations: records,
+  };
+}
+
+async function toolSetTranslations({ source, lcid, translations } = {}) {
+  if (!source)       throw new Error("Parameter 'source' is required");
+  if (!lcid)         throw new Error("Parameter 'lcid' is required");
+  if (!Array.isArray(translations) || !translations.length)
+    throw new Error("Parameter 'translations' must be a non-empty array");
+
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const company  = await getCompany();
+
+  const data = translations.map(t => ({
+    primaryKey: {
+      Source:            source,
+      WindowsLanguageID: String(Number(lcid)),
+      SourceText:        String(t.sourceText),
+    },
+    fields: { TargetText: String(t.targetText || "") },
+  }));
+
+  await bcTask(tenantId, env, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Set",
+    source:      "BC Metadata MCP v1.0",
+    subject:     "Cloud Event Translation",
+    data:        JSON.stringify({ data }),
+  });
+
+  return { company: company.name, source, lcid: Number(lcid), written: translations.length };
+}
+
 // ── MCP Tool definitions (JSON Schema) ────────────────────────────────────────
 
 const TOOLS = [
@@ -481,6 +545,43 @@ const TOOLS = [
       required: ["query"],
     },
   },
+  {
+    name:        "list_translations",
+    description: "Lists Cloud Event Translation records for a given source application and language LCID. Pass missingOnly=true to return only untranslated (blank) entries.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        source:      { type: "string",  description: "Translation source name (e.g. 'BC Portal')." },
+        lcid:        { type: "integer", description: "Windows Language ID / LCID (e.g. 1039 for Icelandic, 1030 for Danish)." },
+        missingOnly: { type: "boolean", description: "When true, returns only records where TargetText is blank (default false)." },
+      },
+      required: ["source", "lcid"],
+    },
+  },
+  {
+    name:        "set_translations",
+    description: "Creates or updates Cloud Event Translation records. Each item is a {sourceText, targetText} pair. Uses upsert semantics — inserts new rows and updates existing ones.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        source:       { type: "string",  description: "Translation source name (e.g. 'BC Portal')." },
+        lcid:         { type: "integer", description: "Windows Language ID / LCID." },
+        translations: {
+          type:  "array",
+          items: {
+            type:       "object",
+            properties: {
+              sourceText: { type: "string", description: "The English source string." },
+              targetText: { type: "string", description: "The translated string." },
+            },
+            required: ["sourceText", "targetText"],
+          },
+          description: "Array of translation pairs to write.",
+        },
+      },
+      required: ["source", "lcid", "translations"],
+    },
+  },
 ];
 
 // ── JSON-RPC 2.0 dispatcher ────────────────────────────────────────────────────
@@ -527,6 +628,8 @@ async function handleMessage(msg) {
           case "get_records":        content = await toolGetRecords(args);        break;
           case "search_customers":   content = await toolSearchCustomers(args);   break;
           case "search_items":       content = await toolSearchItems(args);       break;
+          case "list_translations":  content = await toolListTranslations(args);  break;
+          case "set_translations":   content = await toolSetTranslations(args);   break;
           default:
             return {
               jsonrpc: "2.0", id,
