@@ -64,7 +64,7 @@ Each item below is **❌ Not Implemented**. The file to edit is `api/mcp/index.j
 ---
 
 ### 1. Company targeting via environment variables
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🔴 High  
 **File:** `api/mcp/index.js` — `getCompany()` function
 
@@ -109,7 +109,7 @@ async function getCompany() {
 ---
 
 ### 2. New Tool: `list_companies`
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🟡 Medium  
 **File:** `api/mcp/index.js`
 
@@ -206,7 +206,7 @@ async function toolListMessageTypes({ filter } = {}) {
 ---
 
 ### 4. New Tool: `get_records`
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🟡 Medium  
 **File:** `api/mcp/index.js`
 
@@ -264,7 +264,7 @@ async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid
 ---
 
 ### 5. New Tool: `search_customers`
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🟡 Medium  
 **File:** `api/mcp/index.js`
 
@@ -318,7 +318,7 @@ async function toolSearchCustomers({ query, take = 10 } = {}) {
 ---
 
 ### 6. New Tool: `search_items`
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🟡 Medium  
 **File:** `api/mcp/index.js`
 
@@ -371,7 +371,7 @@ async function toolSearchItems({ query, take = 10 } = {}) {
 ---
 
 ### 7. Filter and paging for `list_tables`
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🟡 Medium  
 **File:** `api/mcp/index.js` — `toolListTables()` and the `list_tables` entry in `TOOLS`
 
@@ -453,7 +453,7 @@ format: { type: "string", enum: ["json", "markdown"], description: "Output forma
 ---
 
 ### 9. MCP Resources
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🟢 Low  
 **File:** `api/mcp/index.js` — `initialize` response, `handleMessage()` switch
 
@@ -509,7 +509,7 @@ capabilities: { tools: {}, resources: {} },
 ---
 
 ### 10. MCP Prompts
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🟢 Low  
 **File:** `api/mcp/index.js` — `handleMessage()` switch
 
@@ -683,7 +683,7 @@ MCP_API_KEY = <a-random-secret-token>
 ---
 
 ### 11b. Table parameter input validation
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🔴 High  
 **File:** `api/mcp/index.js`
 
@@ -712,7 +712,7 @@ validateTableName(table);
 ---
 
 ### 11c. Take / skip upper bound enforcement
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🔴 High  
 **File:** `api/mcp/index.js` — each relevant tool function
 
@@ -809,7 +809,7 @@ async function getCompany() {
 ---
 
 ### 14. Translation tools: `list_translations` and `set_translations`
-**Status:** ❌ Not Implemented  
+**Status:** ✅ Implemented  
 **Priority:** 🟡 Medium  
 **File:** `api/mcp/index.js`
 
