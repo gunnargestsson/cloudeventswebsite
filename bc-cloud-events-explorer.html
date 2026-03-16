@@ -18,8 +18,9 @@
 body{font-family:'JetBrains Mono',monospace;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
 body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.04) 2px,rgba(0,0,0,0.04) 4px);pointer-events:none;z-index:1000}
 header{padding:14px 26px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);background:var(--bg2);position:sticky;top:0;z-index:100}
-.logo{width:32px;height:32px;border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--accent);font-size:11px;animation:pb 3s infinite;flex-shrink:0}
-@keyframes pb{0%,100%{box-shadow:0 0 8px rgba(0,212,255,.1)}50%{box-shadow:0 0 22px rgba(0,212,255,.3)}}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;flex-shrink:0}
+.logo-icon{width:34px;height:34px;border-radius:9px;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.logo-icon img{width:100%;height:100%;object-fit:cover;display:block}
 .htitle{font-family:'Syne',sans-serif;font-weight:800;font-size:16px;color:#fff}
 .hsub{font-size:9px;color:var(--text3);letter-spacing:2px;text-transform:uppercase}
 .hsp{flex:1}
@@ -153,7 +154,9 @@ textarea{resize:vertical;min-height:68px;line-height:1.5}
 </head>
 <body>
 <header>
-  <div class="logo">CE</div>
+  <a class="logo" href="https://origo.is" target="_blank" rel="noopener noreferrer">
+    <div class="logo-icon"><img src="origo.jpeg" alt="Origo"></div>
+  </a>
   <div><div class="htitle">Cloud Events Explorer</div><div class="hsub">Origo · Business Central · Self-Describing</div></div>
   <div class="hsp"></div>
   <div class="spill"><div class="sd" id="sd"></div><span id="st">Not connected</span></div>
