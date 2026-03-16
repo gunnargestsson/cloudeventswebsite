@@ -99,7 +99,8 @@ select.ci{cursor:pointer;appearance:auto}
 .ftable td{padding:6px 14px;border-bottom:1px solid rgba(30,45,61,.5);color:var(--text2);vertical-align:top}
 .ftable tr:hover td{background:var(--bg3)}
 .ftable .td-num{color:var(--text3);font-size:10px;width:48px}
-.ftable .td-name{color:var(--text);font-weight:500;width:180px}
+.ftable .td-name{color:var(--text);font-weight:500;width:160px}
+.ftable .td-caption{color:var(--text2);width:160px;font-size:10.5px}
 .ftable .td-json{color:var(--accent);width:180px;font-size:10.5px}
 .ftable .td-type{width:90px}.ftable .td-len{width:48px;text-align:right;color:var(--text3)}
 .ftable .td-class{width:72px}.ftable .td-pk{width:28px;text-align:center}
@@ -107,6 +108,7 @@ select.ci{cursor:pointer;appearance:auto}
 .pk-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--orange)}
 .enum-wrap{display:flex;flex-wrap:wrap;gap:3px;max-width:260px}
 .enum-tag{font-size:8.5px;padding:1px 5px;background:var(--bg3);border:1px solid var(--border2);color:var(--text3)}
+.enum-caption-tag{color:var(--text2);border-color:var(--border)}
 .loading-row td{text-align:center;padding:20px;color:var(--text3)}
 
 /* DOWNLOAD MODAL */
@@ -479,23 +481,28 @@ function renderFields(){
 function fieldsTable(fields){
   const rows = fields.map(f=>{
     const enumHtml = f.enum&&f.enum.length
-      ? `<div class="enum-wrap">${f.enum.map(e=>`<span class="enum-tag" title="${esc(e.caption)}">${esc(e.value||'·')}</span>`).join('')}</div>`
+      ? `<div class="enum-wrap">${f.enum.map(e=>`<span class="enum-tag">${esc(e.value||'·')}</span>`).join('')}</div>`
+      : '';
+    const enumCaptionHtml = f.enum&&f.enum.length
+      ? `<div class="enum-wrap">${f.enum.map(e=>`<span class="enum-tag enum-caption-tag">${esc(e.caption||e.value||'·')}</span>`).join('')}</div>`
       : '';
     return `<tr>
       <td class="td-num">${f.id}</td>
       <td class="td-name">${esc(f.name)}</td>
       <td class="td-json">${esc(f.jsonName||f.name)}</td>
+      <td class="td-caption">${esc(f.caption&&f.caption!==f.name?f.caption:'')}</td>
       <td class="td-type">${esc(f.type||'')}</td>
       <td class="td-len">${f.len!=null?f.len:''}</td>
       <td class="td-class"><span class="${f.class==='FlowField'?'fc-flow':'fc-norm'}">${esc(f.class||'Normal')}</span></td>
       <td class="td-pk">${f.isPartOfPrimaryKey?'<span class="pk-dot" title="Primary key"></span>':''}</td>
       <td>${enumHtml}</td>
+      <td>${enumCaptionHtml}</td>
     </tr>`;
   }).join('');
   return `<table class="ftable">
     <thead><tr>
-      <th class="td-num">#</th><th>Name (AL)</th><th>JSON Key</th><th>Type</th>
-      <th class="td-len">Len</th><th>Class</th><th class="td-pk">PK</th><th>Enum values</th>
+      <th class="td-num">#</th><th>Name (AL)</th><th>JSON Key</th><th>Caption</th><th>Type</th>
+      <th class="td-len">Len</th><th>Class</th><th class="td-pk">PK</th><th>Enum values</th><th>Enum captions</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
