@@ -118,6 +118,12 @@ function bcJson(method, urlOrPath, auth, body) {
       let data = "";
       res.on("data", (c) => (data += c));
       res.on("end", () => {
+        const ct = res.headers["content-type"] || "";
+        // If BC returns plain text / markdown (e.g. Help.Implementation.Get), wrap it
+        if (!ct.includes("application/json") && !data.trimStart().startsWith("{") && !data.trimStart().startsWith("[")) {
+          resolve({ status: "Success", documentation: data });
+          return;
+        }
         let parsed;
         try { parsed = JSON.parse(data); } catch {
           reject(new Error(`Non-JSON response from BC (HTTP ${res.statusCode}): ${data.slice(0, 200)}`));
