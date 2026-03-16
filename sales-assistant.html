@@ -199,7 +199,7 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
       </div>
 
       <div id="uploadStatus" class="upload-status hidden">
-        <span class="spinner"></span><span id="uploadStatusText" data-t="Processing file…">Processing file…</span>
+        <span class="spinner"></span><span id="uploadStatusText" data-t="Processing file">Processing file…</span>
       </div>
 
       <div class="upload-zone" id="dropZone" title="Drop a file or click to browse">
@@ -208,7 +208,7 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
       </div>
 
       <div class="chat-input-row">
-        <textarea class="chat-input" id="chatInput" data-tp="Describe the order…" placeholder="Describe the order…" onkeydown="onInputKeyDown(event)"></textarea>
+        <textarea class="chat-input" id="chatInput" data-tp="Describe the order" data-tp-append="…" placeholder="Describe the order…" onkeydown="onInputKeyDown(event)"></textarea>
         <button class="send-btn" id="sendBtn" onclick="sendMessage()" data-t="Send">Send</button>
       </div>
     </div>
@@ -238,16 +238,16 @@ const UI_STRINGS = [
   'Language',
   // Upload zone
   '📎 Drop PDF, Excel, email or image — or click to browse',
-  'Processing file…',
+  'Processing file',
   // Chat input
-  'Describe the order…', 'Send',
+  'Describe the order', 'Send',
   // Welcome message
   "Hello! I'm your Business Central sales order assistant.",
   "Describe what you'd like to order — or drop a file (PDF, Excel, email) and I'll extract the order details for you.",
   'Example:',
   'Create an order for Adatum Corporation — 10 units of item 1896-S and 5 units of ATHENS desk',
   // Thinking indicator
-  'Thinking…',
+  'Thinking',
   // Confirmation panel
   'Confirm Sales Order',
   'Review the proposed order before creating it in Business Central',
@@ -257,7 +257,7 @@ const UI_STRINGS = [
   '⚠ Low stock',
   'Subtotal excl. VAT', 'VAT (24%)', 'Total incl. VAT',
   '← Edit / Cancel', '✓ Confirm & Create Order',
-  'Creating order…',
+  'Creating order',
   // Success banner
   'Order Created',
   'Your sales order has been created in Business Central',
@@ -290,7 +290,7 @@ async function loadUiTranslations() {
 
 function applyUiTranslations() {
   document.querySelectorAll('[data-t]').forEach(el  => { el.textContent = t(el.dataset.t); });
-  document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
+  document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp) + (el.dataset.tpAppend || ''); });
 }
 
 function getActiveLcid() {
@@ -432,7 +432,7 @@ function showThinking(show) {
     el = document.createElement('div');
     el.id = 'thinkingIndicator';
     el.className = 'thinking';
-    el.innerHTML = `<span class="spinner"></span> ${t('Thinking…')}`;
+    el.innerHTML = `<span class="spinner"></span> ${t('Thinking')}…`;
     document.getElementById('chatHistory').appendChild(el);
   } else if (!show && el) {
     el.remove();
@@ -488,7 +488,7 @@ async function uploadFile(file) {
   const status = document.getElementById('uploadStatus');
   const stTxt  = document.getElementById('uploadStatusText');
   status.classList.remove('hidden');
-  stTxt.textContent = `${t('Processing file…').replace('…', '')} ${file.name}…`;
+  stTxt.textContent = `${t('Processing file')} ${file.name}…`;
   isBusy = true;
   document.getElementById('sendBtn').disabled = true;
 
@@ -664,7 +664,7 @@ async function confirmOrder() {
   if (!pendingOrder) return;
   const btn = document.getElementById('confirmBtn');
   btn.disabled = true;
-  btn.textContent = t('Creating order…');
+  btn.textContent = t('Creating order') + '…';
 
   const confirmMsg = { role: 'user', content: '__CONFIRM_ORDER__' };
   messages.push(confirmMsg);
