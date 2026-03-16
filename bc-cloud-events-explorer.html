@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BC Cloud Events Explorer</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0a0c0f;--bg2:#0f1318;--bg3:#141920;--bg4:#1a2130;
+  --border:#1e2d3d;--border2:#243347;
+  --text:#c8d8e8;--text2:#7a9ab8;--text3:#3d5a78;
+  --accent:#00d4ff;--accent2:#0096cc;
+  --green:#00ff88;--green2:#00cc6a;
+  --orange:#ff8c42;--red:#ff4d6d;--purple:#a78bfa;--yellow:#ffd60a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'JetBrains Mono',monospace;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.04) 2px,rgba(0,0,0,0.04) 4px);pointer-events:none;z-index:1000}
+header{padding:14px 26px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);background:var(--bg2);position:sticky;top:0;z-index:100}
+.logo{width:32px;height:32px;border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--accent);font-size:11px;animation:pb 3s infinite;flex-shrink:0}
+@keyframes pb{0%,100%{box-shadow:0 0 8px rgba(0,212,255,.1)}50%{box-shadow:0 0 22px rgba(0,212,255,.3)}}
+.htitle{font-family:'Syne',sans-serif;font-weight:800;font-size:16px;color:#fff}
+.hsub{font-size:9px;color:var(--text3);letter-spacing:2px;text-transform:uppercase}
+.hsp{flex:1}
+.spill{display:flex;align-items:center;gap:6px;padding:5px 11px;border:1px solid var(--border2);background:var(--bg3);font-size:10px;color:var(--text2)}
+.sd{width:6px;height:6px;border-radius:50%;background:var(--text3);transition:all .3s;flex-shrink:0}
+.sd.ok{background:var(--green);box-shadow:0 0 7px rgba(0,255,136,.6);animation:bk 2s infinite}
+.sd.err{background:var(--red);box-shadow:0 0 7px rgba(255,77,109,.6)}
+.sd.ld{background:var(--yellow);animation:bk .4s infinite}
+@keyframes bk{0%,100%{opacity:1}50%{opacity:.3}}
+.app{display:grid;grid-template-columns:250px 1fr 360px;height:calc(100vh - 59px)}
+/* SIDEBAR */
+.sb{border-right:1px solid var(--border);overflow-y:auto;background:var(--bg2);display:flex;flex-direction:column}
+.sb::-webkit-scrollbar{width:3px}.sb::-webkit-scrollbar-thumb{background:var(--border2)}
+.sb-cfg{padding:16px 14px;display:flex;flex-direction:column;gap:9px;border-bottom:1px solid var(--border)}
+.lbl{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);font-weight:600;margin-bottom:1px}
+.ci{background:var(--bg);border:1px solid var(--border);color:var(--text2);font-family:inherit;font-size:11px;padding:5px 9px;width:100%;outline:none;transition:all .15s}
+.ci:focus{border-color:var(--accent2);color:var(--text)}
+.ci::placeholder{color:var(--text3)}
+.btn-conn{padding:8px;background:var(--accent);border:none;color:var(--bg);font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px;text-transform:uppercase;transition:all .15s;width:100%}
+.btn-conn:hover:not(:disabled){background:#00eeff;box-shadow:0 0 18px rgba(0,212,255,.3)}
+.btn-conn:disabled{background:var(--text3);cursor:not-allowed}
+.sb-types{flex:1;overflow-y:auto}
+.sb-types::-webkit-scrollbar{width:3px}.sb-types::-webkit-scrollbar-thumb{background:var(--border2)}
+.sec-head{padding:9px 13px 5px;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border)}
+.tb{display:flex;align-items:center;gap:7px;width:100%;padding:7px 13px;background:none;border:none;cursor:pointer;color:var(--text2);font-family:inherit;font-size:11px;text-align:left;transition:all .15s;border-left:2px solid transparent}
+.tb:hover{background:var(--bg3);color:var(--text);border-left-color:var(--border2)}
+.tb.active{background:var(--bg4);color:var(--accent);border-left-color:var(--accent)}
+.tb .tn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{font-size:8px;padding:2px 5px;font-weight:700;letter-spacing:.5px;flex-shrink:0}
+.b-out{background:rgba(0,212,255,.1);color:var(--accent)}
+.b-in{background:rgba(255,140,66,.12);color:var(--orange)}
+.b-meta{background:rgba(167,139,250,.12);color:var(--purple)}
+.b-both{background:rgba(0,255,136,.1);color:var(--green)}
+.spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:sp .6s linear infinite;flex-shrink:0}
+@keyframes sp{to{transform:rotate(360deg)}}
+.sb-load{padding:16px 14px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text3)}
+.sb-empty{padding:20px 14px;text-align:center;font-size:11px;color:var(--text3);line-height:1.7}
+/* MAIN */
+.main{display:flex;flex-direction:column;overflow:hidden}
+.mtop{padding:14px 20px 12px;border-bottom:1px solid var(--border);background:var(--bg2)}
+.mtn{font-family:'Syne',sans-serif;font-size:19px;font-weight:700;color:#fff;letter-spacing:-.5px}
+.mtd{font-size:11px;color:var(--text2);margin-top:3px;line-height:1.5}
+.tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg2)}
+.tab{padding:8px 15px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text3);font-family:inherit;font-size:11px;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:6px}
+.tab:hover{color:var(--text2)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.mbody{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:13px}
+.mbody::-webkit-scrollbar{width:3px}.mbody::-webkit-scrollbar-thumb{background:var(--border2)}
+.send-bar{padding:11px 20px;border-top:1px solid var(--border);background:var(--bg2);display:flex;align-items:center;gap:9px}
+.btn-send{display:flex;align-items:center;gap:6px;padding:9px 20px;background:var(--accent);border:none;color:var(--bg);font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;letter-spacing:1px;text-transform:uppercase;transition:all .15s}
+.btn-send:hover:not(:disabled){background:#00eeff;box-shadow:0 0 18px rgba(0,212,255,.35)}
+.btn-send:disabled{background:var(--text3);cursor:not-allowed}
+.btn-sec{padding:9px 13px;background:none;border:1px solid var(--border2);color:var(--text2);font-family:inherit;font-size:11px;cursor:pointer;transition:all .15s}
+.btn-sec:hover{border-color:var(--accent2);color:var(--accent)}
+.sinfo{margin-left:auto;font-size:10px;color:var(--text3)}
+/* FORM */
+.slbl{display:flex;align-items:center;gap:9px;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--text3);font-weight:600}
+.slbl::after{content:'';flex:1;height:1px;background:var(--border)}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.fg{display:flex;flex-direction:column;gap:4px}
+label{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-weight:600}
+label .req{color:var(--orange);margin-left:2px}
+input,select,textarea{background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11.5px;padding:7px 10px;outline:none;transition:all .15s;width:100%}
+input:focus,select:focus,textarea:focus{border-color:var(--accent2);background:var(--bg4);box-shadow:0 0 0 1px rgba(0,150,204,.15)}
+input::placeholder{color:var(--text3)}
+select option{background:var(--bg3)}
+textarea{resize:vertical;min-height:68px;line-height:1.5}
+.hint{font-size:9.5px;color:var(--text3);line-height:1.4}
+.info-box{background:rgba(0,212,255,.04);border:1px solid rgba(0,212,255,.12);padding:10px 12px;font-size:11px;color:var(--text2);line-height:1.6}
+.info-box strong{color:var(--accent)}
+.warn-box{background:rgba(255,77,109,.05);border:1px solid rgba(255,77,109,.2);padding:10px 12px;font-size:11px;color:var(--red);line-height:1.6}
+.raw-toggle{cursor:pointer;user-select:none}
+/* DOCS */
+.docs-body{font-size:11.5px;line-height:1.8;color:var(--text2)}
+.docs-body h1{font-family:'Syne',sans-serif;color:#fff;font-size:15px;font-weight:700;margin:14px 0 7px;border-bottom:1px solid var(--border);padding-bottom:7px}
+.docs-body h2{font-family:'Syne',sans-serif;color:var(--accent);font-size:13px;font-weight:600;margin:12px 0 6px}
+.docs-body h3{color:var(--text);font-size:11.5px;font-weight:600;margin:10px 0 5px}
+.docs-body p{margin:5px 0}
+.docs-body code{background:var(--bg3);color:var(--orange);padding:1px 5px;font-size:10.5px;border:1px solid var(--border)}
+.docs-body pre{background:var(--bg3);border:1px solid var(--border);padding:11px 13px;overflow-x:auto;margin:7px 0;line-height:1.6}
+.docs-body pre code{background:none;border:none;padding:0;font-size:10.5px;color:var(--text)}
+.docs-body table{width:100%;border-collapse:collapse;margin:7px 0;font-size:10.5px}
+.docs-body th{text-align:left;padding:5px 7px;color:var(--text3);font-size:8.5px;letter-spacing:2px;text-transform:uppercase;border-bottom:1px solid var(--border)}
+.docs-body td{padding:5px 7px;border-bottom:1px solid rgba(30,45,61,.5);color:var(--text2);vertical-align:top}
+.docs-body td:first-child{color:var(--accent)}
+.docs-body ul,.docs-body ol{padding-left:18px;margin:5px 0}
+.docs-body li{margin:2px 0}
+.docs-body hr{border:none;border-top:1px solid var(--border);margin:12px 0}
+.docs-body strong{color:var(--text)}
+.docs-body a{color:var(--purple)}
+/* PREVIEW */
+.pre-blk{background:var(--bg3);border:1px solid var(--border);padding:11px 13px;font-size:11px;line-height:1.7;overflow-x:auto;white-space:pre}
+.json-key{color:var(--accent)}.json-str{color:var(--green)}.json-num{color:var(--orange)}.json-bool{color:var(--purple)}.json-null{color:var(--text3)}
+.mb-post{background:rgba(0,212,255,.12);color:var(--accent);font-size:9px;font-weight:700;padding:2px 7px;letter-spacing:.5px}
+/* RESPONSE */
+.rp{border-left:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg2)}
+.rh{padding:11px 15px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:7px;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--text3);font-weight:600}
+.rmeta{display:flex;gap:10px;padding:7px 15px;border-bottom:1px solid var(--border);background:var(--bg3);flex-wrap:wrap}
+.rkv{display:flex;align-items:center;gap:4px;font-size:9.5px}
+.rkv .k{color:var(--text3)}.rkv .v{color:var(--text)}.rkv .v.ok{color:var(--green)}.rkv .v.err{color:var(--red)}
+.rbody{flex:1;overflow-y:auto;padding:12px 15px;font-size:11px;line-height:1.7;white-space:pre-wrap;word-break:break-all}
+.rbody::-webkit-scrollbar{width:3px}.rbody::-webkit-scrollbar-thumb{background:var(--border2)}
+.re{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text3);gap:9px;font-size:11px}
+.re svg{opacity:.15}
+.pbar{display:flex;align-items:center;gap:7px;font-size:10px;color:var(--text2);padding:7px 13px;border-top:1px solid var(--border)}
+.pbtn{padding:3px 9px;background:none;border:1px solid var(--border2);color:var(--text2);font-family:inherit;font-size:10px;cursor:pointer;transition:all .15s}
+.pbtn:hover:not(:disabled){border-color:var(--accent2);color:var(--accent)}
+.pbtn:disabled{opacity:.3;cursor:not-allowed}
+.copy-btn{padding:3px 9px;background:none;border:1px solid var(--border);color:var(--text3);font-family:inherit;font-size:9px;cursor:pointer;transition:all .15s;letter-spacing:1px;text-transform:uppercase;margin-left:auto}
+.copy-btn:hover{border-color:var(--accent2);color:var(--accent)}
+.copy-btn.copied{border-color:var(--green2);color:var(--green)}
+.est{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px 16px;gap:10px;color:var(--text3);font-size:11px;text-align:center;line-height:1.6}
+.est svg{opacity:.12;margin-bottom:4px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">CE</div>
+  <div><div class="htitle">Cloud Events Explorer</div><div class="hsub">Origo · Business Central · Self-Describing</div></div>
+  <div class="hsp"></div>
+  <div class="spill"><div class="sd" id="sd"></div><span id="st">Not connected</span></div>
+</header>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <aside class="sb">
+    <div class="sb-cfg">
+      <div><div class="lbl">Tenant</div><input class="ci" id="cfgTenant" placeholder="dynamics.is"></div>
+      <div><div class="lbl">Environment</div><input class="ci" id="cfgEnv" placeholder="UAT"></div>
+      <div><div class="lbl">Company GUID</div><input class="ci" id="cfgCompany" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+      <div><div class="lbl">Client ID</div><input class="ci" id="cfgClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"></div>
+      <div><div class="lbl">Client Secret</div><input class="ci" id="cfgClientSecret" type="password" placeholder="your-client-secret"></div>
+      <button class="btn-conn" id="connBtn" onclick="connectAndLoad()">Connect &amp; Load Types</button>
+    </div>
+    <div class="sb-types" id="sbTypes">
+      <div class="sb-empty">Enter credentials above and connect<br>to discover available message types<br>via <code style="color:var(--accent)">Help.MessageTypes.Get</code><br><span style="font-size:9.5px;color:var(--text3);margin-top:4px;display:block">Token acquired automatically via<br>client_credentials grant</span></div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div class="mtop">
+      <div class="mtn" id="mtn">Select a message type</div>
+      <div class="mtd" id="mtd">Connect to load message types dynamically from your BC environment</div>
+    </div>
+    <div class="tabs">
+      <button class="tab active" id="tab-compose" onclick="switchTab('compose',this)">Compose</button>
+      <button class="tab" id="tab-preview" onclick="switchTab('preview',this)">Preview JSON</button>
+      <button class="tab" id="tab-docs" onclick="switchTab('docs',this)">
+        Docs <span id="docsSpinner" style="display:none"><span class="spinner" style="width:9px;height:9px;border-width:1.5px"></span></span>
+      </button>
+    </div>
+    <div class="mbody" id="mbody">
+      <div class="est">
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <div>Connect and select a message type<br>to compose and send requests</div>
+      </div>
+    </div>
+    <div class="send-bar">
+      <button class="btn-send" id="sendBtn" onclick="sendReq()" disabled>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21L23 12 2 3v7l15 2-15 2v7z"/></svg>
+        Send <span style="font-size:9px;opacity:.7;margin-left:2px">⌘↵</span>
+      </button>
+      <button class="btn-sec" onclick="resetForm()">Reset</button>
+      <span class="sinfo" id="sinfo">POST → /tasks</span>
+    </div>
+  </main>
+
+  <!-- RESPONSE -->
+  <aside class="rp">
+    <div class="rh">Response<button class="copy-btn" id="copyBtn" onclick="copyResp()">Copy</button></div>
+    <div id="rmeta" style="display:none" class="rmeta"></div>
+    <div class="rbody" id="rbody">
+      <div class="re">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <div>No response yet</div>
+        <div style="font-size:9.5px">Send a message to see results</div>
+      </div>
+    </div>
+    <div id="pbar" style="display:none" class="pbar">
+      <span id="pinfo"></span>
+      <div style="margin-left:auto;display:flex;gap:5px">
+        <button class="pbtn" id="prevBtn" onclick="changePage(-1)">← Prev</button>
+        <button class="pbtn" id="nextBtn" onclick="changePage(1)">Next →</button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+// ── STATE ────────────────────────────────────────────────────────────────────
+let allTypes = [];
+let currentType = null;
+let currentTypeDef = null;
+let currentTab = 'compose';
+let lastResp = null;
+let currentPage = 0;
+const PAGE_SIZE = 50;
+const docsCache = {};
+
+// ── NETWORK ───────────────────────────────────────────────────────────────────
+function g(id){ return (document.getElementById(id)||{}).value||''; }
+
+function baseUrl(){
+  return `https://api.businesscentral.dynamics.com/v2.0/${g('cfgTenant').trim()}/${g('cfgEnv').trim()}/api/origo/cloudEvent/v1.0/companies(${g('cfgCompany').trim()})`;
+}
+
+// Token cache
+let _tokenCache = null; // { token, expiresAt }
+
+async function getToken(){
+  if(_tokenCache && Date.now() < _tokenCache.expiresAt - 30000) return _tokenCache.token;
+
+  const tenant = g('cfgTenant').trim();
+  const clientId = g('cfgClientId').trim();
+  const clientSecret = g('cfgClientSecret').trim();
+
+  // Microsoft Entra token endpoint — supports CORS from browsers
+  const tokenUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
+
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: clientId,
+    client_secret: clientSecret,
+    scope: 'https://api.businesscentral.dynamics.com/.default'
+  });
+
+  const res = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
+  });
+
+  const data = await res.json();
+  if(!res.ok || data.error) throw new Error(`Token error: ${data.error_description || data.error || res.status}`);
+
+  _tokenCache = { token: data.access_token, expiresAt: Date.now() + (data.expires_in * 1000) };
+  return _tokenCache.token;
+}
+
+async function cePost(envelope){
+  const token = await getToken();
+  const url = `${baseUrl()}/tasks`;
+  const res = await fetch(url,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+    body: JSON.stringify(envelope)
+  });
+  if(!res.ok){ const t=await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0,300)}`); }
+  const task = await res.json();
+  if(task.status==='Error') throw new Error(task.error||JSON.stringify(task));
+  if(!task.data || !String(task.data).startsWith('http')) return task;
+  // Step 2
+  const dr = await fetch(task.data,{headers:{'Authorization':`Bearer ${token}`}});
+  if(!dr.ok) throw new Error(`Data URL HTTP ${dr.status}`);
+  if(task.datacontenttype==='application/pdf') return {_pdf:true,dataUrl:task.data,status:'Success'};
+  const result = await dr.json();
+  if(result.status==='Error') throw new Error(result.error||'Result error');
+  return result;
+}
+
+// ── STATUS ────────────────────────────────────────────────────────────────────
+function setStatus(s,label){
+  document.getElementById('sd').className=`sd ${s}`;
+  document.getElementById('st').textContent=label;
+}
+
+// ── CONNECT ───────────────────────────────────────────────────────────────────
+async function connectAndLoad(){
+  if(!g('cfgTenant')||!g('cfgEnv')||!g('cfgCompany')||!g('cfgClientId')||!g('cfgClientSecret')){
+    alert('Fill in all five connection fields.'); return;
+  }
+  _tokenCache = null; // clear so new credentials are used
+  const btn = document.getElementById('connBtn');
+  btn.disabled=true; btn.textContent='Connecting…';
+  setStatus('ld','Loading…');
+  document.getElementById('sbTypes').innerHTML=`<div class="sb-load"><span class="spinner"></span>Acquiring token, then calling Help.MessageTypes.Get…</div>`;
+
+  try{
+    const res = await cePost({specversion:'1.0',type:'Help.MessageTypes.Get',source:'BC-Explorer'});
+    allTypes = res.result||[];
+    setStatus('ok',`${allTypes.length} types ready`);
+    buildSidebar();
+    btn.textContent='↺ Refresh';
+  } catch(e){
+    setStatus('err','Failed');
+    document.getElementById('sbTypes').innerHTML=`<div class="warn-box" style="margin:12px;font-size:10px">${esc(e.message)}</div>`;
+    btn.textContent='Retry';
+  } finally{ btn.disabled=false; }
+}
+
+// ── SIDEBAR ───────────────────────────────────────────────────────────────────
+function buildSidebar(){
+  const groups={};
+  for(const t of allTypes){
+    const g2=t.name.split('.')[0];
+    if(!groups[g2]) groups[g2]=[];
+    groups[g2].push(t);
+  }
+  const container=document.getElementById('sbTypes');
+  container.innerHTML='';
+  for(const [grp,types] of Object.entries(groups)){
+    const sec=document.createElement('div');
+    const hd=document.createElement('div');
+    hd.className='sec-head'; hd.textContent=grp;
+    sec.appendChild(hd);
+    for(const t of types){
+      const btn=document.createElement('button');
+      btn.className='tb'; btn.dataset.type=t.name;
+      const short=t.name.split('.').slice(1).join('.')||t.name;
+      const dir=t.messageDirection||'';
+      const bc=dir==='Outbound'?'b-out':dir==='Inbound'?'b-in':dir==='Both'?'b-both':'b-meta';
+      const bl=dir==='Outbound'?'OUT':dir==='Inbound'?'IN':dir==='Both'?'I/O':'·';
+      btn.innerHTML=`<span class="tn">${esc(short)}</span><span class="badge ${bc}">${bl}</span>`;
+      btn.addEventListener('click',()=>selectType(t));
+      sec.appendChild(btn);
+    }
+    container.appendChild(sec);
+  }
+}
+
+// ── SELECT TYPE ───────────────────────────────────────────────────────────────
+async function selectType(typeDef){
+  currentType=typeDef.name;
+  currentTypeDef=typeDef;
+  lastResp=null;
+
+  document.querySelectorAll('.tb').forEach(b=>b.classList.remove('active'));
+  const btn=document.querySelector(`.tb[data-type="${CSS.escape(typeDef.name)}"]`);
+  if(btn) btn.classList.add('active');
+
+  document.getElementById('mtn').textContent=typeDef.name;
+  document.getElementById('mtd').textContent=typeDef.description||'';
+  document.getElementById('sendBtn').disabled=false;
+
+  // Clear response
+  document.getElementById('rmeta').style.display='none';
+  document.getElementById('rbody').innerHTML=`<div class="re"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><div>No response yet</div></div>`;
+  document.getElementById('pbar').style.display='none';
+
+  if(currentTab==='compose') renderCompose();
+  else if(currentTab==='preview') renderPreview();
+  else await fetchAndRenderDocs();
+
+  // Pre-fetch docs silently
+  if(!docsCache[currentType]) prefetchDocs(currentType);
+}
+
+// ── DOCS ──────────────────────────────────────────────────────────────────────
+async function prefetchDocs(type){
+  if(docsCache[type]) return;
+  try{
+    const res=await cePost({specversion:'1.0',type:'Help.Implementation.Get',source:'BC-Explorer',subject:type});
+    docsCache[type]=extractDocs(res)||`_No documentation available for **${type}**._`;
+    if(currentType===type && currentTab==='docs') renderDocsFromCache();
+  } catch(e){
+    docsCache[type]=`*Could not load documentation:* ${e.message}`;
+    if(currentType===type && currentTab==='docs') renderDocsFromCache();
+  }
+}
+
+function extractDocs(res){
+  if(typeof res==='string') return res;
+  if(res.documentation) return res.documentation;
+  if(res.markdown) return res.markdown;
+  if(res.description) return res.description;
+  if(res.text) return res.text;
+  if(res.result){
+    if(typeof res.result==='string') return res.result;
+    if(Array.isArray(res.result)&&res.result[0]){
+      const f=res.result[0];
+      return f.documentation||f.markdown||f.description||f.text||(typeof f==='string'?f:JSON.stringify(f,null,2));
+    }
+  }
+  return JSON.stringify(res,null,2);
+}
+
+async function fetchAndRenderDocs(){
+  if(docsCache[currentType]){ renderDocsFromCache(); return; }
+  document.getElementById('docsSpinner').style.display='inline';
+  document.getElementById('mbody').innerHTML=`<div class="est"><span class="spinner" style="width:18px;height:18px;border-width:2px"></span><div>Calling Help.Implementation.Get<br>for <strong style="color:var(--accent)">${esc(currentType)}</strong>…</div></div>`;
+  try{
+    const res=await cePost({specversion:'1.0',type:'Help.Implementation.Get',source:'BC-Explorer',subject:currentType});
+    docsCache[currentType]=extractDocs(res)||`_No documentation returned for **${currentType}**._`;
+  } catch(e){
+    docsCache[currentType]=`*Error loading docs:* \`${e.message}\`\n\nMake sure \`Help.Implementation.Get\` is available in this environment.`;
+  } finally{
+    document.getElementById('docsSpinner').style.display='none';
+  }
+  renderDocsFromCache();
+}
+
+function renderDocsFromCache(){
+  const md=docsCache[currentType]||'';
+  document.getElementById('mbody').innerHTML=`<div class="docs-body">${mdToHtml(md)}</div>`;
+}
+
+// ── TABS ──────────────────────────────────────────────────────────────────────
+function switchTab(tab,btn){
+  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  currentTab=tab;
+  if(!currentType) return;
+  if(tab==='compose') renderCompose();
+  else if(tab==='preview') renderPreview();
+  else fetchAndRenderDocs();
+}
+
+// ── COMPOSE ───────────────────────────────────────────────────────────────────
+function inferFields(name){
+  const lc=name.toLowerCase();
+  let subjectLabel=null;
+  if(lc.includes('customer')) subjectLabel='Customer No.';
+  else if(lc.includes('item')) subjectLabel='Item No.';
+  else if(lc.includes('order')&&!lc.includes('statistics')) subjectLabel='Order No. or SystemId';
+  else if(lc.includes('order.statistics')) subjectLabel='Order No. or SystemId';
+  else if(lc.includes('invoice')||lc.includes('shipment')||lc.includes('creditmemo')||lc.includes('return')) subjectLabel='Document No. or SystemId';
+  else if(lc.includes('vendor')) subjectLabel='Vendor No.';
+  else if(lc.includes('permission')) subjectLabel='Table Name';
+  else if(lc.includes('implementation')||lc.includes('messagetype')) subjectLabel=null;
+  else if(lc.includes('table')&&lc.includes('help')) subjectLabel='Table Name (optional)';
+  else if(lc.includes('help.')) subjectLabel=null;
+
+  const dataFields=[];
+  if(lc.includes('records.get')||lc.includes('recordids.get')){
+    dataFields.push({id:'d_tableName',label:'Table Name',ph:'Customer',hint:'BC table name',req:true});
+    if(lc.includes('records.get'))
+      dataFields.push({id:'d_fieldNumbers',label:'Field Numbers',ph:'1,2,5,7',hint:'Comma-sep. Required to calculate FlowFields.'});
+    dataFields.push({id:'d_tableView',label:'Table View Filter',ph:'WHERE(Blocked=CONST( ))',hint:'AL syntax — use field name (not jsonName)'});
+    dataFields.push({id:'d_skip',label:'Skip',ph:'0',type:'number'});
+    dataFields.push({id:'d_take',label:'Take',ph:'50',type:'number'});
+    dataFields.push({id:'d_startDateTime',label:'Modified After',ph:'2026-01-01T00:00:00Z'});
+    dataFields.push({id:'d_endDateTime',label:'Modified Before',ph:''});
+  } else if(lc.includes('records.set')){
+    dataFields.push({id:'d_tableName',label:'Table Name',ph:'Customer',hint:'Or set via subject'});
+    dataFields.push({id:'d_recordId',label:'SystemId (GUID)',ph:'7FE8C74C-0000-0000-0000-000000000000',hint:'Update by SystemId'});
+    dataFields.push({id:'d_primaryKey',label:'Primary Key JSON',ph:'{"No_":"10000"}',type:'textarea',hint:'Find-or-insert by PK'});
+    dataFields.push({id:'d_fields',label:'Fields to Set (JSON)',ph:'{"Address":"New Road 1","City":"Reykjavik"}',type:'textarea',req:true,hint:'All values as strings'});
+  } else if(lc.includes('saleshistory')){
+    dataFields.push({id:'d_fromDate',label:'From Date',ph:'2025-01-01',req:true,hint:'YYYY-MM-DD'});
+    dataFields.push({id:'d_toDate',label:'To Date',ph:'2025-12-31',hint:'Defaults to today'});
+  } else if(lc.includes('availability')){
+    dataFields.push({id:'d_requestedDeliveryDate',label:'Delivery Date',ph:'2026-04-01'});
+    dataFields.push({id:'d_variantCode',label:'Variant Code',ph:''});
+    dataFields.push({id:'d_locationFilter',label:'Location Filter',ph:'BLUE|RED',hint:'BC filter syntax'});
+  } else if(lc.includes('item.price')){
+    dataFields.push({id:'d_customerNo',label:'Customer No.',ph:'10000'});
+    dataFields.push({id:'d_quantity',label:'Quantity',ph:'10',type:'number'});
+    dataFields.push({id:'d_requestedDeliveryDate',label:'Delivery Date',ph:'2026-04-01'});
+    dataFields.push({id:'d_variantCode',label:'Variant Code',ph:''});
+  } else if(lc.includes('help.fields')){
+    dataFields.push({id:'d_tableName',label:'Table Name',ph:'Customer',req:true});
+    dataFields.push({id:'d_fieldNumbers',label:'Field Numbers',ph:'1,2,21,39'});
+  }
+  return {subjectLabel,dataFields};
+}
+
+function renderCompose(){
+  if(!currentType) return;
+  const {subjectLabel,dataFields}=inferFields(currentType);
+  let html='';
+  html+=`<div class="slbl">Envelope</div>`;
+  html+=`<div class="frow">
+    <div class="fg"><label>Source</label><input id="f_source" value="BC-Explorer v1.0" placeholder="MyApp v1.0"></div>
+    <div class="fg"><label>LCID <span style="color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0;font-size:9px">(1033=EN, 1039=IS)</span></label><input id="f_lcid" type="number" placeholder="1033"></div>
+  </div>`;
+  html+=`<div class="fg"><label>Endpoint</label><select id="f_endpoint"><option value="tasks">tasks (synchronous)</option><option value="queues">queues (asynchronous)</option></select></div>`;
+
+  if(subjectLabel!==null){
+    html+=`<div class="slbl">Subject</div>`;
+    html+=`<div class="fg"><label>${esc(subjectLabel)}</label><input id="f_subject" placeholder="${esc(subjectLabel)}"></div>`;
+  }
+
+  if(dataFields.length){
+    html+=`<div class="slbl">Data Parameters</div>`;
+    let i=0;
+    while(i<dataFields.length){
+      const f=dataFields[i];
+      if(f.type==='textarea'){
+        html+=`<div class="fg">${fhtml(f)}</div>`; i++;
+      } else if(dataFields[i+1]&&dataFields[i+1].type!=='textarea'){
+        html+=`<div class="frow"><div class="fg">${fhtml(f)}</div><div class="fg">${fhtml(dataFields[i+1])}</div></div>`; i+=2;
+      } else {
+        html+=`<div class="fg">${fhtml(f)}</div>`; i++;
+      }
+    }
+  }
+
+  // Raw JSON override (collapsed)
+  html+=`<div class="slbl raw-toggle" onclick="toggleRaw()"><span id="ri">▶</span>&nbsp;Raw data JSON override</div>`;
+  html+=`<div id="rawSec" style="display:none" class="fg">
+    <label>data <span style="color:var(--text3);font-weight:400;text-transform:none;font-size:9px">— overrides fields above</span></label>
+    <textarea id="f_raw" placeholder='{"tableName":"Customer","take":50}' style="min-height:80px;font-size:11px"></textarea>
+    <span class="hint">Valid JSON object — will be serialized to string per the CloudEvents spec.</span>
+  </div>`;
+
+  html+=`<div class="info-box"><strong>${esc(currentType)}</strong> — ${esc(currentTypeDef?.description||'')}<br>
+    <span style="font-size:9.5px;color:var(--text3)">Switch to <strong style="color:var(--accent)">Docs</strong> tab to see implementation details fetched live via <code>Help.Implementation.Get</code>.</span>
+  </div>`;
+
+  document.getElementById('mbody').innerHTML=html;
+}
+
+function fhtml(f){
+  const r=f.req?`<span class="req">*</span>`:'';
+  const inp=f.type==='textarea'
+    ?`<textarea id="${f.id}" placeholder="${esc(f.ph||'')}"></textarea>`
+    :`<input id="${f.id}" type="${f.type||'text'}" placeholder="${esc(f.ph||'')}">`;
+  return `<label>${esc(f.label)}${r}</label>${inp}${f.hint?`<span class="hint">${esc(f.hint)}</span>`:''}`;
+}
+
+function toggleRaw(){
+  const sec=document.getElementById('rawSec'), icon=document.getElementById('ri');
+  const open=sec.style.display==='block';
+  sec.style.display=open?'none':'block';
+  icon.textContent=open?'▶':'▼';
+}
+
+// ── BUILD ENVELOPE ────────────────────────────────────────────────────────────
+function buildEnvelope(){
+  const type=currentType;
+  const source=document.getElementById('f_source')?.value||'BC-Explorer v1.0';
+  const lcidV=document.getElementById('f_lcid')?.value?.trim();
+  const subjectV=document.getElementById('f_subject')?.value?.trim();
+  const env={specversion:'1.0',type,source};
+  if(lcidV) env.lcid=parseInt(lcidV);
+  if(subjectV) env.subject=subjectV;
+
+  // Raw override
+  const rawV=document.getElementById('f_raw')?.value?.trim();
+  if(rawV){ try{ JSON.parse(rawV); env.data=rawV; return env; } catch(e){} }
+
+  // d_* fields
+  const data={};
+  document.querySelectorAll('[id^="d_"]').forEach(el=>{
+    const k=el.id.slice(2); const v=el.value?.trim();
+    if(!v) return;
+    if(k==='fieldNumbers'){ const ns=v.split(',').map(s=>parseInt(s.trim())).filter(n=>!isNaN(n)); if(ns.length) data.fieldNumbers=ns; }
+    else if(k==='skip'||k==='take'||k==='quantity') data[k]=parseFloat(v);
+    else if(k==='fields'||k==='primaryKey'){ try{data[k]=JSON.parse(v);}catch(e){} }
+    else if(k==='recordId') data.id=v;
+    else data[k]=v;
+  });
+  if(Object.keys(data).length) env.data=JSON.stringify(data);
+  return env;
+}
+
+// ── PREVIEW ───────────────────────────────────────────────────────────────────
+function renderPreview(){
+  if(!currentType) return;
+  const env=buildEnvelope();
+  const endpoint=document.getElementById('f_endpoint')?.value?.split(' ')[0]||'tasks';
+  const ten=g('cfgTenant')||'{tenantId}', en=g('cfgEnv')||'{env}', co=g('cfgCompany')||'{companyId}';
+  const url=`https://api.businesscentral.dynamics.com/v2.0/${ten}/${en}/api/origo/cloudEvent/v1.0/companies(${co})/${endpoint}`;
+  document.getElementById('mbody').innerHTML=`
+    <div class="slbl">POST Request</div>
+    <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">
+      <span class="mb-post">POST</span>
+      <span style="font-size:10px;color:var(--text2);word-break:break-all">${esc(url)}</span>
+    </div>
+    <div class="pre-blk">${shl(JSON.stringify(env,null,2))}</div>
+    <div class="slbl" style="margin-top:2px">Step 2 — Fetch result</div>
+    <div class="pre-blk" style="color:var(--text2);font-size:10.5px"><span class="json-bool">GET</span>  {response.data}
+Authorization: Bearer {token}
+
+<span style="color:var(--text3)">// data field in POST response is a full absolute URL — use verbatim.</span>
+<span style="color:var(--text3)">// If datacontenttype === "application/pdf" use .blob() not .json()</span></div>
+    <div><button class="btn-sec" style="font-size:10px;padding:6px 12px" onclick="copyTxt(${eA(JSON.stringify(env,null,2))})">Copy JSON</button></div>
+  `;
+}
+
+// ── SEND ──────────────────────────────────────────────────────────────────────
+async function sendReq(){
+  if(!currentType) return;
+  const endpoint=document.getElementById('f_endpoint')?.value?.split(' ')[0]||'tasks';
+  const env=buildEnvelope();
+  const btn=document.getElementById('sendBtn');
+  btn.disabled=true;
+  btn.innerHTML=`<span class="spinner" style="border-top-color:var(--bg)"></span>&nbsp;Sending…`;
+  setStatus('ld','Sending…');
+  document.getElementById('rmeta').style.display='none';
+  document.getElementById('rbody').innerHTML=`<div class="re"><span class="spinner" style="width:20px;height:20px;border-width:2px"></span><div>Waiting…</div></div>`;
+  document.getElementById('pbar').style.display='none';
+  const t0=Date.now();
+  try{
+    let result;
+    if(endpoint==='queues'){
+      const res=await fetch(`${baseUrl()}/queues`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${g('cfgToken').trim()}`},body:JSON.stringify(env)});
+      result=await res.json();
+      result._note='Queued asynchronously. Poll /queues({id})/Microsoft.NAV.GetStatus to check.';
+    } else {
+      result=await cePost(env);
+    }
+    lastResp=result; currentPage=0;
+    setStatus('ok','Connected');
+    showResp(200,Date.now()-t0,result);
+  } catch(e){
+    setStatus('err','Error');
+    showResp(0,Date.now()-t0,{status:'Error',error:e.message},true);
+  } finally{
+    btn.disabled=false;
+    btn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21L23 12 2 3v7l15 2-15 2v7z"/></svg> Send <span style="font-size:9px;opacity:.7;margin-left:2px">⌘↵</span>`;
+  }
+}
+
+function showResp(status,elapsed,data,isErr=false){
+  const meta=document.getElementById('rmeta');
+  meta.style.display='flex';
+  meta.innerHTML=`
+    ${status?`<div class="rkv"><span class="k">HTTP</span><span class="v ${isErr?'err':'ok'}">${status}</span></div>`:''}
+    <div class="rkv"><span class="k">ms</span><span class="v">${elapsed}</span></div>
+    ${data?.status?`<div class="rkv"><span class="k">Status</span><span class="v ${data.status==='Error'?'err':'ok'}">${data.status}</span></div>`:''}
+    ${data?.noOfRecords!=null?`<div class="rkv"><span class="k">Total</span><span class="v">${data.noOfRecords}</span></div>`:''}
+    ${data?.insertedCount!=null?`<div class="rkv"><span class="k">Ins</span><span class="v ok">${data.insertedCount}</span></div>`:''}
+    ${data?.modifiedCount!=null?`<div class="rkv"><span class="k">Mod</span><span class="v ok">${data.modifiedCount}</span></div>`:''}
+  `;
+  if(data?.result&&Array.isArray(data.result)&&data.result.length>PAGE_SIZE){
+    showPaged(data);
+  } else {
+    document.getElementById('rbody').innerHTML=shl(JSON.stringify(data,null,2));
+    document.getElementById('pbar').style.display='none';
+  }
+}
+
+function showPaged(data){
+  const total=data.noOfRecords??data.result.length;
+  const tp=Math.ceil(data.result.length/PAGE_SIZE);
+  const slice=data.result.slice(currentPage*PAGE_SIZE,(currentPage+1)*PAGE_SIZE);
+  document.getElementById('rbody').innerHTML=shl(JSON.stringify({status:data.status,noOfRecords:total,_page:`${currentPage+1}/${tp}`,result:slice},null,2));
+  document.getElementById('pbar').style.display='flex';
+  document.getElementById('pinfo').textContent=`Page ${currentPage+1}/${tp} · ${data.result.length} loaded`;
+  document.getElementById('prevBtn').disabled=currentPage===0;
+  document.getElementById('nextBtn').disabled=(currentPage+1)*PAGE_SIZE>=data.result.length;
+}
+
+function changePage(d){ if(!lastResp) return; currentPage=Math.max(0,currentPage+d); showPaged(lastResp); }
+
+// ── UTILITIES ─────────────────────────────────────────────────────────────────
+function shl(json){
+  return json.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,m=>{
+      if(/^"/.test(m)) return /:$/.test(m)?`<span class="json-key">${m}</span>`:`<span class="json-str">${m}</span>`;
+      if(/true|false/.test(m)) return `<span class="json-bool">${m}</span>`;
+      if(/null/.test(m)) return `<span class="json-null">${m}</span>`;
+      return `<span class="json-num">${m}</span>`;
+    });
+}
+
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function eA(s){ return JSON.stringify(s).replace(/'/g,"&#39;"); }
+function copyTxt(s){ navigator.clipboard.writeText(s); }
+function resetForm(){ if(currentType) renderCompose(); }
+function copyResp(){
+  const t=document.getElementById('rbody').innerText;
+  navigator.clipboard.writeText(t).then(()=>{
+    const b=document.getElementById('copyBtn');
+    b.textContent='Copied!'; b.classList.add('copied');
+    setTimeout(()=>{ b.textContent='Copy'; b.classList.remove('copied'); },1500);
+  });
+}
+
+function mdToHtml(md){
+  if(!md) return '';
+  let h=esc(md);
+  h=h.replace(/```[\w]*\n?([\s\S]*?)```/g,(_,c)=>`<pre><code>${c.trim()}</code></pre>`);
+  h=h.replace(/`([^`]+)`/g,'<code>$1</code>');
+  h=h.replace(/^#{4,6}\s(.+)$/gm,'<h3>$1</h3>');
+  h=h.replace(/^###\s(.+)$/gm,'<h3>$1</h3>');
+  h=h.replace(/^##\s(.+)$/gm,'<h2>$1</h2>');
+  h=h.replace(/^#\s(.+)$/gm,'<h1>$1</h1>');
+  h=h.replace(/\*\*\*(.+?)\*\*\*/g,'<strong><em>$1</em></strong>');
+  h=h.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+  h=h.replace(/\*(.+?)\*/g,'<em>$1</em>');
+  h=h.replace(/^---$/gm,'<hr>');
+  h=h.replace(/((?:^\|.+\|\n)+)/gm,tbl=>{
+    const rows=tbl.trim().split('\n');
+    let out='<table>';
+    rows.forEach((row,i)=>{
+      if(/^\|[\s\-|]+\|$/.test(row)) return;
+      const cells=row.split('|').slice(1,-1).map(c=>c.trim());
+      const tag=i===0?'th':'td';
+      out+=`<tr>${cells.map(c=>`<${tag}>${c}</${tag}>`).join('')}</tr>`;
+    });
+    return out+'</table>';
+  });
+  h=h.replace(/^[-*]\s(.+)$/gm,'<li>$1</li>');
+  h=h.replace(/(<li>[\s\S]*?<\/li>\n?)+/g,m=>`<ul>${m}</ul>`);
+  h=h.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank">$1</a>');
+  h=h.replace(/\n\n/g,'</p><p>');
+  h='<p>'+h+'</p>';
+  h=h.replace(/<p>(<(?:h[1-6]|pre|ul|table|hr)[^>]*>)/g,'$1');
+  h=h.replace(/(<\/(?:h[1-6]|pre|ul|table|hr)>)<\/p>/g,'$1');
+  h=h.replace(/<p>\s*<\/p>/g,'');
+  return h;
+}
+
+// ⌘↵ / Ctrl+↵ to send
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key==='Enter'&&currentType&&!document.getElementById('sendBtn').disabled) sendReq();
+});
+</script>
+</body>
+</html>
