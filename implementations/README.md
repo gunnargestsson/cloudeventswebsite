@@ -81,7 +81,8 @@ Each requirement is stored in its own subfolder with complete implementation det
 
 ---
 
-### Requirement 3: Date Range Filter for Ledger Entries and Documents
+### Requirement 3:
+ Date Range Filter for Ledger Entries and Documents
 **Folder**: `requirement-3-date-filter-ledger-documents/`
 **Status**: ⏳ Ready for Implementation
 **Description**: Add From/To date range filter bars to the Ledger Entries and Documents tabs in the customer detail view, matching the UX pattern of the Sales History tab.
@@ -156,6 +157,26 @@ Each requirement is stored in its own subfolder with complete implementation det
 
 **Files**:
 - `SPECIFICATION.md` - Complete implementation guide
+
+---
+
+### Requirement 7: Global Connection Settings
+**Folder**: `requirement-7-global-settings/`
+**Status**: ⏳ Ready for Implementation
+**Description**: Centralise BC connection parameters in `localStorage` so credentials entered once persist across all pages and sessions. Adds a company-name dropdown (instead of raw GUID), language selection, and auto-fill from server environment variables.
+
+**Key Features**:
+- Shared `settings.js` module with `bcSettingsLoad()`, `bcSettingsSave()`, `bcSettingsClear()`, `bcSettingsReady()`, `bcSettingsHeaders()` helpers
+- New `GET /api/companies` Azure Function — fetches company list using client-supplied credentials
+- Settings panel component used by `bc-metadata-explorer.html`, `bc-cloud-events-explorer.html`, `sales-assistant.html`
+- Pre-fill from `/api/config` (tenant / clientId / environment) on first load
+- Company dropdown auto-populated via `/api/companies` after credentials entered
+- Language dropdown loaded from BC `Allowed Language` + `Language` tables per company
+- All settings (including client secret) persisted in `localStorage` with `bc_portal_` prefix
+- LCID synced to/from `index.html` so language choice is consistent across all pages
+
+**Files**:
+- `SPECIFICATION.md` - Complete implementation guide with module API, endpoint spec, boot sequence, page-by-page changes, and testing checklist
 
 ---
 
