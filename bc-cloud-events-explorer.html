@@ -248,6 +248,7 @@ const docsCache = {};
 let historyItems = [];
 let historyLoaded = false;
 let historySourceFilter = null;
+let currentHistoryIdx = null;
 
 // ── NETWORK ───────────────────────────────────────────────────────────────────
 function g(id){ return (document.getElementById(id)||{}).value||''; }
@@ -354,6 +355,26 @@ async function ceFetchResult(dataUrl, datacontenttype=''){
   const result = await res.json();
   if(result.error && !result.status) throw new Error(result.error);
   return result;
+}
+
+// Fetch original request payload via /requestdata({id}).
+async function ceFetchRequest(itemId){
+  const res = await fetch('/api/explorer', {
+    method: 'POST',
+    headers: {
+      'Content-Type':       'application/json',
+      'x-bc-tenant':        g('cfgTenant').trim(),
+      'x-bc-client-id':     g('cfgClientId').trim(),
+      'x-bc-client-secret': g('cfgClientSecret').trim(),
+      'x-bc-environment':   g('cfgEnv').trim(),
+      'x-bc-company':       g('cfgCompany').trim(),
+      'x-bc-endpoint':      'fetch-request',
+      'x-bc-item-id':       itemId,
+    },
+    body: JSON.stringify({}),
+  });
+  if(!res.ok){ const t=await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0,300)}`); }
+  return res.json();
 }
 
 // ── STATUS ────────────────────────────────────────────────────────────────────
@@ -872,6 +893,7 @@ function fmtTime(isoStr){
 async function openHistoryItem(idx){
   const item = historyItems[idx];
   if(!item) return;
+  currentHistoryIdx = idx;
 
   // Highlight selected item in history list
   document.querySelectorAll('.hist-item').forEach(el=>el.classList.remove('active'));
@@ -893,8 +915,42 @@ async function openHistoryItem(idx){
     currentTypeDef = typeDef;
     const tbBtn = document.querySelector(`.tb[data-type="${CSS.escape(item.type)}"]`);
     if(tbBtn) tbBtn.classList.add('active');
-    if(currentTab==='compose') renderCompose();
-    else if(currentTab==='preview') renderPreview();
+
+    // Always switch to compose so the user can review & replay the original request
+    document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+    document.getElementById('tab-compose').classList.add('active');
+    currentTab = 'compose';
+    renderCompose();
+
+    // Populate envelope fields from the history item immediately
+    const srcEl = document.getElementById('f_source');
+    if(srcEl) srcEl.value = item.source||'';
+    const lcidEl = document.getElementById('f_lcid');
+    if(lcidEl) lcidEl.value = item.lcid||'';
+    const subjEl = document.getElementById('f_subject');
+    if(subjEl) subjEl.value = item.subject||'';
+    const epEl = document.getElementById('f_endpoint');
+    if(epEl) epEl.value = item._endpoint||'tasks';
+
+    // Asynchronously fetch the original data payload and fill in the raw override
+    if(item.id){
+      const capturedIdx = idx;
+      ceFetchRequest(item.id).then(rd=>{
+        if(currentHistoryIdx !== capturedIdx) return; // user moved on
+        const rawData = rd.data || '';
+        if(!rawData) return;
+        const rawSec = document.getElementById('rawSec');
+        const rawEl  = document.getElementById('f_raw');
+        const icon   = document.getElementById('ri');
+        if(rawEl){
+          // Pretty-print if valid JSON, otherwise use as-is
+          try{ rawEl.value = JSON.stringify(JSON.parse(rawData), null, 2); }
+          catch{ rawEl.value = rawData; }
+        }
+        if(rawSec) rawSec.style.display='block';
+        if(icon)   icon.textContent='▼';
+      }).catch(()=>{}); // silently ignore if endpoint unavailable
+    }
   } else {
     document.getElementById('mbody').innerHTML = `<div class="info-box"><strong>${esc(item.type||'?')}</strong><br>
       <span style="font-size:9.5px;color:var(--text3)">Type not found in current types list. Result shown in response panel.</span></div>`;

@@ -40,11 +40,11 @@ module.exports = async function (context, req) {
     return;
   }
 
-  if (!["tasks", "queues", "queue-status", "queue-retry", "history", "fetch-result"].includes(endpoint)) {
+  if (!["tasks", "queues", "queue-status", "queue-retry", "history", "fetch-result", "fetch-request"].includes(endpoint)) {
     context.res = {
       status: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "x-bc-endpoint must be 'tasks', 'queues', 'queue-status', 'queue-retry', 'history', or 'fetch-result'" }),
+      body: JSON.stringify({ error: "x-bc-endpoint must be 'tasks', 'queues', 'queue-status', 'queue-retry', 'history', 'fetch-result', or 'fetch-request'" }),
     };
     return;
   }
@@ -94,6 +94,26 @@ module.exports = async function (context, req) {
         headers: { "Content-Type": "application/json", "x-queue-status": statusValue },
         body: JSON.stringify({ _queueStatus: statusValue, _raw: statusRes }),
       };
+    } catch (e) {
+      context.res = { status: 502, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: e.message }) };
+    }
+    return;
+  }
+
+  // ── Fetch original request payload (/requestdata) ────────────────────────
+  if (endpoint === "fetch-request") {
+    const itemId = req.headers["x-bc-item-id"] || "";
+    // Basic GUID-shape validation to prevent path injection
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(itemId)) {
+      context.res = { status: 400, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "x-bc-item-id must be a valid GUID" }) };
+      return;
+    }
+    try {
+      const token = await getToken(tenantId, clientId, clientSecret);
+      const auth  = `Bearer ${token}`;
+      const basePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})`;
+      const result = await bcJson("GET", `${basePath}/requestdata(${itemId})`, auth, null);
+      context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) };
     } catch (e) {
       context.res = { status: 502, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: e.message }) };
     }

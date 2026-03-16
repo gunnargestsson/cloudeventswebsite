@@ -50,6 +50,14 @@ https://api.businesscentral.dynamics.com/v2.0/{tenantId}/{environment}/api/origo
 **Authentication:** OAuth 2.0 Bearer token via Microsoft Entra ID (Azure AD).  
 Scope: `https://api.businesscentral.dynamics.com/.default`
 
+> **Data Isolation — Entra Application Boundary**  
+> Every Cloud Events endpoint (`/tasks`, `/queues`, `/responses`, `/requestdata`) automatically
+> filters all results to the **Entra Application (Client ID)** that authenticated the request.
+> This is enforced server-side via `SystemCreatedBy = UserSecurityId()` — it cannot be bypassed
+> by any query parameter or OData filter.  
+> **One Entra Application will never see messages, history, or responses that were created by
+> a different Entra Application**, even within the same BC company and environment.
+
 > **Important:** The `data` download URL returned in task responses uses the internal
 > tenant GUID (e.g. `9069b642-…`), not the named tenant. Always use the URL verbatim
 > — do not reconstruct it.
@@ -109,11 +117,47 @@ GET  /companies({companyId})/queues({id})                                   ← 
 
 Always use the URL from `task.data` verbatim. Do not construct it manually.
 
+### 3.4 `/requestdata({id})` — Read the Original Request Payload
+
+Read-only endpoint that exposes the **original request body** that was sent for a message. Useful for auditing, debugging, or re-replaying a call.
+
+```http
+GET /companies({companyId})/requestdata({id})
+Authorization: Bearer {token}
+```
+
+Response:
+```json
+{
+  "id": "8440906f-113b-4c21-90a0-3a016a4ea043",
+  "data": "{\"tableName\":\"G/L Entry\",\"startDateTime\":\"2020-01-01T00:00:00Z\"}"
+}
+```
+
+Or fetch the raw blob stream:
+```http
+GET /companies({companyId})/requestdata({id})/data
+Authorization: Bearer {token}
+```
+
+The `id` is the same GUID as the queue or task message — no extra lookup needed. Results are scoped to the current application (`SystemCreatedBy`).
+
 ---
 
 ## 3b. Listing Message History (GET queues / tasks)
 
 Both endpoints support standard OData **GET** to list previously submitted messages. Use `$filter` on `source` to scope results to your own application.
+
+> **Note:** Results are automatically scoped to the calling Entra Application — you will
+> never see records created by another application. The `source` filter is an additional
+> optional label you control; it does not replace or weaken security isolation.
+
+Once you have a message `id`, you can retrieve both the original request and the result:
+
+| What you want | URL |
+|---|---|
+| Full response body | `GET /responses({id})/data` |
+| Original request payload | `GET /requestdata({id})/data` |
 
 ### List queue history
 ```http
@@ -127,7 +171,8 @@ GET /companies({companyId})/tasks?$filter=source eq 'MyApp v1.0'
 Authorization: Bearer {token}
 ```
 
-Without a filter both return **all** messages in the company across all sources — always filter by `source` in production.
+Without a filter you get all your own application's messages — the Entra isolation
+already ensures you never see another application's data.
 
 ### Response shape (same for both endpoints)
 
