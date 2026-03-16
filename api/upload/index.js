@@ -110,7 +110,7 @@ function fileToContent(file) {
   // .msg — use msg-parser if available, fall back to raw text
   if (mimeType.includes("message") || ext === "msg") {
     try {
-      const MsgReader = require("@kenjiuno/msgreader").default; // optional dependency
+      const { MsgReader } = require("@kenjiuno/msgreader"); // optional dependency
       const reader    = new MsgReader(buffer);
       const info      = reader.getFileData();
       const text = `Email:\nSubject: ${info.subject || ""}\nFrom: ${info.senderName || ""} <${info.senderEmail || ""}>\n\n${info.body || ""}`;

@@ -8,6 +8,6 @@
   "dependencies": {
     "busboy": "^1.6.0",
     "xlsx": "^0.18.5",
-    "@kenjiuno/msgreader": "^2.3.0"
+    "@kenjiuno/msgreader": "^1.28.0"
   }
 }
