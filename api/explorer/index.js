@@ -40,12 +40,109 @@ module.exports = async function (context, req) {
     return;
   }
 
-  if (endpoint !== "tasks" && endpoint !== "queues") {
+  if (!["tasks", "queues", "queue-status", "queue-retry", "history", "fetch-result"].includes(endpoint)) {
     context.res = {
       status: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "x-bc-endpoint must be 'tasks' or 'queues'" }),
+      body: JSON.stringify({ error: "x-bc-endpoint must be 'tasks', 'queues', 'queue-status', 'queue-retry', 'history', or 'fetch-result'" }),
     };
+    return;
+  }
+
+  // ── Queue management actions (GetStatus / RetryTask) ──────────────────────
+  // These don't use a CloudEvents envelope — they act on an existing queue item.
+  if (endpoint === "queue-status" || endpoint === "queue-retry") {
+    const queueId = req.headers["x-bc-queue-id"] || "";
+    if (!queueId) {
+      context.res = { status: 400, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Missing x-bc-queue-id header" }) };
+      return;
+    }
+    try {
+      const token = await getToken(tenantId, clientId, clientSecret);
+      const auth  = `Bearer ${token}`;
+      const basePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})`;
+
+      if (endpoint === "queue-retry") {
+        const result = await bcJson("POST", `${basePath}/queues(${queueId})/Microsoft.NAV.RetryTask`, auth, {});
+        context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) };
+        return;
+      }
+
+      // queue-status: POST GetStatus, then if Updated fetch the result data URL
+      const statusRes = await bcJson("POST", `${basePath}/queues(${queueId})/Microsoft.NAV.GetStatus`, auth, {});
+      const statusValue = statusRes.value || statusRes.status || statusRes.statusValue || "";
+
+      if (statusValue === "Updated") {
+        // Fetch the queue record to get the data URL
+        const queueRecord = await bcJson("GET", `${basePath}/queues(${queueId})`, auth, null);
+        if (queueRecord.data && String(queueRecord.data).startsWith("https://api.businesscentral.dynamics.com/")) {
+          if (queueRecord.datacontenttype && queueRecord.datacontenttype.includes("pdf")) {
+            const { buffer, contentType } = await bcBinary(queueRecord.data, auth);
+            context.res = { status: 200, headers: { "Content-Type": contentType || "application/pdf", "x-queue-status": "Updated" }, body: buffer, isRaw: true };
+            return;
+          }
+          const dataPath = new URL(queueRecord.data).pathname + new URL(queueRecord.data).search;
+          const result = await bcJson("GET", dataPath, auth, null);
+          context.res = { status: 200, headers: { "Content-Type": "application/json", "x-queue-status": "Updated" }, body: JSON.stringify(result) };
+          return;
+        }
+      }
+
+      // Not done yet (Created) or gone (Deleted/None) — return status info
+      context.res = {
+        status: 200,
+        headers: { "Content-Type": "application/json", "x-queue-status": statusValue },
+        body: JSON.stringify({ _queueStatus: statusValue, _raw: statusRes }),
+      };
+    } catch (e) {
+      context.res = { status: 502, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: e.message }) };
+    }
+    return;
+  }
+
+  // ── History listing (GET /tasks + GET /queues, combined & sorted) ──────────
+  if (endpoint === "history") {
+    try {
+      const token = await getToken(tenantId, clientId, clientSecret);
+      const auth  = `Bearer ${token}`;
+      const basePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})`;
+      const [tasksRes, queuesRes] = await Promise.all([
+        bcJson("GET", `${basePath}/tasks`, auth, null).catch(() => ({ value: [] })),
+        bcJson("GET", `${basePath}/queues`, auth, null).catch(() => ({ value: [] })),
+      ]);
+      const items = [
+        ...(Array.isArray(tasksRes.value)  ? tasksRes.value  : []).map(i => ({ ...i, _endpoint: "tasks" })),
+        ...(Array.isArray(queuesRes.value) ? queuesRes.value : []).map(i => ({ ...i, _endpoint: "queues" })),
+      ].sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0)).slice(0, 100);
+      context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }) };
+    } catch (e) {
+      context.res = { status: 502, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: e.message }) };
+    }
+    return;
+  }
+
+  // ── Fetch result by data URL (for history replay) ─────────────────────────
+  if (endpoint === "fetch-result") {
+    const dataUrl = req.headers["x-bc-data-url"] || "";
+    const dataContentType = req.headers["x-bc-datacontenttype"] || "";
+    // SSRF guard — only allow Business Central API host
+    if (!dataUrl.startsWith("https://api.businesscentral.dynamics.com/")) {
+      context.res = { status: 400, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "x-bc-data-url must be a businesscentral.dynamics.com URL" }) };
+      return;
+    }
+    try {
+      const token = await getToken(tenantId, clientId, clientSecret);
+      const auth  = `Bearer ${token}`;
+      if (dataContentType.includes("pdf")) {
+        const { buffer, contentType } = await bcBinary(dataUrl, auth);
+        context.res = { status: 200, headers: { "Content-Type": contentType || "application/pdf" }, body: buffer, isRaw: true };
+      } else {
+        const result = await bcJson("GET", dataUrl, auth, null);
+        context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) };
+      }
+    } catch (e) {
+      context.res = { status: 502, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: e.message }) };
+    }
     return;
   }
 

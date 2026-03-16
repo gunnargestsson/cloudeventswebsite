@@ -111,6 +111,109 @@ Always use the URL from `task.data` verbatim. Do not construct it manually.
 
 ---
 
+## 3b. Listing Message History (GET queues / tasks)
+
+Both endpoints support standard OData **GET** to list previously submitted messages. Use `$filter` on `source` to scope results to your own application.
+
+### List queue history
+```http
+GET /companies({companyId})/queues?$filter=source eq 'MyApp v1.0'
+Authorization: Bearer {token}
+```
+
+### List task history
+```http
+GET /companies({companyId})/tasks?$filter=source eq 'MyApp v1.0'
+Authorization: Bearer {token}
+```
+
+Without a filter both return **all** messages in the company across all sources — always filter by `source` in production.
+
+### Response shape (same for both endpoints)
+
+```json
+{
+  "@odata.context": ".../$metadata#companies(...)/queues",
+  "value": [
+    {
+      "@odata.etag": "W/\"...\"",
+      "id": "fb304e23-2aac-43fa-a16d-5bc837a52830",
+      "specversion": "1.0",
+      "type": "Data.Records.Get",
+      "source": "MyApp v1.0",
+      "time": "2026-03-16T10:18:51.303Z",
+      "subject": "",
+      "lcid": 0,
+      "datacontenttype": "text/json",
+      "data": "https://api.businesscentral.dynamics.com/v2.0/{tenantGuid}/UAT/api/origo/cloudEvent/v1.0/companies({companyId})/responses(fb304e23-2aac-43fa-a16d-5bc837a52830)/data"
+    }
+  ]
+}
+```
+
+Key fields:
+
+| Field | Description |
+|---|---|
+| `id` | Message GUID — use it as the queue/task ID and as the response ID |
+| `type` | The message type that was executed |
+| `source` | The caller identifier set in the original request |
+| `time` | When the message was submitted (UTC) |
+| `subject` | Optional subject sent by the caller (table name, document no., etc.) |
+| `lcid` | Language requested (0 = default) |
+| `datacontenttype` | Content type of the response (`text/json`, `text/markdown`, `application/pdf`, …) |
+| `data` | Absolute URL to fetch the response body — GET this URL to retrieve results |
+
+The `data` URL is always in the form `.../responses({id})/data`. You can fetch it at any time after the message is processed.
+
+### Queue-specific: poll status and retry
+
+These actions are only available on `/queues`, not `/tasks` (tasks are already completed synchronously).
+
+**Poll status**
+```http
+POST /companies({companyId})/queues({id})/Microsoft.NAV.GetStatus
+Authorization: Bearer {token}
+```
+
+Returns the current processing status:
+
+| Status | Meaning |
+|---|---|
+| `Created` | Job is still running |
+| `Updated` | Job completed successfully — `data` URL is ready |
+| `Deleted` | Queue entry no longer exists |
+| `None` | Unknown / not found |
+
+**Retry a failed job**
+```http
+POST /companies({companyId})/queues({id})/Microsoft.NAV.RetryTask
+Authorization: Bearer {token}
+```
+
+Requeues the same message for re-processing. Use after investigating a `Created`-but-stalled or errored entry.
+
+### JavaScript polling pattern
+
+```js
+async function pollUntilDone(companyId, messageId, token, maxWaitMs = 30_000) {
+  const base = `${BASE_URL}/companies(${companyId})/queues(${messageId})`;
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const st = await fetch(`${base}/Microsoft.NAV.GetStatus`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` }
+    }).then(r => r.json());
+    if (st.value === 'Updated') return; // done
+    if (st.value === 'Deleted')  throw new Error('Queue entry deleted');
+    await new Promise(r => setTimeout(r, 2000)); // wait 2 s before next poll
+  }
+  throw new Error('Timed out waiting for queue message to complete');
+}
+```
+
+---
+
 ## 4. Request Envelope
 
 Every POST body follows this structure:

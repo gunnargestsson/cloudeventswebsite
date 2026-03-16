@@ -133,6 +133,20 @@ textarea{resize:vertical;min-height:68px;line-height:1.5}
 .copy-btn.copied{border-color:var(--green2);color:var(--green)}
 .est{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px 16px;gap:10px;color:var(--text3);font-size:11px;text-align:center;line-height:1.6}
 .est svg{opacity:.12;margin-bottom:4px}
+.qbar{display:flex;align-items:center;gap:7px;padding:7px 13px;border-top:1px solid var(--border);font-size:10px;color:var(--text2);flex-wrap:wrap}
+.qid{font-size:9px;color:var(--text3);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:inherit}
+.qs-badge{font-size:8.5px;padding:2px 7px;font-weight:700;letter-spacing:.5px;border:1px solid;flex-shrink:0}
+.qs-created{background:rgba(255,214,10,.08);color:var(--yellow);border-color:rgba(255,214,10,.3)}
+.qs-updated{background:rgba(0,255,136,.08);color:var(--green);border-color:rgba(0,255,136,.3)}
+.qs-deleted,.qs-none{background:rgba(255,77,109,.07);color:var(--red);border-color:rgba(255,77,109,.3)}
+/* SIDEBAR HISTORY */
+.sb-tab-bar{display:flex;border-bottom:1px solid var(--border)}.sb-tab-btn{flex:1;padding:7px 4px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text3);font-family:inherit;font-size:9px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;font-weight:600;transition:all .15s}.sb-tab-btn:hover{color:var(--text2)}.sb-tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.sb-history{flex:1;overflow-y:auto}.sb-history::-webkit-scrollbar{width:3px}.sb-history::-webkit-scrollbar-thumb{background:var(--border2)}
+.hist-hdr{padding:6px 13px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;font-size:9px;color:var(--text3);letter-spacing:1px;text-transform:uppercase}
+.hist-hdr-btn{background:none;border:1px solid var(--border2);color:var(--text3);font-family:inherit;font-size:8.5px;padding:2px 8px;cursor:pointer;transition:all .15s;letter-spacing:1px;margin-left:auto}.hist-hdr-btn:hover{border-color:var(--accent2);color:var(--accent)}.hist-hdr-btn:disabled{opacity:.4;cursor:not-allowed}
+.hist-item{display:flex;flex-direction:column;gap:2px;padding:8px 13px;cursor:pointer;border-left:2px solid transparent;transition:all .15s;border-bottom:1px solid rgba(255,255,255,.03)}.hist-item:hover{background:var(--bg3);border-left-color:var(--border2)}.hist-item.active{background:var(--bg4);border-left-color:var(--accent)}
+.hist-row1{display:flex;align-items:center;gap:5px}.hist-type{font-size:10px;color:var(--text);font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hist-ep{font-size:7.5px;padding:2px 5px;font-weight:700;letter-spacing:.5px;flex-shrink:0}.hist-ep.ep-t{background:rgba(0,212,255,.1);color:var(--accent)}.hist-ep.ep-q{background:rgba(255,140,66,.12);color:var(--orange)}
+.hist-time{font-size:9px;color:var(--text3)}.hist-subj{font-size:9.5px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -154,9 +168,14 @@ textarea{resize:vertical;min-height:68px;line-height:1.5}
       <div><div class="lbl">Client Secret</div><input class="ci" id="cfgClientSecret" type="password" placeholder="your-client-secret"></div>
       <button class="btn-conn" id="connBtn" onclick="connectAndLoad()">Connect &amp; Load Types</button>
     </div>
+    <div class="sb-tab-bar">
+      <button class="sb-tab-btn active" id="sbTabTypes" onclick="switchSbTab('types')">Types</button>
+      <button class="sb-tab-btn" id="sbTabHistory" onclick="switchSbTab('history')">History</button>
+    </div>
     <div class="sb-types" id="sbTypes">
       <div class="sb-empty">Enter credentials above and connect<br>to discover available message types<br>via <code style="color:var(--accent)">Help.MessageTypes.Get</code><br><span style="font-size:9.5px;color:var(--text3);margin-top:4px;display:block">Token acquired automatically via<br>client_credentials grant</span></div>
     </div>
+    <div class="sb-history" id="sbHistory" style="display:none"></div>
   </aside>
 
   <!-- MAIN -->
@@ -206,6 +225,12 @@ textarea{resize:vertical;min-height:68px;line-height:1.5}
         <button class="pbtn" id="nextBtn" onclick="changePage(1)">Next →</button>
       </div>
     </div>
+    <div id="qbar" style="display:none" class="qbar">
+      <span class="qid" id="qbar-id"></span>
+      <span id="qbar-badge" class="qs-badge qs-created">—</span>
+      <button class="pbtn qact-btn" onclick="queueAction('queue-status')">Get Status</button>
+      <button class="pbtn qact-btn" onclick="queueAction('queue-retry')">Retry Task</button>
+    </div>
   </aside>
 </div>
 
@@ -216,9 +241,10 @@ let currentType = null;
 let currentTypeDef = null;
 let currentTab = 'compose';
 let lastResp = null;
-let currentPage = 0;
-const PAGE_SIZE = 50;
+let currentPage = 0;let lastQueueId = null;const PAGE_SIZE = 50;
 const docsCache = {};
+let historyItems = [];
+let historyLoaded = false;
 
 // ── NETWORK ───────────────────────────────────────────────────────────────────
 function g(id){ return (document.getElementById(id)||{}).value||''; }
@@ -252,6 +278,81 @@ async function cePost(envelope, endpoint='tasks'){
   return result;
 }
 
+// Queue actions — GetStatus / RetryTask on an existing queue item.
+async function ceQueueAction(queueId, action){
+  const res = await fetch('/api/explorer', {
+    method: 'POST',
+    headers: {
+      'Content-Type':       'application/json',
+      'x-bc-tenant':        g('cfgTenant').trim(),
+      'x-bc-client-id':     g('cfgClientId').trim(),
+      'x-bc-client-secret': g('cfgClientSecret').trim(),
+      'x-bc-environment':   g('cfgEnv').trim(),
+      'x-bc-company':       g('cfgCompany').trim(),
+      'x-bc-endpoint':      action,
+      'x-bc-queue-id':      queueId,
+    },
+    body: JSON.stringify({}),
+  });
+  const queueStatus = res.headers.get('x-queue-status')||'';
+  if(!res.ok){ const t=await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0,300)}`); }
+  const ct = res.headers.get('content-type')||'';
+  if(ct.includes('application/pdf')){
+    const blob = await res.blob();
+    return {_pdf:true, dataUrl:URL.createObjectURL(blob), status:'Success', _queueStatus:'Updated'};
+  }
+  const result = await res.json();
+  result._queueStatus = queueStatus || result._queueStatus || '';
+  return result;
+}
+
+// Fetch history (GET /tasks + /queues) via proxy.
+async function ceHistory(){
+  const res = await fetch('/api/explorer', {
+    method: 'POST',
+    headers: {
+      'Content-Type':       'application/json',
+      'x-bc-tenant':        g('cfgTenant').trim(),
+      'x-bc-client-id':     g('cfgClientId').trim(),
+      'x-bc-client-secret': g('cfgClientSecret').trim(),
+      'x-bc-environment':   g('cfgEnv').trim(),
+      'x-bc-company':       g('cfgCompany').trim(),
+      'x-bc-endpoint':      'history',
+    },
+    body: JSON.stringify({}),
+  });
+  if(!res.ok){ const t=await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0,300)}`); }
+  return res.json();
+}
+
+// Fetch a data URL result (for history replay) via proxy.
+async function ceFetchResult(dataUrl, datacontenttype=''){
+  const res = await fetch('/api/explorer', {
+    method: 'POST',
+    headers: {
+      'Content-Type':         'application/json',
+      'x-bc-tenant':          g('cfgTenant').trim(),
+      'x-bc-client-id':       g('cfgClientId').trim(),
+      'x-bc-client-secret':   g('cfgClientSecret').trim(),
+      'x-bc-environment':     g('cfgEnv').trim(),
+      'x-bc-company':         g('cfgCompany').trim(),
+      'x-bc-endpoint':        'fetch-result',
+      'x-bc-data-url':        dataUrl,
+      'x-bc-datacontenttype': datacontenttype,
+    },
+    body: JSON.stringify({}),
+  });
+  if(!res.ok){ const t=await res.text(); throw new Error(`HTTP ${res.status}: ${t.slice(0,300)}`); }
+  const ct = res.headers.get('content-type')||'';
+  if(ct.includes('application/pdf')){
+    const blob = await res.blob();
+    return {_pdf:true, dataUrl:URL.createObjectURL(blob), status:'Success'};
+  }
+  const result = await res.json();
+  if(result.error && !result.status) throw new Error(result.error);
+  return result;
+}
+
 // ── STATUS ────────────────────────────────────────────────────────────────────
 function setStatus(s,label){
   document.getElementById('sd').className=`sd ${s}`;
@@ -265,6 +366,7 @@ async function connectAndLoad(){
   }
   const btn = document.getElementById('connBtn');
   btn.disabled=true; btn.textContent='Connecting…';
+  historyLoaded=false;
   setStatus('ld','Loading…');
   document.getElementById('sbTypes').innerHTML=`<div class="sb-load"><span class="spinner"></span>Acquiring token, then calling Help.MessageTypes.Get…</div>`;
 
@@ -329,6 +431,8 @@ async function selectType(typeDef){
   document.getElementById('rmeta').style.display='none';
   document.getElementById('rbody').innerHTML=`<div class="re"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><div>No response yet</div></div>`;
   document.getElementById('pbar').style.display='none';
+  lastQueueId=null;
+  document.getElementById('qbar').style.display='none';
 
   if(currentTab==='compose') renderCompose();
   else if(currentTab==='preview') renderPreview();
@@ -576,9 +680,15 @@ async function sendReq(){
   const t0=Date.now();
   try{
     const result = await cePost(env, endpoint);
-    if(endpoint==='queues') result._note='Queued asynchronously. Poll /queues({id})/Microsoft.NAV.GetStatus to check.';
     lastResp=result; currentPage=0;
     setStatus('ok','Connected');
+    if(endpoint==='queues'){
+      lastQueueId=result.id||null;
+      showQbar(result.status||'Created');
+    } else {
+      lastQueueId=null;
+      document.getElementById('qbar').style.display='none';
+    }
     showResp(200,Date.now()-t0,result);
   } catch(e){
     setStatus('err','Error');
@@ -620,6 +730,177 @@ function showPaged(data){
 }
 
 function changePage(d){ if(!lastResp) return; currentPage=Math.max(0,currentPage+d); showPaged(lastResp); }
+
+// ── QUEUE ACTIONS ─────────────────────────────────────────────────────────────────
+function showQbar(status){
+  if(!lastQueueId) return;
+  const qbar=document.getElementById('qbar');
+  qbar.style.display='flex';
+  document.getElementById('qbar-id').textContent=`Queue ID: ${lastQueueId}`;
+  const badge=document.getElementById('qbar-badge');
+  badge.textContent=status||'—';
+  const cls={'Created':'qs-created','Updated':'qs-updated','Deleted':'qs-deleted','None':'qs-none'};
+  badge.className='qs-badge '+(cls[status]||'qs-created');
+}
+
+async function queueAction(action){
+  if(!lastQueueId) return;
+  document.querySelectorAll('.qact-btn').forEach(b=>b.disabled=true);
+  setStatus('ld', action==='queue-status'?'Polling status…':'Retrying…');
+  const t0=Date.now();
+  try{
+    const result = await ceQueueAction(lastQueueId, action);
+    setStatus('ok','Connected');
+    const qs=result._queueStatus||'';
+    if(action==='queue-retry'){
+      showQbar(qs||'Created');
+      document.getElementById('rbody').innerHTML=shl(JSON.stringify(result,null,2));
+      return;
+    }
+    // GetStatus
+    showQbar(qs);
+    if(qs==='Updated'){
+      // Got the actual result — display normally
+      lastResp=result; currentPage=0;
+      document.getElementById('qbar').style.display='none'; // result replaces queue view
+      lastQueueId=null;
+      showResp(200,Date.now()-t0,result);
+    } else if(qs==='Deleted'||qs==='None'){
+      document.getElementById('rbody').innerHTML=`<div class="re"><div style="color:var(--red)">${esc(qs)}</div><div style="font-size:9.5px">Queue item no longer exists.</div></div>`;
+    } else {
+      // Still running (Created) or unknown
+      document.getElementById('rbody').innerHTML=shl(JSON.stringify(result,null,2));
+    }
+  } catch(e){
+    setStatus('err','Error');
+    showResp(0,Date.now()-t0,{status:'Error',error:e.message},true);
+  } finally{
+    document.querySelectorAll('.qact-btn').forEach(b=>b.disabled=false);
+  }
+}
+
+// ── HISTORY ───────────────────────────────────────────────────────────────────
+function switchSbTab(tab){
+  const toTypes = tab==='types';
+  document.getElementById('sbTypes').style.display   = toTypes ? '' : 'none';
+  document.getElementById('sbHistory').style.display = toTypes ? 'none' : '';
+  document.getElementById('sbTabTypes').classList.toggle('active', toTypes);
+  document.getElementById('sbTabHistory').classList.toggle('active', !toTypes);
+  if(!toTypes && !historyLoaded) loadHistory();
+}
+
+async function loadHistory(){
+  const cont = document.getElementById('sbHistory');
+  cont.innerHTML = `<div class="sb-load"><span class="spinner"></span>Loading history…</div>`;
+  try{
+    const res = await ceHistory();
+    historyItems = res.items || [];
+    historyLoaded = true;
+    renderHistoryList();
+  } catch(e){
+    historyLoaded = false;
+    cont.innerHTML = `<div class="hist-hdr">Error<button class="hist-hdr-btn" onclick="loadHistory()">↺ Retry</button></div><div class="sb-empty">${esc(e.message)}</div>`;
+  }
+}
+
+function renderHistoryList(){
+  const cont = document.getElementById('sbHistory');
+  if(!historyItems.length){
+    cont.innerHTML = `<div class="hist-hdr">No history<button class="hist-hdr-btn" onclick="loadHistory()">↺ Refresh</button></div><div class="sb-empty">No tasks or queues found.<br>Send a request first, then refresh.</div>`;
+    return;
+  }
+  let html = `<div class="hist-hdr">${historyItems.length} recent<button class="hist-hdr-btn" onclick="loadHistory()">↺ Refresh</button></div>`;
+  for(let i=0; i<historyItems.length; i++){
+    const item = historyItems[i];
+    const isQ  = item._endpoint==='queues';
+    html += `<div class="hist-item" id="hi-${i}" onclick="openHistoryItem(${i})">
+      <div class="hist-row1">
+        <span class="hist-type">${esc(item.type||'?')}</span>
+        <span class="hist-ep ${isQ?'ep-q':'ep-t'}">${isQ?'Q':'T'}</span>
+      </div>
+      <div class="hist-time">${esc(fmtTime(item.time))}</div>
+      ${item.subject?`<div class="hist-subj">${esc(item.subject)}</div>`:''}
+    </div>`;
+  }
+  cont.innerHTML = html;
+}
+
+function fmtTime(isoStr){
+  if(!isoStr) return '—';
+  try{
+    const d=new Date(isoStr), diff=Date.now()-d;
+    if(diff<60000) return 'just now';
+    if(diff<3600000) return `${Math.floor(diff/60000)}m ago`;
+    if(diff<86400000) return `${Math.floor(diff/3600000)}h ago`;
+    return d.toLocaleDateString()+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  }catch{ return isoStr; }
+}
+
+async function openHistoryItem(idx){
+  const item = historyItems[idx];
+  if(!item) return;
+
+  // Highlight selected item in history list
+  document.querySelectorAll('.hist-item').forEach(el=>el.classList.remove('active'));
+  const el = document.getElementById(`hi-${idx}`);
+  if(el) el.classList.add('active');
+
+  // Update main panel title
+  const typeDef = allTypes.find(t=>t.name===item.type);
+  document.getElementById('mtn').textContent = item.type||'?';
+  document.getElementById('mtd').textContent = typeDef
+    ? (typeDef.description||'')
+    : `Source: ${item.source||'?'} · ${fmtTime(item.time)}`;
+  document.getElementById('sendBtn').disabled = !typeDef;
+
+  // Highlight in types list (without switching tabs)
+  document.querySelectorAll('.tb').forEach(b=>b.classList.remove('active'));
+  if(typeDef){
+    currentType = item.type;
+    currentTypeDef = typeDef;
+    const tbBtn = document.querySelector(`.tb[data-type="${CSS.escape(item.type)}"]`);
+    if(tbBtn) tbBtn.classList.add('active');
+    if(currentTab==='compose') renderCompose();
+    else if(currentTab==='preview') renderPreview();
+  } else {
+    document.getElementById('mbody').innerHTML = `<div class="info-box"><strong>${esc(item.type||'?')}</strong><br>
+      <span style="font-size:9.5px;color:var(--text3)">Type not found in current types list. Result shown in response panel.</span></div>`;
+  }
+
+  // Prepare response panel
+  document.getElementById('rmeta').style.display='none';
+  document.getElementById('rbody').innerHTML=`<div class="re"><span class="spinner" style="width:20px;height:20px;border-width:2px"></span><div>Fetching result…</div></div>`;
+  document.getElementById('pbar').style.display='none';
+  lastResp=null;
+
+  // For queue items set up the action bar so GetStatus / Retry still work
+  if(item._endpoint==='queues' && item.id){
+    lastQueueId=item.id;
+    showQbar(item.status||'Created');
+  } else {
+    lastQueueId=null;
+    document.getElementById('qbar').style.display='none';
+  }
+
+  // No data URL — show raw item
+  if(!item.data || !String(item.data).startsWith('https://api.businesscentral.dynamics.com/')){
+    const meta=document.getElementById('rmeta');
+    meta.style.display='flex';
+    meta.innerHTML=`<div class="rkv"><span class="k">Source</span><span class="v">${esc(item.source||'?')}</span></div>
+      <div class="rkv"><span class="k">Time</span><span class="v">${esc(fmtTime(item.time))}</span></div>`;
+    document.getElementById('rbody').innerHTML=shl(JSON.stringify(item,null,2));
+    return;
+  }
+
+  const t0=Date.now();
+  try{
+    const result = await ceFetchResult(item.data, item.datacontenttype||'');
+    lastResp=result; currentPage=0;
+    showResp(200, Date.now()-t0, result);
+  } catch(e){
+    showResp(0, Date.now()-t0, {status:'Error',error:e.message}, true);
+  }
+}
 
 // ── UTILITIES ─────────────────────────────────────────────────────────────────
 function shl(json){
