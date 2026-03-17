@@ -8,13 +8,15 @@ description: >
   field name normalization, or convert enum values. Also covers: dynamic schema
   discovery via the BC Metadata MCP server at https://dynamics.is/api/mcp (tools:
   list_tables, get_table_fields, get_table_info, list_companies, list_message_types,
-  get_records, search_customers, search_items, list_translations, set_translations;
+  get_records, search_customers, search_items, list_translations, set_translations,
+  get_integration_timestamp, set_integration_timestamp, reverse_integration_timestamp;
   resources: bc://tables, bc://tables/{name}, bc://message-types, bc://companies;
   prompts: customer_lookup_pattern, item_lookup_pattern, sales_order_creation_workflow,
   describe_table, find_tables_for_entity, data_model_overview), selecting only needed
   fields with fieldNumbers, tableView filtering and sorting in BC AL syntax (WHERE/
-  FILTER/CONST/SORTING), UI translations via the Cloud Event Translation table, field
-  metadata caching, webhooks, special field conversions (BLOB, Media, Dimension Set,
+  FILTER/CONST/SORTING/ORDER with skip+take for sorted paging), UI translations via the
+  Cloud Event Translation table, integration timestamps via the Cloud Events Integration
+  table, field metadata caching, webhooks, special field conversions (BLOB, Media, Dimension Set,
   Currency Code), and creating sales orders via the generic Data.Records.Set workflow.
 ---
 
@@ -1097,6 +1099,44 @@ WHERE(Blocked=CONST( ),Balance (LCY)=FILTER(>0))               ← multiple fiel
 ```
 
 Operators: `CONST` (exact), `FILTER` (pattern/range), `>` `<` `>=` `<=`, `&` (AND on same field), `|` (OR), `*` (wildcard), `@` (case-insensitive), `..` (range).
+
+### Sorting and paging within tableView
+
+Prepend a `SORTING(...)` clause (using BC **field names**, not JSON keys) and an `ORDER(...)` clause before the `WHERE` clause. Combine with `skip` and `take` to fetch a specific slice in a controlled order.
+
+```
+SORTING(Field1,Field2,Field3) ORDER(Ascending) WHERE(...)
+SORTING(Field1,Field2,Field3) ORDER(Descending) WHERE(...)
+```
+
+**Get the single most-recent record matching a filter** (skip:0, take:1, ORDER Descending):
+
+```json
+{
+  "tableName": "Cloud Events Integration",
+  "tableView": "SORTING(Source,Table Id,Date & Time) ORDER(Descending) WHERE(Source=CONST(MyApp),Table Id=CONST(18),Reversed=CONST(false))",
+  "skip": 0,
+  "take": 1
+}
+```
+
+**Get the 5 oldest customer ledger entries for a customer** (skip:0, take:5, ORDER Ascending):
+
+```json
+{
+  "tableName": "Cust. Ledger Entry",
+  "tableView": "SORTING(Customer No.,Posting Date) ORDER(Ascending) WHERE(Customer No.=CONST(10000))",
+  "skip": 0,
+  "take": 5
+}
+```
+
+Key rules:
+- `SORTING(...)` field names use BC field names (same as `WHERE` clauses), not JSON keys.
+- `ORDER(Ascending)` is the default — omit or include explicitly.
+- `ORDER(Descending)` reverses the sort. Combined with `take:1` and `skip:0` this efficiently retrieves the latest entry.
+- The `SORTING` + `ORDER` clause is evaluated **server-side by BC** — it is not client-side sorting in the MCP layer.
+- You can sort by multiple fields: `SORTING(Field1,Field2)` — BC uses them left to right.
 
 ---
 
@@ -2270,6 +2310,94 @@ Returns complete field metadata plus read/write permissions for the table.
 | `class` | `Normal` or `FlowField` |
 | `isPartOfPrimaryKey` | `true` if field is part of the primary key |
 | `enum` | Array of `{ value, caption }` for Option/Enum fields |
+
+---
+
+#### `get_integration_timestamp` — Latest integration DateTime for source + tableId
+
+Queries the **Cloud Events Integration** table for the most recent non-reversed `Date & Time`
+entry matching the given `source` and `tableId`. Uses
+`SORTING(Source,Table Id,Date & Time) ORDER(Descending) WHERE(...,Reversed=CONST(false))`
+with `skip:0, take:1` so only one record is fetched.
+
+**The Cloud Events Integration table schema:**
+
+| Field | Type | PK | JSON key | Notes |
+|---|---|---|---|---|
+| Source | Text | ✅ | `Source` | Integration source name |
+| Table Id | Integer | ✅ | `TableId` | BC table number |
+| Date & Time | DateTime | ✅ | `DateTime` | ISO 8601 timestamp |
+| Reversed | Boolean | | `Reversed` | `"true"` = entry is invalidated; ignored in lookup |
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `source` | string | ✅ | Integration source name (e.g. `"MyApp"`) |
+| `tableId` | integer | ✅ | BC table number (e.g. `18` for Customer) |
+
+**Returns:** `{ company, source, tableId, dateTime }` — `dateTime` is `null` if no entry exists.
+
+```json
+{ "company": "CRONUS IS", "source": "MyApp", "tableId": 18, "dateTime": "2026-03-17T10:00:00Z" }
+```
+
+---
+
+#### `set_integration_timestamp` — Record a completed integration run
+
+Inserts a new non-reversed entry into the Cloud Events Integration table. Call this after
+a successful sync to persist the exact cutoff timestamp. The `dateTime` value becomes the
+`Date & Time` primary key and is the value returned by the next `get_integration_timestamp` call.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `source` | string | ✅ | Integration source name |
+| `tableId` | integer | ✅ | BC table number |
+| `dateTime` | string | ✅ | ISO 8601 timestamp to record (e.g. `"2026-03-17T12:00:00Z"`) |
+
+**Returns:** `{ company, source, tableId, dateTime, written: 1 }`
+
+---
+
+#### `reverse_integration_timestamp` — Invalidate the current timestamp
+
+Finds the latest non-reversed entry for `source + tableId` and sets `Reversed = true`.
+Use this to roll back a sync checkpoint so the next run re-processes from the previous
+timestamp (leaving earlier non-reversed entries intact).
+
+The operation is a two-step read-then-modify:
+1. `Data.Records.Get` with descending sort + `Reversed=CONST(false)` + `take:1`
+2. `Data.Records.Set` with `mode: "modify"` to set `Reversed = "true"` on that record
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `source` | string | ✅ | Integration source name |
+| `tableId` | integer | ✅ | BC table number |
+
+**Returns:** `{ company, source, tableId, reversed: true, dateTime }` — or `reversed: false` with a message if no reversible entry was found.
+
+**Typical workflow:**
+
+```
+1. get_integration_timestamp({ source: "MyApp", tableId: 18 })
+   → { dateTime: "2026-03-17T09:00:00Z" }
+
+2. Run sync: fetch all Customer records modified after "2026-03-17T09:00:00Z"
+
+3. set_integration_timestamp({ source: "MyApp", tableId: 18, dateTime: "2026-03-17T12:00:00Z" })
+   → records the new cutoff
+
+4. If the sync fails:
+   reverse_integration_timestamp({ source: "MyApp", tableId: 18 })
+   → marks "2026-03-17T12:00:00Z" as reversed; next get returns "2026-03-17T09:00:00Z" again
+```
+
+---
 
 ### 23.3 Using MCP Metadata in Integration Code
 

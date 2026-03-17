@@ -20,6 +20,9 @@
  *   search_items       — Data.Records.Get — item lookup by description or number
  *   list_translations  — Cloud Event Translation — list UI translations (filter by source/lcid)
  *   set_translations   — Cloud Event Translation — upsert UI translation pairs
+ *   get_integration_timestamp   — Cloud Events Integration — latest non-reversed DateTime for source+tableId
+ *   set_integration_timestamp   — Cloud Events Integration — insert a DateTime entry for source+tableId
+ *   reverse_integration_timestamp — Cloud Events Integration — mark the latest non-reversed entry as reversed
  *
  * Resources: bc://companies, bc://message-types, bc://tables, bc://tables/{name}
  * Prompts:   describe_table, find_tables_for_entity, data_model_overview,
@@ -529,6 +532,122 @@ async function toolSetTranslations({ source, lcid, translations } = {}) {
   return { company: company.name, source, lcid: Number(lcid), written: translations.length };
 }
 
+// ── Cloud Events Integration helpers ─────────────────────────────────────────
+
+const CI_TABLE = "Cloud Events Integration";
+
+/**
+ * Builds the tableView for Cloud Events Integration:
+ *   SORTING(Source,Table Id,Date & Time) ORDER(Descending)
+ *   WHERE(Source=CONST(<source>),Table Id=CONST(<tableId>),Reversed=CONST(false))
+ * Using skip:0, take:1 returns the single most-recent non-reversed record.
+ */
+function ciTableView(source, tableId) {
+  return `SORTING(Source,Table Id,Date & Time) ORDER(Descending) WHERE(Source=CONST(${source}),Table Id=CONST(${tableId}),Reversed=CONST(false))`;
+}
+
+async function toolGetIntegrationTimestamp({ source, tableId } = {}) {
+  if (!source)  throw new Error("Parameter 'source' is required");
+  if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
+
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const company  = await getCompany();
+
+  const result = await bcTask(tenantId, env, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify({
+      tableName:  CI_TABLE,
+      tableView:  ciTableView(source, Number(tableId)),
+      skip:       0,
+      take:       1,
+    }),
+  });
+
+  const records = result.result || result.value || [];
+  if (!records.length) {
+    return { company: company.name, source, tableId: Number(tableId), dateTime: null };
+  }
+
+  const dateTime = (records[0].primaryKey || {}).DateTime || null;
+  return { company: company.name, source, tableId: Number(tableId), dateTime };
+}
+
+async function toolSetIntegrationTimestamp({ source, tableId, dateTime } = {}) {
+  if (!source)   throw new Error("Parameter 'source' is required");
+  if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
+  if (!dateTime) throw new Error("Parameter 'dateTime' is required (ISO 8601 string, e.g. '2026-03-17T12:00:00Z')");
+
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const company  = await getCompany();
+
+  await bcTask(tenantId, env, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Set",
+    source:      "BC Metadata MCP v1.0",
+    subject:     CI_TABLE,
+    data:        JSON.stringify({
+      data: [{
+        primaryKey: { Source: String(source), TableId: Number(tableId), DateTime: String(dateTime) },
+        fields:     { Reversed: "false" },
+      }],
+    }),
+  });
+
+  return { company: company.name, source, tableId: Number(tableId), dateTime: String(dateTime), written: 1 };
+}
+
+async function toolReverseIntegrationTimestamp({ source, tableId } = {}) {
+  if (!source)  throw new Error("Parameter 'source' is required");
+  if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
+
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const company  = await getCompany();
+
+  // Step 1: find the latest non-reversed record
+  const readResult = await bcTask(tenantId, env, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify({
+      tableName:  CI_TABLE,
+      tableView:  ciTableView(source, Number(tableId)),
+      skip:       0,
+      take:       1,
+    }),
+  });
+
+  const records = readResult.result || readResult.value || [];
+  if (!records.length) {
+    return { company: company.name, source, tableId: Number(tableId), reversed: false, dateTime: null,
+             message: "No non-reversed record found for this source + tableId" };
+  }
+
+  const pk       = records[0].primaryKey || {};
+  const dateTime = pk.DateTime;
+
+  // Step 2: mark it reversed
+  await bcTask(tenantId, env, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Set",
+    source:      "BC Metadata MCP v1.0",
+    subject:     CI_TABLE,
+    data:        JSON.stringify({
+      mode: "modify",
+      data: [{
+        primaryKey: { Source: String(source), TableId: Number(tableId), DateTime: String(dateTime) },
+        fields:     { Reversed: "true" },
+      }],
+    }),
+  });
+
+  return { company: company.name, source, tableId: Number(tableId), reversed: true, dateTime };
+}
+
 // ── MCP Tool definitions (JSON Schema) ────────────────────────────────────────
 
 const TOOLS = [
@@ -682,6 +801,43 @@ const TOOLS = [
     },
   },
   {
+    name:        "get_integration_timestamp",
+    description: "Returns the latest non-reversed Date & Time entry from the Cloud Events Integration table for a given source + tableId combination. Returns null if no entry exists.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        source:  { type: "string",  description: "Integration source name (e.g. 'MyApp')." },
+        tableId: { type: "integer", description: "BC table number (e.g. 18 for Customer)." },
+      },
+      required: ["source", "tableId"],
+    },
+  },
+  {
+    name:        "set_integration_timestamp",
+    description: "Inserts a new Date & Time entry into the Cloud Events Integration table for a given source + tableId. Use this to record the timestamp of a completed integration run.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        source:   { type: "string", description: "Integration source name." },
+        tableId:  { type: "integer", description: "BC table number." },
+        dateTime: { type: "string",  description: "ISO 8601 timestamp to record (e.g. '2026-03-17T12:00:00Z')." },
+      },
+      required: ["source", "tableId", "dateTime"],
+    },
+  },
+  {
+    name:        "reverse_integration_timestamp",
+    description: "Marks the latest non-reversed Cloud Events Integration entry for a given source + tableId as reversed (Reversed = true). Use to invalidate the current timestamp so the next sync re-processes from the previous one.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        source:  { type: "string",  description: "Integration source name." },
+        tableId: { type: "integer", description: "BC table number." },
+      },
+      required: ["source", "tableId"],
+    },
+  },
+  {
     name:        "set_translations",
     description: "Creates or updates Cloud Event Translation records. Each item is a {sourceText, targetText} pair. Uses upsert semantics — inserts new rows and updates existing ones.",
     inputSchema: {
@@ -753,8 +909,11 @@ async function handleMessage(msg) {
           case "set_records":           content = await toolSetRecords(args);              break;
           case "search_customers":      content = await toolSearchCustomers(args);        break;
           case "search_items":       content = await toolSearchItems(args);       break;
-          case "list_translations":  content = await toolListTranslations(args);  break;
-          case "set_translations":   content = await toolSetTranslations(args);   break;
+          case "list_translations":            content = await toolListTranslations(args);            break;
+          case "set_translations":             content = await toolSetTranslations(args);             break;
+          case "get_integration_timestamp":     content = await toolGetIntegrationTimestamp(args);     break;
+          case "set_integration_timestamp":     content = await toolSetIntegrationTimestamp(args);     break;
+          case "reverse_integration_timestamp": content = await toolReverseIntegrationTimestamp(args); break;
           default:
             return {
               jsonrpc: "2.0", id,
