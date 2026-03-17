@@ -110,7 +110,7 @@ Stored as a JSON array in the second Cloud Events Storage record:
 
 ### Valid field number range
 
-Only fields with field numbers in the range **1..1999999999** are valid for user selection. This is the range of application-defined BC fields returned by `Help.Fields.Get`.
+Only **Normal** fields with field numbers in the range **1..1999999999** are valid for user selection. **FlowFields are excluded** — `CSV.Records.Get` does not calculate FlowFields and they are silently skipped by BC. This is the range of application-defined Normal fields returned by `Help.Fields.Get` where `class === "Normal"`.
 
 Field numbers outside this range are system-level and are handled automatically:
 
@@ -137,10 +137,11 @@ When the user opens the Add/Edit Table panel and loads fields for a table (via `
 
 - The field picker loads all fields from `get_table_fields` for the chosen table.
 - Fields are displayed as: `[🔑] No. (1) — Code 20` / `Name (2) — Text 100` etc.
+- **FlowFields (`class === "FlowField"`) are not shown in the picker at all** — they are not supported by `CSV.Records.Get`.
 - Fields of unsupported types (BLOB, Media, MediaSet, RecordId, OemCode, OemText, TableFilter) are shown greyed-out and cannot be selected.
 - System fields (numbers outside 1..1999999999) are not shown in the picker at all.
-- The user may select any subset of the valid fields, or leave all unchecked to mirror all fields.
-- Stored `fieldNumbers` contains only numbers in range 1..1999999999.
+- The user may select any subset of the valid fields, or leave all unchecked to mirror all Normal fields.
+- Stored `fieldNumbers` contains only numbers in range 1..1999999999 belonging to Normal fields.
 
 ---
 
@@ -452,7 +453,7 @@ const mirrorConn = JSON.parse(dec.plaintext);
 | Field | Control | Editable when Active |
 |---|---|---|
 | Table name / number | Text input + Lookup button (`get_table_info`) | No |
-| Fields | Multi-select list loaded from `get_table_fields`; each entry shows field name, number, type, and 🔑 if part of BC primary key; unsupported types greyed-out; system fields (no. outside 1..1999999999) hidden; blank selection = all fields | No |
+| Fields | Multi-select list loaded from `get_table_fields`; only Normal fields (class = Normal, no. 1..1999999999) shown; FlowFields hidden; unsupported types (BLOB, Media, etc.) greyed-out; each entry shows field name, number, type, and 🔑 if part of BC primary key; blank selection = all Normal fields | No |
 | Filter (`tableView`) | Text input, BC AL expression | No |
 | Interval (min) | Number input, min 1, default 60 | Yes |
 
@@ -558,5 +559,5 @@ const UI_STRINGS = [
 | M1 | Exact Fabric Open Mirroring DDL JSON field names | Validate against current [Microsoft docs](https://learn.microsoft.com/en-us/fabric/database/mirrored-database/open-mirroring-landing-zone-format) |
 | M2 | `type` field for incremental data files after initial load | Likely `"Incremental"`  confirm from Fabric spec |
 | M3 | `$Company` column  include in DDL? | Yes, always, as `varchar(250)` |
-| M4 | When `fieldNumbers` is empty, DDL includes all non-BLOB / non-unsupported fields from `get_table_fields` (range 1..1999999999) + the 7 system columns | ✅ Confirmed |
+| M4 | When `fieldNumbers` is empty, DDL includes all Normal, non-BLOB / non-unsupported fields from `get_table_fields` (class = Normal, range 1..1999999999) + the 7 system columns. FlowFields are never included. | ✅ Confirmed |
 | M5 | ADLS path for `test-connection`  use root container or `Tables/` prefix? | Use root; just authenticate and check access |
