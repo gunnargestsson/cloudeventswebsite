@@ -18,7 +18,9 @@ description: >
   FILTER/CONST/SORTING/ORDER with skip+take for sorted paging), UI translations via the
   Cloud Event Translation table, integration timestamps via the Cloud Events Integration
   table, field metadata caching, webhooks, special field conversions (BLOB, Media, Dimension Set,
-  Currency Code), and creating sales orders via the generic Data.Records.Set workflow.
+  Currency Code), CSV bulk export via CSV.Records.Get (Open Mirroring format, no pagination,
+  column naming convention {name}-{no}, system fields always appended, $Company column),
+  and creating sales orders via the generic Data.Records.Set workflow.
 ---
 
 # Cloud Events BC Integration Skill
@@ -461,6 +463,102 @@ Response:
   ]
 }
 ```
+
+#### `CSV.Records.Get` — Export table as CSV (Open Mirroring format)
+
+Direction: **Outbound**  
+Content-Type: **text/csv**
+
+Exports all matching records from a BC table as a UTF-8 CSV file. The **full result set is always returned** — no pagination (unlike `Data.Records.Get`). Designed for bulk export and Open Mirroring scenarios.
+
+Table identification is the same priority order as `Data.Records.Get`: `tableNumber` → `tableName` → `subject`.
+
+```json
+{
+  "specversion": "1.0",
+  "type": "CSV.Records.Get",
+  "source": "my-integration",
+  "subject": "Customer",
+  "datacontenttype": "application/json",
+  "data": "{\"tableName\":\"Customer\",\"tableView\":\"WHERE(Blocked = CONST( ))\"}"
+}
+```
+
+Input parameters:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `tableName` | string | — | Table name (e.g. `"Customer"`) |
+| `tableNumber` / `tableNo` / `tableId` | integer | — | Table number (e.g. `18`) |
+| `fieldNumbers` | int[] | all fields | Specific field numbers to include (BLOB/Media fields are always skipped) |
+| `startDateTime` | ISO 8601 | — | Filter by `SystemModifiedAt` ≥ |
+| `endDateTime` | ISO 8601 | — | Filter by `SystemModifiedAt` ≤ |
+| `tableView` | string | — | BC AL table view filter (see §11) |
+
+**No `skip` or `take`** — the entire matching result set is always returned.
+
+**Column naming convention:** `{stripped field name}-{field number}`  
+Non-alphanumeric characters (except `%`) are stripped from the field name, then `-{no}` is appended.
+
+| BC field | Column header |
+|---|---|
+| `No.` (no 1) | `No-1` |
+| `Name` (no 2) | `Name-2` |
+| `Sell-to Customer No.` (no 2) | `SelltoCustomerNo-2` |
+| `SystemId` (no 2000000000) | `SystemId-2000000000` |
+
+**System fields always appended** (regardless of `fieldNumbers`):
+
+| Column | Field No. | Description |
+|---|---|---|
+| `Timestamp-0` | 0 | Internal timestamp (BigInteger) |
+| `SystemId-2000000000` | 2000000000 | Record GUID |
+| `SystemCreatedAt-2000000001` | 2000000001 | Creation timestamp UTC |
+| `SystemCreatedBy-2000000002` | 2000000002 | Created by user GUID |
+| `SystemModifiedAt-2000000003` | 2000000003 | Last modified timestamp UTC |
+| `SystemModifiedBy-2000000004` | 2000000004 | Last modified by user GUID |
+
+**`$Company` column** — appended before system fields for per-company tables. Value is the current company name (double-quoted).
+
+**Value formatting:**
+
+| Type | Format | Quoted |
+|---|---|---|
+| BigInteger, Integer, Decimal, Duration | Culture-invariant number | No |
+| Boolean | `true` or `false` | No |
+| Date | `YYYY-MM-DD` (blank → empty string) | No |
+| DateTime | ISO 8601 UTC with 3-digit ms, e.g. `2024-01-15T10:30:00.000Z` (zero DT → empty) | No |
+| Time | `HH:mm:ss` | Yes |
+| Option | Enum value name | Yes |
+| Code, Text, Guid | String value | Yes |
+
+String escaping: LF/CR → space; `\` → `\\`; `"` → `\"`; wrapped in double quotes.
+
+**Unsupported types (silently skipped):** BLOB, Media, MediaSet, RecordID, OemCode, OemText, TableFilter.
+
+Response — the `data` field contains a download URL:
+```
+/api/origo/cloudEvent/v1.0/responses({guid})
+```
+GET that URL to download the CSV. The first row is always the header; if no records match only the header row is returned.
+
+```
+No-1,Name-2,Address-5,City-7,$Company,SystemId-2000000000,SystemModifiedAt-2000000003,...
+"C00001","Fabrikam, Inc.","123 Main St","Seattle","CRONUS International Ltd.","7FE8C7...",2024-01-15T10:30:00.000Z,...
+```
+
+**Error handling:**
+
+| Condition | Result |
+|---|---|
+| Table not identified | Error raised |
+| Read permission denied | Error with table number |
+| No records match | CSV with header row only |
+| Unsupported field type | Field silently skipped |
+
+**Related:** `Data.Records.Get` — same filtering, JSON output, supports pagination · `Data.RecordIds.Get` — IDs + timestamps only
+
+---
 
 #### `Data.Records.Set` — Insert or update records
 
