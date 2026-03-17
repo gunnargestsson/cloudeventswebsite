@@ -395,7 +395,7 @@ async function toolGetTableFields({ table, lcid = 1033, format = "json", company
   return { company: company.name, table: String(table), permissions, fieldCount: fields.length, fields };
 }
 
-async function toolListCompanies({ tenantId, clientId, clientSecret, environment } = {}) {
+async function toolListCompanies({ tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   const conn      = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const companies = await _getCompanies(conn);
   return { companies: companies.map(c => ({ id: c.id, name: c.name, displayName: c.displayName })) };
