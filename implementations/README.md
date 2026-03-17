@@ -271,9 +271,38 @@ Copy the GUID of the company you want and paste it into `x-company-id` in `.vsco
 
 ---
 
+### Requirement 11: BC Open Mirror
+**Folder**: `requirement-11-open-mirror/`
+**Status**: 📝 Specification — Awaiting clarification
+**Description**: Standalone page (`bc-open-mirror.html`) that reads data from BC tables via `CSV.Records.Get` and sends it to a configured mirror destination. Supports both manual ("Run Now") and automatic per-table interval-based mirroring. Mirror destination connection config is stored encrypted in the BC `Cloud Events Storage` table. The `Cloud Events Integration` table tracks the last successful mirror timestamp per table.
+
+**Key Features**:
+- Navigation card on landing page alongside BC Portal, CE Explorer, Metadata Explorer
+- Single encrypted mirror destination connection config (stored in `Cloud Events Storage`, source `"BC Open Mirror"`, id `11111111-1111-1111-1111-000000000001`)
+- Per-table config (table name/number, field numbers, tableView filter, interval, active toggle) stored in `Cloud Events Storage` (id `11111111-1111-1111-1111-000000000002`)
+- Timestamp workflow using `Cloud Events Integration` (source `"BC Open Mirror"`, tableId = BC table number)
+- Pre-fetch count check via `Data.Records.Get` with `take:1` before calling `CSV.Records.Get`
+- Timestamp stored **before** the CSV fetch; rolled back via `reverse_integration_timestamp` on failure
+- Browser-based per-table interval scheduler (runs while page is open)
+- Manual "Run Now" button per table
+- Session-scoped run log (timestamp, record count, status, duration)
+
+**Open Questions (blocking)**:
+- Q1: Mirror destination type (Fabric Open Mirroring ADLS? Generic HTTP POST? Blob storage? Other?)
+- Q2: Connection fields for the chosen destination type
+- Q3: Encryption mechanism — reuse `/api/mcp` `encrypt_data` tool or add dedicated endpoint?
+- Q4: Does the CSV transit through the browser, or should a server-side hop fetch+push?
+- Q5: Error handling — auto-rollback timestamp on failure? (recommended: yes)
+- Q6: Table config details — active/inactive toggle? Display name alias? Additional tableView filter?
+- Q7: Single vs. multiple mirror destinations?
+- Q8: Run history — last-run indicator only, or session log, or persistent log?
+
+**Files**:
+- `SPECIFICATION.md` - Full specification with proposed architecture, layout wireframe, timestamp workflow, and all open questions
 
 
-### Cloud Events API Flow
+
+
 
 ```
 Client (Browser)
