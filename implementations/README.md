@@ -180,23 +180,27 @@ Each requirement is stored in its own subfolder with complete implementation det
 
 ### Requirement 8: BC Metadata MCP Server
 **Folder**: `requirement-8-mcp-server/`
-**Status**: ✅ Implemented (core) · ⏳ Extensions pending
+**Status**: ✅ Implemented  
 **Description**: Model Context Protocol server that exposes Business Central metadata and data to AI assistants (GitHub Copilot, Claude Desktop, Cursor) via a single HTTP POST endpoint at `/api/mcp`. Supports the MCP Streamable HTTP transport (`2024-11-05`).
 
 **Current Tools (implemented)**:
-- `list_tables` — all BC tables via `Help.Tables.Get`
-- `get_table_info` — summary for one table by name or number
-- `get_table_fields` — fields, types, enums, permissions for one table
+- `list_tables`, `get_table_info`, `get_table_fields` — BC table and field metadata
+- `list_companies`, `list_message_types`, `get_message_type_help`, `call_message_type`
+- `get_records`, `set_records`, `search_customers`, `search_items`
+- `list_translations`, `set_translations`
+- `get_record_count`, `get_sales_order_statistics`
+- `get_integration_timestamp`, `set_integration_timestamp`, `reverse_integration_timestamp`
+- `encrypt_data`, `decrypt_data` — AES-256-GCM symmetric encryption using server-side key
+
+**Credential handling:**
+- Server-side env vars (`BC_TENANT_ID`, `BC_CLIENT_ID`, `BC_CLIENT_SECRET`) are the default
+- Per-call `tenantId` / `clientId` / `clientSecret` / `environment` params override env vars
+- `encryptedConn` — Base64 AES-256-GCM blob containing JSON credentials; see §18 in SPECIFICATION.md
+- `x-encrypted-conn` HTTP header — workspace-level encrypted credentials set once in `.vscode/mcp.json`; automatically injected into every tool call (§18)
 
 **Planned Additions**:
-- `list_companies` — expose the BC company list
-- `list_message_types` — `Help.MessageTypes.Get` for Cloud Event type discovery
-- `get_records` — read data from any BC table with filter/paging
-- `search_customers` / `search_items` — AI-friendly entity lookup tools
-- Filter/paging params on `list_tables` (1 000+ table payloads are large for LLMs)
-- Markdown table output format for better LLM readability
-- MCP Resources (`bc://tables`, `bc://tables/{name}`)
-- MCP Prompts (describe_table, find_related_tables)
+- Optional `MCP_API_KEY` bearer token guard (§11a)
+- Updated `/.well-known/mcp.json` discovery document (§13)
 
 ---
 

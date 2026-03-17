@@ -1010,8 +1010,180 @@ case "set_translations":  content = await toolSetTranslations(args);  break;
 | 🟡 Medium | §15 — `get_message_type_help` tool + `implement_message_type` prompt | ~1 h |
 | 🟡 Medium | §16 — `set_records` tool — generic table write | ~1 h |
 | 🟡 Medium | §17 — `call_message_type` tool — generic Cloud Event caller | ~30 min |
+| ✅ Done | §18 — `x-encrypted-conn` header — workspace-level encrypted credentials | Done |
 
 ---
+
+### 18. Workspace-level encrypted connection via `x-encrypted-conn` header
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**Files:** `api/mcp/index.js`, `.vscode/mcp.json`
+
+**Background:**  
+All MCP tools accept per-call credential parameters (`tenantId`, `clientId`, `clientSecret`, `environment`). Typing these on every call is impractical. This feature lets you encrypt the credentials once into a single Base64 ciphertext and store it in the MCP client configuration. The server reads the ciphertext from the `x-encrypted-conn` HTTP request header and automatically injects it as the `encryptedConn` default for every tool call in that session.
+
+---
+
+#### Prerequisites
+
+`MCP_ENCRYPTION_KEY` must be set as an Azure Function application setting — a 64-character hex string (32 bytes, AES-256-GCM key).
+
+Generate a cryptographically strong key in PowerShell:
+```powershell
+[System.BitConverter]::ToString(
+  [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+).Replace('-','').ToLower()
+```
+Paste the output as the value of `MCP_ENCRYPTION_KEY` in the Azure Function → Configuration → Application settings.
+
+---
+
+#### Step 1 — Encrypt your connection JSON
+
+Build a JSON object with your BC credentials:
+```json
+{
+  "tenantId": "<Entra tenant GUID>",
+  "clientId": "<app registration client ID>",
+  "clientSecret": "<client secret>",
+  "environment": "production"
+}
+```
+
+Send it to the `encrypt_data` tool:
+```powershell
+$conn = '{"tenantId":"<guid>","clientId":"<guid>","clientSecret":"<secret>","environment":"production"}'
+
+$body = @{
+  jsonrpc = "2.0"; id = 1; method = "tools/call"
+  params  = @{ name = "encrypt_data"; arguments = @{ plaintext = $conn } }
+} | ConvertTo-Json -Depth 5 -Compress
+
+$ciphertext = (Invoke-RestMethod -Uri "https://dynamics.is/api/mcp" `
+  -Method POST -ContentType "application/json" -Body $body
+).result.content[0].text | ConvertFrom-Json | Select-Object -ExpandProperty ciphertext
+
+$ciphertext   # copy this value
+```
+
+The returned ciphertext is a Base64 string, for example:
+```
+YY4Kg63+WJFy4IAiks3SVk5FC7dxMKW0hGWwzVJ...
+```
+
+The plaintext credentials are never stored — only the encrypted blob.
+
+---
+
+#### Step 2 — Store the ciphertext in `.vscode/mcp.json`
+
+Edit `.vscode/mcp.json` to add a `headers` block:
+```json
+{
+  "servers": {
+    "bc-metadata": {
+      "type": "http",
+      "url": "https://dynamics.is/api/mcp",
+      "headers": {
+        "x-encrypted-conn": "<paste ciphertext here>"
+      }
+    }
+  }
+}
+```
+
+This header is sent automatically by VS Code / GitHub Copilot on every MCP request. Other clients (Claude Desktop, Cursor) support the same `headers` configuration key.
+
+---
+
+#### How the server handles the header
+
+1. The Azure Function reads `req.headers["x-encrypted-conn"]`.
+2. For every `tools/call` request, if `args.encryptedConn` is **not** already set by the caller, the header value is injected as the default.
+3. `resolveConn()` decrypts the blob via AES-256-GCM using `MCP_ENCRYPTION_KEY`, parses the resulting JSON, and fills in `tenantId`, `clientId`, `clientSecret`, `environment`.
+4. Explicit per-call parameters always override the header — so a caller can still target a different tenant by passing `tenantId` / `clientSecret` directly.
+
+**Priority order (highest to lowest):**
+```
+explicit argument param  >  encryptedConn arg  >  x-encrypted-conn header  >  server env var
+```
+
+---
+
+#### Server implementation details
+
+**`resolveConn()` — credential resolution function:**
+```js
+function resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (encryptedConn) {
+    const parsed = JSON.parse(toolDecryptData({ ciphertext: String(encryptedConn) }).plaintext);
+    tenantId     = tenantId     || parsed.tenantId;
+    clientId     = clientId     || parsed.clientId;
+    clientSecret = clientSecret || parsed.clientSecret;
+    environment  = environment  || parsed.environment;
+  }
+  return {
+    tenantId:     tenantId     || process.env.BC_TENANT_ID,
+    clientId:     clientId     || process.env.BC_CLIENT_ID,
+    clientSecret: clientSecret || process.env.BC_CLIENT_SECRET,
+    environment:  environment  || process.env.BC_ENVIRONMENT || "production",
+  };
+}
+```
+
+**Header injection in Azure Function entry point (`module.exports`):**
+```js
+// Read per-workspace encrypted connection from the x-encrypted-conn header
+const headerEncryptedConn = req.headers["x-encrypted-conn"] || "";
+```
+
+**Injection into `tools/call` dispatcher:**
+```js
+case "tools/call": {
+  const toolName = (params || {}).name;
+  const args     = (params || {}).arguments || {};
+  // Inject header value as workspace-level default (per-call arg takes priority)
+  if (headerEncryptedConn && !args.encryptedConn) args.encryptedConn = headerEncryptedConn;
+  // ...
+}
+```
+
+**CORS — `x-encrypted-conn` is allowed:**
+```js
+"Access-Control-Allow-Headers": "Content-Type, x-encrypted-conn"
+```
+
+---
+
+#### Ciphertext format
+
+The ciphertext produced by `encrypt_data` is a single Base64 string encoding:
+```
+base64( iv[12 bytes] | authTag[16 bytes] | ciphertext[n bytes] )
+```
+
+- **AES-256-GCM** — authenticated encryption; any tampering causes decryption to fail with an error
+- **Unique IV per call** — encrypting the same plaintext twice produces different ciphertexts
+- **Key** — `MCP_ENCRYPTION_KEY` (64 hex chars = 32 bytes), stored only on the server
+
+---
+
+#### Rotating the ciphertext
+
+If credentials change (secret rotation, new app registration), generate a new ciphertext and update `.vscode/mcp.json`:
+1. Re-run the `encrypt_data` PowerShell snippet (Step 1) with the new credentials.
+2. Paste the new ciphertext into `.vscode/mcp.json` → `headers.x-encrypted-conn`.
+
+To rotate the encryption key itself, set a new `MCP_ENCRYPTION_KEY` in Azure Function settings and re-encrypt all stored blobs.
+
+---
+
+#### Security notes
+
+- The ciphertext is safe to store in a repository — without the server-side key it is opaque.
+- The key (`MCP_ENCRYPTION_KEY`) must never be committed to the repository; it lives only in Azure Function application settings.
+- If `.vscode/mcp.json` is in `.gitignore` and contains real credentials as plaintext, move them to this encrypted form so the file can be committed safely.
+- GCM authentication guarantees integrity: a truncated, flipped, or forged ciphertext is rejected before any BC call is made.
 
 ---
 
