@@ -151,7 +151,13 @@ async function bcTask(tenantId, env, companyId, envelope) {
     { Authorization: auth },
     null,
   );
-  const result = JSON.parse(resultRaw);
+  let result;
+  try {
+    result = JSON.parse(resultRaw);
+  } catch {
+    // Response is plain text / markdown — return as-is
+    return resultRaw;
+  }
   if (result.status === "Error") throw new Error(result.error || JSON.stringify(result));
   return result;
 }
