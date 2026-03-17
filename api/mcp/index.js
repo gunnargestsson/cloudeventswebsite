@@ -20,7 +20,8 @@
  *   search_items       — Data.Records.Get — item lookup by description or number
  *   list_translations  — Cloud Event Translation — list UI translations (filter by source/lcid)
  *   set_translations   — Cloud Event Translation — upsert UI translation pairs
- *   get_record_count        — Data.Records.Get (take:1, field 1 only) — total record count for any table with optional filter
+ *   get_record_count             — Data.Records.Get (take:1, field 1 only) — total record count for any table with optional filter
+ *   get_sales_order_statistics  — Sales.Order.Statistics — amounts, VAT totals, quantities for a sales order
  *   get_integration_timestamp   — Cloud Events Integration — latest non-reversed DateTime for source+tableId
  *   set_integration_timestamp   — Cloud Events Integration — insert a DateTime entry for source+tableId
  *   reverse_integration_timestamp — Cloud Events Integration — mark the latest non-reversed entry as reversed
@@ -634,6 +635,27 @@ async function toolGetRecordCount({ table, filter } = {}) {
   return { company: company.name, table: String(table), filter: filter || null, count: noOfRecords };
 }
 
+async function toolGetSalesOrderStatistics({ orderNo } = {}) {
+  if (!orderNo) throw new Error("Parameter 'orderNo' is required");
+
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const company  = await getCompany();
+
+  const result = await bcTask(tenantId, env, company.id, {
+    specversion: "1.0",
+    type:        "Sales.Order.Statistics",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(orderNo),
+  });
+
+  // bcTask returns parsed JSON or a raw string; normalise
+  if (typeof result === "string") {
+    try { return JSON.parse(result); } catch { return { raw: result }; }
+  }
+  return result;
+}
+
 async function toolReverseIntegrationTimestamp({ source, tableId } = {}) {
   if (!source)  throw new Error("Parameter 'source' is required");
   if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
@@ -760,6 +782,17 @@ const TOOLS = [
         filter: { type: "string", description: "Optional BC tableView filter, e.g. \"WHERE(Blocked=CONST( ))\"." },
       },
       required: ["table"],
+    },
+  },
+  {
+    name:        "get_sales_order_statistics",
+    description: "Returns comprehensive statistics for a sales order (amounts, VAT totals, quantities, weight and volume) using the Sales.Order.Statistics Cloud Event message type. Equivalent to page 402 'Sales Order Statistics' in Business Central.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        orderNo: { type: "string", description: "Sales order number (e.g. '101016')." },
+      },
+      required: ["orderNo"],
     },
   },
   {
@@ -951,7 +984,8 @@ async function handleMessage(msg) {
           case "list_companies":        content = await toolListCompanies();              break;
           case "list_message_types":    content = await toolListMessageTypes(args);       break;
           case "get_message_type_help": content = await toolGetMessageTypeHelp(args);     break;
-          case "get_record_count":      content = await toolGetRecordCount(args);          break;
+          case "get_record_count":            content = await toolGetRecordCount(args);            break;
+          case "get_sales_order_statistics":  content = await toolGetSalesOrderStatistics(args);   break;
           case "get_records":           content = await toolGetRecords(args);              break;
           case "set_records":           content = await toolSetRecords(args);              break;
           case "search_customers":      content = await toolSearchCustomers(args);        break;
