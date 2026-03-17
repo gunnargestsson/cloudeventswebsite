@@ -90,7 +90,21 @@ function httpsRequest(hostname, path, method, headers, body) {
 
 // ── Token (module-level cache) ─────────────────────────────────────────────────
 
-function resolveConn({ tenantId, clientId, clientSecret, environment } = {}) {
+function resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  // If an encrypted connection blob is provided, decrypt and merge it first.
+  // Individual explicit params still override values from the blob.
+  if (encryptedConn) {
+    let parsed;
+    try {
+      parsed = JSON.parse(toolDecryptData({ ciphertext: String(encryptedConn) }).plaintext);
+    } catch (e) {
+      throw new Error(`encryptedConn could not be decrypted: ${e.message}`);
+    }
+    tenantId     = tenantId     || parsed.tenantId;
+    clientId     = clientId     || parsed.clientId;
+    clientSecret = clientSecret || parsed.clientSecret;
+    environment  = environment  || parsed.environment;
+  }
   return {
     tenantId:     tenantId     || process.env.BC_TENANT_ID,
     clientId:     clientId     || process.env.BC_CLIENT_ID,
@@ -297,11 +311,11 @@ function toolDecryptData({ ciphertext } = {}) {
 
 // ── Tool implementations ───────────────────────────────────────────────────────
 
-async function toolListTables({ lcid = 1033, filter, skip = 0, take = 200, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolListTables({ lcid = 1033, filter, skip = 0, take = 200, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   take = Math.min(Number(take) || 200, 500);
   skip = Math.max(Number(skip) || 0, 0);
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const result = await bcTask(conn, company.id, {
@@ -321,11 +335,11 @@ async function toolListTables({ lcid = 1033, filter, skip = 0, take = 200, compa
   return { company: company.name, total, skip, take, tableCount: tables.length, tables };
 }
 
-async function toolGetTableInfo({ table, lcid = 1033, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolGetTableInfo({ table, lcid = 1033, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!table) throw new Error("Parameter 'table' is required (table name or number)");
   validateTableName(table);
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const result = await bcTask(conn, company.id, {
@@ -340,11 +354,11 @@ async function toolGetTableInfo({ table, lcid = 1033, companyId, tenantId, clien
   return { company: company.name, table: tableData };
 }
 
-async function toolGetTableFields({ table, lcid = 1033, format = "json", companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolGetTableFields({ table, lcid = 1033, format = "json", companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!table) throw new Error("Parameter 'table' is required (table name or number)");
   validateTableName(table);
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const [fieldsResult, permsResult] = await Promise.all([
@@ -382,13 +396,13 @@ async function toolGetTableFields({ table, lcid = 1033, format = "json", company
 }
 
 async function toolListCompanies({ tenantId, clientId, clientSecret, environment } = {}) {
-  const conn      = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn      = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const companies = await _getCompanies(conn);
   return { companies: companies.map(c => ({ id: c.id, name: c.name, displayName: c.displayName })) };
 }
 
-async function toolListMessageTypes({ filter, companyId, tenantId, clientId, clientSecret, environment } = {}) {
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+async function toolListMessageTypes({ filter, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const result = await bcTask(conn, company.id, {
@@ -405,10 +419,10 @@ async function toolListMessageTypes({ filter, companyId, tenantId, clientId, cli
   return { company: company.name, typeCount: types.length, types };
 }
 
-async function toolGetMessageTypeHelp({ type, lcid = 1033, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolGetMessageTypeHelp({ type, lcid = 1033, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!type) throw new Error("Parameter 'type' is required (message type name, e.g. 'Customer.Create')");
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const result = await bcTask(conn, company.id, {
@@ -431,13 +445,13 @@ async function toolGetMessageTypeHelp({ type, lcid = 1033, companyId, tenantId, 
   return { company: company.name, type: String(type), markdown };
 }
 
-async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid = 1033, format = "json", companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid = 1033, format = "json", companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   validateTableName(table);
   take = Math.min(Number(take) || 50, 200);
   skip = Math.max(Number(skip) || 0, 0);
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const data = { tableName: String(table), skip, take };
@@ -475,7 +489,7 @@ async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid
   return ret;
 }
 
-async function toolSetRecords({ table, data, mode = "upsert", companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolSetRecords({ table, data, mode = "upsert", companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   if (!Array.isArray(data) || !data.length) throw new Error("Parameter 'data' must be a non-empty array");
   validateTableName(table);
@@ -491,7 +505,7 @@ async function toolSetRecords({ table, data, mode = "upsert", companyId, tenantI
     if (mode !== "delete" && (!rec.fields || typeof rec.fields !== "object")) throw new Error(`data[${i}].fields is required for mode '${mode}'`);
   }
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const payload = mode === "upsert" ? { data } : { mode, data };
@@ -508,11 +522,11 @@ async function toolSetRecords({ table, data, mode = "upsert", companyId, tenantI
   return { company: company.name, table: String(table), mode, written: data.length, records };
 }
 
-async function toolSearchCustomers({ query, take = 10, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolSearchCustomers({ query, take = 10, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!query) throw new Error("Parameter 'query' is required");
   take = Math.min(Number(take) || 10, 50);
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const isNo   = /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20;
@@ -531,11 +545,11 @@ async function toolSearchCustomers({ query, take = 10, companyId, tenantId, clie
   return { company: company.name, query, count: records.length, customers: records };
 }
 
-async function toolSearchItems({ query, take = 10, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolSearchItems({ query, take = 10, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!query) throw new Error("Parameter 'query' is required");
   take = Math.min(Number(take) || 10, 50);
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const filter = /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20
@@ -553,11 +567,11 @@ async function toolSearchItems({ query, take = 10, companyId, tenantId, clientId
   return { company: company.name, query, count: records.length, items: records };
 }
 
-async function toolListTranslations({ source, lcid, missingOnly = false, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolListTranslations({ source, lcid, missingOnly = false, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!source) throw new Error("Parameter 'source' is required");
   if (!lcid)   throw new Error("Parameter 'lcid' is required");
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const tableView = `WHERE(Windows Language ID=CONST(${Number(lcid)}),Source=CONST(${source}))`;
@@ -586,13 +600,13 @@ async function toolListTranslations({ source, lcid, missingOnly = false, company
   };
 }
 
-async function toolSetTranslations({ source, lcid, translations, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolSetTranslations({ source, lcid, translations, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!source)       throw new Error("Parameter 'source' is required");
   if (!lcid)         throw new Error("Parameter 'lcid' is required");
   if (!Array.isArray(translations) || !translations.length)
     throw new Error("Parameter 'translations' must be a non-empty array");
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const data = translations.map(t => ({
@@ -629,11 +643,11 @@ function ciTableView(source, tableId) {
   return `SORTING(Source,Table Id,Date & Time) ORDER(Descending) WHERE(Source=CONST(${source}),Table Id=CONST(${tableId}),Reversed=CONST(false))`;
 }
 
-async function toolGetIntegrationTimestamp({ source, tableId, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolGetIntegrationTimestamp({ source, tableId, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!source)  throw new Error("Parameter 'source' is required");
   if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const result = await bcTask(conn, company.id, {
@@ -657,12 +671,12 @@ async function toolGetIntegrationTimestamp({ source, tableId, companyId, tenantI
   return { company: company.name, source, tableId: Number(tableId), dateTime };
 }
 
-async function toolSetIntegrationTimestamp({ source, tableId, dateTime, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolSetIntegrationTimestamp({ source, tableId, dateTime, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!source)   throw new Error("Parameter 'source' is required");
   if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
   if (!dateTime) throw new Error("Parameter 'dateTime' is required (ISO 8601 string, e.g. '2026-03-17T12:00:00Z')");
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   await bcTask(conn, company.id, {
@@ -681,11 +695,11 @@ async function toolSetIntegrationTimestamp({ source, tableId, dateTime, companyI
   return { company: company.name, source, tableId: Number(tableId), dateTime: String(dateTime), written: 1 };
 }
 
-async function toolGetRecordCount({ table, filter, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolGetRecordCount({ table, filter, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   validateTableName(table);
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const data = { tableName: String(table), skip: 0, take: 1, fieldNumbers: [1] };
@@ -702,10 +716,10 @@ async function toolGetRecordCount({ table, filter, companyId, tenantId, clientId
   return { company: company.name, table: String(table), filter: filter || null, count: noOfRecords };
 }
 
-async function toolGetSalesOrderStatistics({ orderNo, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolGetSalesOrderStatistics({ orderNo, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!orderNo) throw new Error("Parameter 'orderNo' is required");
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const result = await bcTask(conn, company.id, {
@@ -722,10 +736,10 @@ async function toolGetSalesOrderStatistics({ orderNo, companyId, tenantId, clien
   return result;
 }
 
-async function toolCallMessageType({ type, subject, data, lcid = 1033, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolCallMessageType({ type, subject, data, lcid = 1033, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!type) throw new Error("Parameter 'type' is required (e.g. 'Customer.Create', 'Sales.Order.Statistics')");
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const envelope = {
@@ -750,11 +764,11 @@ async function toolCallMessageType({ type, subject, data, lcid = 1033, companyId
   return { company: company.name, type: String(type), result };
 }
 
-async function toolReverseIntegrationTimestamp({ source, tableId, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+async function toolReverseIntegrationTimestamp({ source, tableId, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!source)  throw new Error("Parameter 'source' is required");
   if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
 
-  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   // Step 1: find the latest non-reversed record
@@ -1105,6 +1119,7 @@ async function handleMessage(msg) {
           clientId:     { type: "string", description: "Azure AD application (client) ID. Falls back to BC_CLIENT_ID." },
           clientSecret: { type: "string", description: "Azure AD client secret. Falls back to BC_CLIENT_SECRET." },
           environment:  { type: "string", description: "BC environment name (default 'production'). Falls back to BC_ENVIRONMENT." },
+          encryptedConn: { type: "string", description: "Base64 ciphertext from encrypt_data containing a JSON object with tenantId, clientId, clientSecret, and optionally environment. Overridden by any explicit credential params above." },
         };
         const toolsOut = TOOLS.map(t => {
           const extraProps = t.name === "list_companies"
