@@ -37,6 +37,10 @@
  * Optional env vars: BC_ENVIRONMENT  (default "production")
  *                    BC_COMPANY_ID   (GUID — pin a specific company)
  *                    BC_COMPANY_NAME (display name fallback)
+ *
+ * All tools also accept per-call connection parameters (tenantId, clientId,
+ * clientSecret, environment, companyId) that override the env vars. This lets
+ * AI agents address any BC tenant/environment without redeploying the server.
  */
 "use strict";
 
@@ -81,15 +85,25 @@ function httpsRequest(hostname, path, method, headers, body) {
 
 // ── Token (module-level cache) ─────────────────────────────────────────────────
 
-let _token       = null;
-let _tokenExpiry = 0;
+function resolveConn({ tenantId, clientId, clientSecret, environment } = {}) {
+  return {
+    tenantId:     tenantId     || process.env.BC_TENANT_ID,
+    clientId:     clientId     || process.env.BC_CLIENT_ID,
+    clientSecret: clientSecret || process.env.BC_CLIENT_SECRET,
+    environment:  environment  || process.env.BC_ENVIRONMENT || "production",
+  };
+}
 
-async function getToken() {
-  if (_token && Date.now() < _tokenExpiry - 60_000) return _token;
+const _tokenCache = new Map(); // key: "tenantId|clientId" → { token, expiry }
 
-  const tenantId     = process.env.BC_TENANT_ID;
-  const clientId     = process.env.BC_CLIENT_ID;
-  const clientSecret = process.env.BC_CLIENT_SECRET;
+async function getToken(conn) {
+  const key    = `${conn.tenantId}|${conn.clientId}`;
+  const cached = _tokenCache.get(key);
+  if (cached && Date.now() < cached.expiry - 60_000) return cached.token;
+
+  const tenantId     = conn.tenantId;
+  const clientId     = conn.clientId;
+  const clientSecret = conn.clientSecret;
 
   const form = new URLSearchParams({
     grant_type:    "client_credentials",
@@ -110,15 +124,14 @@ async function getToken() {
   if (parsed.error) throw new Error(`Token error (${parsed.error}): ${parsed.error_description || ""}`);
   if (!parsed.access_token) throw new Error("Microsoft identity platform returned no access_token");
 
-  _token       = parsed.access_token;
-  _tokenExpiry = Date.now() + parsed.expires_in * 1_000;
-  return _token;
+  _tokenCache.set(key, { token: parsed.access_token, expiry: Date.now() + parsed.expires_in * 1_000 });
+  return parsed.access_token;
 }
 
 // ── BC standard REST (for company list) ────────────────────────────────────────
 
-async function bcGet(path) {
-  const token = await getToken();
+async function bcGet(path, conn) {
+  const token = await getToken(conn);
   const { statusCode, body } = await httpsRequest(
     BC_HOST, path, "GET",
     { Authorization: `Bearer ${token}` },
@@ -130,10 +143,10 @@ async function bcGet(path) {
 
 // ── CloudEvents task (two-step POST → GET) ─────────────────────────────────────
 
-async function bcTask(tenantId, env, companyId, envelope) {
-  const token    = await getToken();
+async function bcTask(conn, companyId, envelope) {
+  const token    = await getToken(conn);
   const auth     = `Bearer ${token}`;
-  const taskPath = `/v2.0/${tenantId}/${env}/api/origo/cloudEvent/v1.0/companies(${companyId})/tasks`;
+  const taskPath = `/v2.0/${conn.tenantId}/${conn.environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/tasks`;
   const bodyStr  = JSON.stringify(envelope);
 
   const { body: taskRaw } = await httpsRequest(
@@ -167,21 +180,21 @@ async function bcTask(tenantId, env, companyId, envelope) {
 
 // ── Company resolution (module-level cache) ────────────────────────────────────
 
-let _defaultCompanyId   = null;
-let _defaultCompanyName = null;
-let _companiesCache     = null;
+const _companiesCache    = new Map(); // key: "tenantId|environment" → companies[]
+const _defaultCompanyMap = new Map(); // key: "tenantId|environment|companyId|companyName" → { id, name }
 
-async function _getCompanies() {
-  if (_companiesCache) return _companiesCache;
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const result   = await bcGet(`/v2.0/${tenantId}/${env}/api/v2.0/companies`);
-  _companiesCache = Array.isArray(result) ? result : (result.value || []);
-  return _companiesCache;
+async function _getCompanies(conn) {
+  const key    = `${conn.tenantId}|${conn.environment}`;
+  const cached = _companiesCache.get(key);
+  if (cached) return cached;
+  const result = await bcGet(`/v2.0/${conn.tenantId}/${conn.environment}/api/v2.0/companies`, conn);
+  const list   = Array.isArray(result) ? result : (result.value || []);
+  _companiesCache.set(key, list);
+  return list;
 }
 
-async function getCompany(companyIdOverride) {
-  const companies = await _getCompanies();
+async function getCompany(companyIdOverride, conn) {
+  const companies = await _getCompanies(conn);
   if (!companies.length) throw new Error("No companies found in Business Central");
 
   // Explicit per-call override — match by GUID or exact name (case-insensitive)
@@ -194,8 +207,10 @@ async function getCompany(companyIdOverride) {
     return { id: found.id, name: found.name };
   }
 
-  // Cached default
-  if (_defaultCompanyId) return { id: _defaultCompanyId, name: _defaultCompanyName };
+  // Cached default (keyed per tenant+environment+company env vars)
+  const cacheKey = `${conn.tenantId}|${conn.environment}|${process.env.BC_COMPANY_ID || ""}|${(process.env.BC_COMPANY_NAME || "").toLowerCase()}`;
+  const cached   = _defaultCompanyMap.get(cacheKey);
+  if (cached) return cached;
 
   // Resolve from env vars
   const targetId   = process.env.BC_COMPANY_ID;
@@ -215,9 +230,9 @@ async function getCompany(companyIdOverride) {
     company = companies[0];
   }
 
-  _defaultCompanyId   = company.id;
-  _defaultCompanyName = company.name;
-  return { id: _defaultCompanyId, name: _defaultCompanyName };
+  const resolved = { id: company.id, name: company.name };
+  _defaultCompanyMap.set(cacheKey, resolved);
+  return resolved;
 }
 
 // ── Markdown helper ────────────────────────────────────────────────────────────
@@ -234,15 +249,14 @@ function toMarkdownTable(headers, rows) {
 
 // ── Tool implementations ───────────────────────────────────────────────────────
 
-async function toolListTables({ lcid = 1033, filter, skip = 0, take = 200, companyId } = {}) {
+async function toolListTables({ lcid = 1033, filter, skip = 0, take = 200, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   take = Math.min(Number(take) || 200, 500);
   skip = Math.max(Number(skip) || 0, 0);
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
-  const result = await bcTask(tenantId, env, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Help.Tables.Get",
     source:      "BC Metadata MCP v1.0",
@@ -259,15 +273,14 @@ async function toolListTables({ lcid = 1033, filter, skip = 0, take = 200, compa
   return { company: company.name, total, skip, take, tableCount: tables.length, tables };
 }
 
-async function toolGetTableInfo({ table, lcid = 1033, companyId } = {}) {
+async function toolGetTableInfo({ table, lcid = 1033, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!table) throw new Error("Parameter 'table' is required (table name or number)");
   validateTableName(table);
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
-  const result = await bcTask(tenantId, env, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Help.Tables.Get",
     source:      "BC Metadata MCP v1.0",
@@ -279,23 +292,22 @@ async function toolGetTableInfo({ table, lcid = 1033, companyId } = {}) {
   return { company: company.name, table: tableData };
 }
 
-async function toolGetTableFields({ table, lcid = 1033, format = "json", companyId } = {}) {
+async function toolGetTableFields({ table, lcid = 1033, format = "json", companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!table) throw new Error("Parameter 'table' is required (table name or number)");
   validateTableName(table);
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
   const [fieldsResult, permsResult] = await Promise.all([
-    bcTask(tenantId, env, company.id, {
+    bcTask(conn, company.id, {
       specversion: "1.0",
       type:        "Help.Fields.Get",
       source:      "BC Metadata MCP v1.0",
       data:        JSON.stringify({ tableName: String(table) }),
       lcid,
     }),
-    bcTask(tenantId, env, company.id, {
+    bcTask(conn, company.id, {
       specversion: "1.0",
       type:        "Help.Permissions.Get",
       source:      "BC Metadata MCP v1.0",
@@ -321,17 +333,17 @@ async function toolGetTableFields({ table, lcid = 1033, format = "json", company
   return { company: company.name, table: String(table), permissions, fieldCount: fields.length, fields };
 }
 
-async function toolListCompanies() {
-  const companies = await _getCompanies();
+async function toolListCompanies({ tenantId, clientId, clientSecret, environment } = {}) {
+  const conn      = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const companies = await _getCompanies(conn);
   return { companies: companies.map(c => ({ id: c.id, name: c.name, displayName: c.displayName })) };
 }
 
-async function toolListMessageTypes({ filter, companyId } = {}) {
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+async function toolListMessageTypes({ filter, companyId, tenantId, clientId, clientSecret, environment } = {}) {
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
-  const result = await bcTask(tenantId, env, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Help.MessageTypes.Get",
     source:      "BC Metadata MCP v1.0",
@@ -345,14 +357,13 @@ async function toolListMessageTypes({ filter, companyId } = {}) {
   return { company: company.name, typeCount: types.length, types };
 }
 
-async function toolGetMessageTypeHelp({ type, lcid = 1033, companyId } = {}) {
+async function toolGetMessageTypeHelp({ type, lcid = 1033, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!type) throw new Error("Parameter 'type' is required (message type name, e.g. 'Customer.Create')");
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
-  const result = await bcTask(tenantId, env, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Help.Implementation.Get",
     source:      "BC Metadata MCP v1.0",
@@ -372,21 +383,20 @@ async function toolGetMessageTypeHelp({ type, lcid = 1033, companyId } = {}) {
   return { company: company.name, type: String(type), markdown };
 }
 
-async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid = 1033, format = "json", companyId } = {}) {
+async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid = 1033, format = "json", companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   validateTableName(table);
   take = Math.min(Number(take) || 50, 200);
   skip = Math.max(Number(skip) || 0, 0);
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
   const data = { tableName: String(table), skip, take };
   if (filter) data.tableView = String(filter);
   if (Array.isArray(fields) && fields.length) data.fieldNumbers = fields;
 
-  const result = await bcTask(tenantId, env, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Data.Records.Get",
     source:      "BC Metadata MCP v1.0",
@@ -417,7 +427,7 @@ async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid
   return ret;
 }
 
-async function toolSetRecords({ table, data, mode = "upsert", companyId } = {}) {
+async function toolSetRecords({ table, data, mode = "upsert", companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   if (!Array.isArray(data) || !data.length) throw new Error("Parameter 'data' must be a non-empty array");
   validateTableName(table);
@@ -433,13 +443,12 @@ async function toolSetRecords({ table, data, mode = "upsert", companyId } = {}) 
     if (mode !== "delete" && (!rec.fields || typeof rec.fields !== "object")) throw new Error(`data[${i}].fields is required for mode '${mode}'`);
   }
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
   const payload = mode === "upsert" ? { data } : { mode, data };
 
-  const result = await bcTask(tenantId, env, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Data.Records.Set",
     source:      "BC Metadata MCP v1.0",
@@ -451,20 +460,19 @@ async function toolSetRecords({ table, data, mode = "upsert", companyId } = {}) 
   return { company: company.name, table: String(table), mode, written: data.length, records };
 }
 
-async function toolSearchCustomers({ query, take = 10, companyId } = {}) {
+async function toolSearchCustomers({ query, take = 10, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!query) throw new Error("Parameter 'query' is required");
   take = Math.min(Number(take) || 10, 50);
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
   const isNo   = /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20;
   const filter = isNo
     ? `WHERE(No.=FILTER(${query}*)|Name=FILTER(*${query}*))`
     : `WHERE(Name=FILTER(*${query}*))`;
 
-  const result = await bcTask(tenantId, env, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Data.Records.Get",
     source:      "BC Metadata MCP v1.0",
@@ -475,19 +483,18 @@ async function toolSearchCustomers({ query, take = 10, companyId } = {}) {
   return { company: company.name, query, count: records.length, customers: records };
 }
 
-async function toolSearchItems({ query, take = 10, companyId } = {}) {
+async function toolSearchItems({ query, take = 10, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!query) throw new Error("Parameter 'query' is required");
   take = Math.min(Number(take) || 10, 50);
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
   const filter = /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20
     ? `WHERE(No.=FILTER(${query}*)|Description=FILTER(*${query}*))`
     : `WHERE(Description=FILTER(*${query}*))`;
 
-  const result = await bcTask(tenantId, env, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Data.Records.Get",
     source:      "BC Metadata MCP v1.0",
@@ -498,16 +505,15 @@ async function toolSearchItems({ query, take = 10, companyId } = {}) {
   return { company: company.name, query, count: records.length, items: records };
 }
 
-async function toolListTranslations({ source, lcid, missingOnly = false, companyId } = {}) {
+async function toolListTranslations({ source, lcid, missingOnly = false, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!source) throw new Error("Parameter 'source' is required");
   if (!lcid)   throw new Error("Parameter 'lcid' is required");
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
   const tableView = `WHERE(Windows Language ID=CONST(${Number(lcid)}),Source=CONST(${source}))`;
-  const result = await bcTask(tenantId, env, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Data.Records.Get",
     source:      "BC Metadata MCP v1.0",
@@ -532,15 +538,14 @@ async function toolListTranslations({ source, lcid, missingOnly = false, company
   };
 }
 
-async function toolSetTranslations({ source, lcid, translations, companyId } = {}) {
+async function toolSetTranslations({ source, lcid, translations, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!source)       throw new Error("Parameter 'source' is required");
   if (!lcid)         throw new Error("Parameter 'lcid' is required");
   if (!Array.isArray(translations) || !translations.length)
     throw new Error("Parameter 'translations' must be a non-empty array");
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
   const data = translations.map(t => ({
     primaryKey: {
@@ -551,7 +556,7 @@ async function toolSetTranslations({ source, lcid, translations, companyId } = {
     fields: { TargetText: String(t.targetText || "") },
   }));
 
-  await bcTask(tenantId, env, company.id, {
+  await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Data.Records.Set",
     source:      "BC Metadata MCP v1.0",
@@ -576,15 +581,14 @@ function ciTableView(source, tableId) {
   return `SORTING(Source,Table Id,Date & Time) ORDER(Descending) WHERE(Source=CONST(${source}),Table Id=CONST(${tableId}),Reversed=CONST(false))`;
 }
 
-async function toolGetIntegrationTimestamp({ source, tableId, companyId } = {}) {
+async function toolGetIntegrationTimestamp({ source, tableId, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!source)  throw new Error("Parameter 'source' is required");
   if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
-  const result = await bcTask(tenantId, env, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Data.Records.Get",
     source:      "BC Metadata MCP v1.0",
@@ -605,16 +609,15 @@ async function toolGetIntegrationTimestamp({ source, tableId, companyId } = {}) 
   return { company: company.name, source, tableId: Number(tableId), dateTime };
 }
 
-async function toolSetIntegrationTimestamp({ source, tableId, dateTime, companyId } = {}) {
+async function toolSetIntegrationTimestamp({ source, tableId, dateTime, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!source)   throw new Error("Parameter 'source' is required");
   if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
   if (!dateTime) throw new Error("Parameter 'dateTime' is required (ISO 8601 string, e.g. '2026-03-17T12:00:00Z')");
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
-  await bcTask(tenantId, env, company.id, {
+  await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Data.Records.Set",
     source:      "BC Metadata MCP v1.0",
@@ -630,18 +633,17 @@ async function toolSetIntegrationTimestamp({ source, tableId, dateTime, companyI
   return { company: company.name, source, tableId: Number(tableId), dateTime: String(dateTime), written: 1 };
 }
 
-async function toolGetRecordCount({ table, filter, companyId } = {}) {
+async function toolGetRecordCount({ table, filter, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   validateTableName(table);
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
   const data = { tableName: String(table), skip: 0, take: 1, fieldNumbers: [1] };
   if (filter) data.tableView = String(filter);
 
-  const result = await bcTask(tenantId, env, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Data.Records.Get",
     source:      "BC Metadata MCP v1.0",
@@ -652,14 +654,13 @@ async function toolGetRecordCount({ table, filter, companyId } = {}) {
   return { company: company.name, table: String(table), filter: filter || null, count: noOfRecords };
 }
 
-async function toolGetSalesOrderStatistics({ orderNo, companyId } = {}) {
+async function toolGetSalesOrderStatistics({ orderNo, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!orderNo) throw new Error("Parameter 'orderNo' is required");
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
-  const result = await bcTask(tenantId, env, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Sales.Order.Statistics",
     source:      "BC Metadata MCP v1.0",
@@ -673,12 +674,11 @@ async function toolGetSalesOrderStatistics({ orderNo, companyId } = {}) {
   return result;
 }
 
-async function toolCallMessageType({ type, subject, data, lcid = 1033, companyId } = {}) {
+async function toolCallMessageType({ type, subject, data, lcid = 1033, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!type) throw new Error("Parameter 'type' is required (e.g. 'Customer.Create', 'Sales.Order.Statistics')");
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
   const envelope = {
     specversion: "1.0",
@@ -693,7 +693,7 @@ async function toolCallMessageType({ type, subject, data, lcid = 1033, companyId
     envelope.data = typeof data === "string" ? data : JSON.stringify(data);
   }
 
-  const result = await bcTask(tenantId, env, company.id, envelope);
+  const result = await bcTask(conn, company.id, envelope);
 
   if (typeof result === "string") {
     try { return { company: company.name, type: String(type), result: JSON.parse(result) }; }
@@ -702,16 +702,15 @@ async function toolCallMessageType({ type, subject, data, lcid = 1033, companyId
   return { company: company.name, type: String(type), result };
 }
 
-async function toolReverseIntegrationTimestamp({ source, tableId, companyId } = {}) {
+async function toolReverseIntegrationTimestamp({ source, tableId, companyId, tenantId, clientId, clientSecret, environment } = {}) {
   if (!source)  throw new Error("Parameter 'source' is required");
   if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
 
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany(companyId);
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment });
+  const company = await getCompany(companyId, conn);
 
   // Step 1: find the latest non-reversed record
-  const readResult = await bcTask(tenantId, env, company.id, {
+  const readResult = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Data.Records.Get",
     source:      "BC Metadata MCP v1.0",
@@ -733,7 +732,7 @@ async function toolReverseIntegrationTimestamp({ source, tableId, companyId } = 
   const dateTime = pk.DateTime;
 
   // Step 2: mark it reversed
-  await bcTask(tenantId, env, company.id, {
+  await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Data.Records.Set",
     source:      "BC Metadata MCP v1.0",
@@ -1030,10 +1029,18 @@ async function handleMessage(msg) {
         return { jsonrpc: "2.0", id, result: {} };
 
       case "tools/list": {
-        const coProp  = { type: "string", description: "Target company: BC company GUID or exact company name. Omit to use the server default company." };
+        const coProp   = { type: "string", description: "Target company: BC company GUID or exact company name. Omit to use the server default company." };
+        const connProps = {
+          tenantId:     { type: "string", description: "BC tenant ID (GUID). Falls back to the server's BC_TENANT_ID env var." },
+          clientId:     { type: "string", description: "Azure AD application (client) ID. Falls back to BC_CLIENT_ID." },
+          clientSecret: { type: "string", description: "Azure AD client secret. Falls back to BC_CLIENT_SECRET." },
+          environment:  { type: "string", description: "BC environment name (default 'production'). Falls back to BC_ENVIRONMENT." },
+        };
         const toolsOut = TOOLS.map(t => {
-          if (t.name === "list_companies") return t;
-          return { ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, companyId: coProp } } };
+          const extraProps = t.name === "list_companies"
+            ? connProps
+            : { companyId: coProp, ...connProps };
+          return { ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, ...extraProps } } };
         });
         return { jsonrpc: "2.0", id, result: { tools: toolsOut } };
       }
@@ -1047,7 +1054,7 @@ async function handleMessage(msg) {
           case "list_tables":        content = await toolListTables(args);        break;
           case "get_table_info":     content = await toolGetTableInfo(args);      break;
           case "get_table_fields":   content = await toolGetTableFields(args);    break;
-          case "list_companies":        content = await toolListCompanies();              break;
+          case "list_companies":        content = await toolListCompanies(args);              break;
           case "list_message_types":    content = await toolListMessageTypes(args);       break;
           case "get_message_type_help": content = await toolGetMessageTypeHelp(args);     break;
           case "call_message_type":     content = await toolCallMessageType(args);         break;
