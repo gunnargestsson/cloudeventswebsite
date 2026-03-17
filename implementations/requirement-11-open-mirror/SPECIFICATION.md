@@ -1,318 +1,520 @@
-# Requirement 11: BC Open Mirror
+﻿# Requirement 11: BC Open Mirror
 
-## Status: 📝 Specification — Awaiting Clarification
+## Status:  Specification  Ready for Implementation
 
 ---
 
 ## Overview
 
-A standalone page (`bc-open-mirror.html`) at the same level as `bc-portal.html`, `bc-metadata-explorer.html`, and `bc-cloud-events-explorer.html`. It reuses the same connection and language infrastructure (settings.js / landing page flow) as the other pages.
+A standalone page (`bc-open-mirror.html`) at the same level as `bc-portal.html`,
+`bc-metadata-explorer.html`, and `bc-cloud-events-explorer.html`. It reuses the same
+connection and language infrastructure (`settings.js` / landing-page flow) as all other
+pages.
 
-**Goal:** Read data from Business Central using `CSV.Records.Get` (one table at a time) and send it to a configured mirror destination, both on demand and on a per-table automatic schedule. All configuration — the mirror destination connection and the table/field selection — is stored encrypted in the BC `Cloud Events Storage` table. The `Cloud Events Integration` table is used to track the last successful mirror timestamp per table.
+**Goal:** Incrementally mirror Business Central table data to a **Microsoft Fabric Open
+Mirroring** landing zone (ADLS Gen2) using `CSV.Records.Get`. Each configured table runs
+on its own schedule (or manually). The Azure Function fetches from BC and uploads to ADLS
+in a single server-side hop  the CSV never goes through the browser. All configuration is
+stored encrypted in BC's `Cloud Events Storage` table. The `Cloud Events Integration`
+table tracks the last successful mirror timestamp per table.
 
 ---
 
-## Design Decisions (confirmed by user)
+## Design Decisions (all confirmed)
 
 | # | Decision | Answer |
 |---|----------|--------|
-| D1 | BC connection source | Same settings.js / landing-page flow as the other pages |
+| D1 | BC connection source | Same `settings.js` / landing-page flow as the other pages |
 | D2 | Language selector | Same shared language setup as other pages |
-| D3 | Config storage | `Cloud Events Storage` table (Source + Id primary key, BLOB Data) |
-| D4 | Config encryption | Encrypted on the server side before writing; decrypted on read |
-| D5 | Timestamp tracking | `Cloud Events Integration` table, one entry per (`source`, `tableId`) pair |
-| D6 | Timestamp `source` name | `"BC Open Mirror"` |
-| D7 | Timestamp stored **before** the CSV fetch | ✅ — endDateTime = now − 1 s written first; rolled back on failure |
-| D8 | First run startDateTime | Empty (omitted) — BC returns all records |
-| D9 | Pre-fetch count check | `Data.Records.Get` with same period + `take: 1`, read `noOfRecords` |
-| D10 | Scheduling scope | Browser-based per-table `setInterval`; scheduling only runs while the page is open |
-| D11 | Per-table interval | Configurable per table (minutes) |
-| D12 | Manual trigger | "Run Now" button per table |
+| D3 | Config storage | `Cloud Events Storage` table (Source + Id PK, BLOB Data) |
+| D4 | Config encryption | Server-side AES-256-GCM via `/api/mcp` `encrypt_data` / `decrypt_data` |
+| D5 | Timestamp tracking | `Cloud Events Integration`, source `"BC Open Mirror"`, one row per tableId |
+| D6 | Timestamp written before fetch | endDateTime = now1s written first; rolled back on failure |
+| D7 | First-run startDateTime | Omitted  BC returns all historical records |
+| D8 | Pre-fetch count check | `Data.Records.Get` with same date range + `take:1`; skip if `noOfRecords == 0` |
+| D9 | Scheduler scope | Browser-based `setInterval` per table; runs only while page is open |
+| D10 | Per-table interval | Configurable per table in minutes |
+| D11 | Manual trigger | "Run Now" button per table (visible when Active) |
+| D12 | Mirror destination type | **Microsoft Fabric Open Mirroring**  ADLS Gen2 service-principal auth |
+| D13 | Mirror connection fields | `mirrorUrl`, `tenant`, `clientId`, `clientSecret` |
+| D14 | CSV transit | **Server-side hop**  Function fetches from BC and uploads to ADLS; CSV never in browser |
+| D15 | Multiple destinations | Single destination for v1 |
+| D16 | Timestamp rollback on failure | `reverse_integration_timestamp` called on any run error |
+| D17 | Active/inactive toggle | Per-table; config is **locked while Active** |
+| D18 | Activation requires DDL upload | Every activation (and re-activation) sends Fabric Open Mirroring DDL |
+| D19 | Mirror connection prerequisite | Connection must be verified before any table can be activated |
+| D20 | Run log | Session-scoped, live-updating log panel on the page |
 
 ---
 
-## Open Questions — Need Answers Before Implementation
+## Configuration Storage
 
-### Q1 — Mirror destination type (BLOCKER)
+All configuration stored in **`Cloud Events Storage`** with `Source = "BC Open Mirror"`:
 
-**What does the mirror destination look like?**
-
-Options:
-- **A** Microsoft Fabric Open Mirroring — ADLS Gen2 landing zone URL + SAS token. Data is written as CSV files under `/Tables/{tableName}/` in an Azure Data Lake Storage container. This is the native Fabric mirroring path.
-- **B** Generic HTTP/REST endpoint — a URL that accepts HTTP POST with the CSV body (or JSON wrapper). Authentication via Bearer token or API key in a header.
-- **C** Azure Blob Storage — storage account URL + SAS token; upload CSV blobs.
-- **D** Other (please describe).
-
-> **Why it matters:** Determines the connection fields the user must configure and what the backend proxy function needs to do with the data after fetching it.
-
----
-
-### Q2 — Mirror connection configuration fields
-
-Depending on the answer to Q1, the fields stored in `Cloud Events Storage` will differ. Proposed for **Fabric Open Mirroring (Option A)**:
-
-| Field | Description |
-|---|---|
-| `landingZoneUrl` | ADLS Gen2 container URL (e.g. `https://{account}.dfs.core.windows.net/{container}`) |
-| `sasToken` | Shared Access Signature token (stored encrypted) |
-| `pathPrefix` | Optional prefix inside the container (default `/Tables`) |
-
-Proposed for **Generic HTTP endpoint (Option B)**:
-
-| Field | Description |
-|---|---|
-| `endpointUrl` | HTTP POST target URL |
-| `authHeader` | Header name (e.g. `Authorization`) |
-| `authValue` | Header value (e.g. `Bearer eyJ…`) — stored encrypted |
-| `contentType` | Request body content type (default `text/csv`) |
-
-**→ Please confirm which fields are needed, or describe the target system.**
-
----
-
-### Q3 — Encryption mechanism
-
-The mirror connection config is stored encrypted in BC. The encryption uses the server-side `MCP_ENCRYPTION_KEY` (AES-256-GCM) via the existing `/api/mcp` endpoint's `encrypt_data` / `decrypt_data` tools.
-
-The browser page would call `POST /api/mcp` with `encrypt_data` / `decrypt_data` as part of the save/load flow. Is this acceptable, or should encryption go through a dedicated lighter endpoint?
-
-Options:
-- **A** Reuse `POST /api/mcp` — call `encrypt_data` / `decrypt_data` tools directly from the browser (simplest, no new function needed)
-- **B** Add lightweight `POST /api/crypto` Azure Function — thin wrapper exposing only encrypt/decrypt (avoids MCP dependency)
-
----
-
-### Q4 — What happens to the CSV data at the destination?
-
-- **A** Always **append** — new records are appended to the destination on each run (tracking deletions is the destination's responsibility).
-- **B** **Upsert by SystemId** — the page parses the CSV, groups by SystemId, and merges with the destination.
-- **C** **Full replace per run** — the destination path is overwritten on each run.
-- **D** The page's job is only to **HTTP POST the raw CSV**; the destination handles it.
-
-> For Fabric Open Mirroring, Option D is standard: upload the CSV file to the landing zone and Fabric ingests it.
-
----
-
-### Q5 — Error handling / timestamp rollback
-
-When a mirror run fails after the timestamp has been written:
-
-- **A** **Auto-rollback**: call `reverse_integration_timestamp` to undo the written timestamp, so the next run re-tries from the previous checkpoint.
-- **B** **Keep the timestamp**: the run is considered attempted; data within that period may be lost but the pointer advances. Next run starts from the failed run's endDateTime.
-
-> Recommendation: **Option A** — rollback on failure gives at-least-once delivery semantics.
-
----
-
-### Q6 — Table/field configuration details
-
-For each table the user adds to the mirror, they configure:
-
-| Config field | Confirmed | Question |
-|---|---|---|
-| Table name or number | ✅ | — |
-| Field numbers (subset, or all) | ✅ | Should "all fields" be the default if none are specified? |
-| Mirror interval (minutes) | ✅ | What is the minimum interval? (e.g. 1 min, 5 min?) |
-| Active / inactive toggle | ❓ | Should individual tables be pauseable without deleting the config? |
-| Table alias / display name | ❓ | Do you want a free-text nickname for each table (e.g. "Customers-ISK") or just the BC table name? |
-| Additional `tableView` filter | ❓ | Should the user be able to add a BC AL filter (e.g. `WHERE(Blocked=CONST( ))`) per table? |
-
----
-
-### Q7 — Multiple mirror destinations
-
-Is this page configured for a **single mirror destination** (one connection config, N tables), or should it support **multiple destinations** each with their own connection and table set?
-
-- **A** Single destination — one encrypted connection block, one table list.
-- **B** Multiple destinations — each destination has its own name, connection config, and table list.
-
-> Recommendation: **Option A** for v1 — simpler to build and reason about. Multiple destinations can be a future requirement (Requirement 12).
-
----
-
-### Q8 — First-run end boundary
-
-On the **very first** run for a table (no timestamp stored yet):
-- `startDateTime` is omitted (full history from BC).
-- What should `endDateTime` be?
-  - **A** `now − 1 second` (same as subsequent runs) — mirror all historical data up to now, then track going forward.
-  - **B** `"2000-01-01T00:00:00Z"` to `now − 1 second` — same effect as A but explicit.
-
-> Recommendation: **Option A** — omit `startDateTime`, use `now − 1 second` as `endDateTime`.
-
----
-
-### Q9 — Scheduler persistence
-
-Browser-based scheduling (setInterval) only runs while the page is open. Is this acceptable for v1?
-
-- **A** ✅ Acceptable — user keeps the page open; tab stays alive.
-- **B** Should scheduling survive page close — would require a server-side job (Azure Timer Function or similar) and is a significantly larger scope.
-
----
-
-### Q10 — Run history / log
-
-Should the page display a **log of past mirror runs** per table (timestamp, records mirrored, status, duration), or just a "last run" indicator?
-
-- **A** Last-run summary only (timestamp + record count + status badge).
-- **B** Full scrollable run log per table (last N runs in memory for the session).
-- **C** Persistent run log (stored in `Cloud Events Storage`).
-
----
-
-## Proposed Architecture
-
-### Files
-
-| File | Purpose |
-|---|---|
-| `bc-open-mirror.html` | Full-page mirror UI |
-| `api/mirror/function.json` | Azure Function binding |
-| `api/mirror/index.js` | Proxy: fetch CSV from BC + forward to mirror destination + encrypt/decrypt config |
-| `staticwebapp.config.json` | Add route `/bc-open-mirror` → `bc-open-mirror.html` |
-| `index.html` | Add "Open Mirror" nav card |
-
-### Azure Function: `/api/mirror`
-
-Handles:
-1. **`action: "fetch-csv"`** — receives BC connection headers + message params → calls BC `/tasks` with `CSV.Records.Get` → returns raw CSV to browser
-2. **`action: "push-mirror"`** — receives raw CSV + mirror connection config → forwards to mirror destination → returns result
-3. **`action: "encrypt"`** / **`"decrypt"`** — thin wrapper around the AES-256-GCM key (if reusing server-side key rather than calling `/api/mcp`)
-
-Alternatively, steps 1+2 can be combined: the function fetches from BC and immediately pushes to the destination without the raw CSV ever going through the browser (better for large tables).
-
-**→ Q11: Should the CSV transit through the browser (browser downloads it then uploads it), or should the Azure Function fetch from BC and push to the destination in a single server-side hop?**
-
----
-
-## Configuration Storage (confirmed GUIDs)
-
-All config stored in **`Cloud Events Storage`** table:
-
-| Config | `Source` | `Id` (GUID) | Encrypted |
+| Config object | `Id` (GUID) | Encrypted | Contents |
 |---|---|---|---|
-| Mirror destination connection | `BC Open Mirror` | `11111111-1111-1111-1111-000000000001` | ✅ Yes |
-| Table & field configuration | `BC Open Mirror` | `11111111-1111-1111-1111-000000000002` | No (not sensitive) |
+| Mirror destination connection | `11111111-1111-1111-1111-000000000001` | Yes | `mirrorUrl`, `tenant`, `clientId`, `clientSecret`, `status` |
+| Table & field configuration | `11111111-1111-1111-1111-000000000002` | No | Array of table config objects |
+
+### Mirror Connection Config Object
+
+```json
+{
+  "mirrorUrl":    "https://{account}.dfs.core.windows.net/{container}/{path}",
+  "tenant":       "your-entra-tenant-id-or-domain",
+  "clientId":     "service-principal-client-id",
+  "clientSecret": "service-principal-client-secret",
+  "status":       "verified"
+}
+```
+
+`status` is `"verified"` after a successful test connection, `"unverified"` otherwise.
+A table cannot be activated unless `status === "verified"`.
+
+The ciphertext of this object is stored as a plain string in `Cloud Events Storage`
+(the `set_config` call uses `encrypt: false` since the value is already AES-256-GCM
+encrypted by `encrypt_data` before being passed to `set_config`).
+
+### Table Config Array
+
+Stored as a JSON array in the second Cloud Events Storage record:
+
+```json
+[
+  {
+    "tableId":      18,
+    "tableName":    "Customer",
+    "fieldNumbers": [1, 2, 5, 7, 35, 102],
+    "tableView":    "WHERE(Blocked=CONST( ))",
+    "intervalMin":  60,
+    "active":       true
+  },
+  {
+    "tableId":      27,
+    "tableName":    "Item",
+    "fieldNumbers": [],
+    "tableView":    "",
+    "intervalMin":  15,
+    "active":       false
+  }
+]
+```
+
+`fieldNumbers: []` means all fields (omitted from the BC API request).
 
 ---
 
-## Timestamp Workflow (per table)
+## Mirror Destination  ADLS Gen2 via Service Principal
+
+The Azure Function authenticates to ADLS Gen2 using:
+- `@azure/identity`  `ClientSecretCredential(tenant, clientId, clientSecret)`
+- `@azure/storage-file-datalake`  `DataLakeFileClient` for file upload
+
+### Landing Zone Path Structure
 
 ```
-Run triggered (manual or scheduled):
-  1. lastDateTime = get_integration_timestamp("BC Open Mirror", tableId) → may be null (first run)
-  2. endDateTime  = new Date(Date.now() - 1000).toISOString()
-  3. WRITE: set_integration_timestamp("BC Open Mirror", tableId, endDateTime)
-  4. CHECK: Data.Records.Get(tableName, startDateTime=lastDateTime, endDateTime, take=1)
-            → noOfRecords
-     If noOfRecords == 0: skip (nothing to mirror), done
-  5. FETCH: CSV.Records.Get(tableName, fieldNumbers, startDateTime=lastDateTime, endDateTime)
-  6. PUSH: send CSV to mirror destination
-  7a. SUCCESS: update UI — "Last mirrored: {endDateTime}, {count} records"
-  7b. FAILURE: reverse_integration_timestamp("BC Open Mirror", tableId) → roll back to lastDateTime
-              update UI — "Error: {message}"
+{mirrorUrl}/
+  Tables/
+    {tableName}/
+      _metadata/
+        DDL.json                         uploaded once on activation / re-activation
+      {YYYY}/
+        {MM}/
+          {DD}/
+            {YYYYMMDD_HHmmss_SSS}.csv    one file per successful mirror run
 ```
 
-> Note: For the first run, step 3 records `endDateTime`. Step 4 checks `startDateTime = null` (all records). Step 5 fetches all records.
+`{YYYYMMDD_HHmmss_SSS}` is the UTC `endDateTime` of the run, formatted for
+chronological sort order. Files within a day are always ordered correctly.
 
 ---
 
-## Layout (proposed)
+## Fabric Open Mirroring Metadata (DDL)
+
+When a table is **activated** (or **re-activated** after a config change), the page:
+
+1. Calls `/api/mcp`  `get_table_fields` to retrieve all field definitions for the table.
+2. Builds a DDL JSON object following the **Fabric Open Mirroring standard**.
+3. Calls `/api/mirror` with `action: "upload-ddl"`  the function uploads the JSON to
+   `{mirrorUrl}/Tables/{tableName}/_metadata/DDL.json` (overwrites any existing DDL).
+4. Only if the upload succeeds is the table marked Active and the interval started.
+
+### DDL Format
+
+The DDL uses the `{strippedName}-{fieldNo}` column naming convention identical to
+`CSV.Records.Get` output, so Fabric column names always match the CSV headers exactly.
+
+```json
+{
+  "type": "FullInitialLoad",
+  "schema": "dbo",
+  "tableName": "Customer",
+  "columns": [
+    { "columnName": "No-1",   "columnDataType": "varchar", "columnLength": 20,  "isNullable": true,  "isPrimaryKey": false },
+    { "columnName": "Name-2", "columnDataType": "varchar", "columnLength": 100, "isNullable": true,  "isPrimaryKey": false },
+    { "columnName": "$Company",                   "columnDataType": "varchar", "columnLength": 250, "isNullable": true,  "isPrimaryKey": false },
+    { "columnName": "Timestamp-0",                "columnDataType": "bigint",                       "isNullable": true,  "isPrimaryKey": false },
+    { "columnName": "SystemId-2000000000",         "columnDataType": "uniqueidentifier",             "isNullable": false, "isPrimaryKey": true  },
+    { "columnName": "SystemCreatedAt-2000000001",  "columnDataType": "datetime2",                    "isNullable": true,  "isPrimaryKey": false },
+    { "columnName": "SystemCreatedBy-2000000002",  "columnDataType": "uniqueidentifier",             "isNullable": true,  "isPrimaryKey": false },
+    { "columnName": "SystemModifiedAt-2000000003", "columnDataType": "datetime2",                    "isNullable": true,  "isPrimaryKey": false },
+    { "columnName": "SystemModifiedBy-2000000004", "columnDataType": "uniqueidentifier",             "isNullable": true,  "isPrimaryKey": false }
+  ],
+  "primaryKey": ["SystemId-2000000000"],
+  "watermarkColumn": "SystemModifiedAt-2000000003"
+}
+```
+
+Data upload files (subsequent incremental runs) use `"type": "Incremental"` instead of
+`"FullInitialLoad"`. Confirm exact enum values against the current
+[Fabric Open Mirroring landing zone format docs](https://learn.microsoft.com/en-us/fabric/database/mirrored-database/open-mirroring-landing-zone-format)
+during implementation.
+
+#### BC Field Type  Fabric DDL Type Mapping
+
+| BC Type | `columnDataType` | `columnLength` | Notes |
+|---|---|---|---|
+| Text[n] | `varchar` | n | |
+| Code[n] | `varchar` | n | |
+| Integer | `int` |  | |
+| BigInteger | `bigint` |  | |
+| Decimal | `decimal` | precision 38, scale 20 | |
+| Boolean | `bit` |  | |
+| Date | `date` |  | |
+| Time | `time` |  | |
+| DateTime | `datetime2` |  | |
+| DateFormula | `varchar` | 250 | |
+| Duration | `bigint` |  | Milliseconds |
+| Guid | `uniqueidentifier` |  | |
+| Option / Enum | `varchar` | 250 | Enum value name |
+| BLOB, Media, MediaSet, RecordId | **omit** |  | Not in DDL or CSV |
+
+System fields are always appended to every DDL regardless of `fieldNumbers`, with the
+types shown in the example above. `$Company` is always included for per-company tables.
+
+---
+
+## Table States and Lifecycle
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  ← Home   🪞 BC Open Mirror                  [Language] [Status] │
-├──────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │  MIRROR DESTINATION  [Edit] [Test Connection]               │ │
-│  │  Endpoint: https://...   Status: ● Connected                │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-│                                                                    │
-│  MIRROR TABLES  [+ Add Table]                                     │
-│  ┌──────────────────────────────────────────────────────────────┐ │
-│  │  Customer (18)                    Interval: 60 min  [▶ Run Now] │
-│  │  Fields: No., Name, Address, City (+4 more)  Active: ●      │ │
-│  │  Last run: 2026-03-17 14:30  •  247 records  •  ✅ OK       │ │
-│  ├──────────────────────────────────────────────────────────────┤ │
-│  │  Item (27)                        Interval: 15 min  [▶ Run Now] │
-│  │  Fields: No., Description, Unit Price (+2 more)  Active: ●  │ │
-│  │  Last run: –  •  Not yet mirrored                           │ │
-│  └──────────────────────────────────────────────────────────────┘ │
-│                                                                    │
-│  RUN LOG (session)                                                │
-│  14:30:02  Customer  →  247 records  ✅  0.8 s                   │
-│  14:15:01  Item      →  0 records (skipped)                      │
-└──────────────────────────────────────────────────────────────────┘
+[Not configured]
+         Add table (via "+ Add Table" panel)
+[Inactive]           config editable, no scheduler
+         Activate  (blocked if mirror connection not verified)
+          1. Call get_table_fields via /api/mcp  field definitions
+          2. Build DDL JSON
+          3. POST /api/mirror { action: "upload-ddl" }
+                failure: stay Inactive, show error
+          4. Mark Active, lock config, start setInterval(runMirror, intervalMin * 60000)
+[Active]             config locked (table, field numbers, filter)
+                      intervalMin editable (resets setInterval)
+         run fires (interval or Run Now)
+[Active / Running]   spinner shown on row
+         success or failure
+[Active]             success: update last-run, append to log
+[Active / Error]     failure: rollback timestamp, show error badge; scheduler keeps running
+         Deactivate
+[Inactive]           config editable again, setInterval cleared
+                      Cloud Events Integration timestamp preserved (resumes on next activation)
 ```
 
 ---
 
-## Table Configuration Panel (Add / Edit)
+## Timestamp Workflow (per-table mirror run)
 
-A modal or slide-in panel with:
+```
+Triggered by: setInterval or "Run Now" button
 
-| Field | Control | Notes |
+1. Read lastDateTime
+   POST /api/explorer  { type: "Data.Records.Get", subject: "Cloud Events Integration",
+                         data: { tableView: "WHERE(Source=CONST(BC Open Mirror),Table Id=CONST({tableId}),
+                                             Reversed=CONST(false)) SORTING(Date & Time) ORDER(Descending)",
+                                 take: 1 } }
+    lastDateTime = records[0].primaryKey.DateTime  (null if no records)
+
+   [OR call GET /api/explorer with get_integration_timestamp via cloud events /tasks]
+
+2. endDateTime = new Date(Date.now() - 1000).toISOString()
+
+3. WRITE timestamp
+   POST /api/explorer  Data.Records.Set  Cloud Events Integration
+   { Source: "BC Open Mirror", TableId: tableId, DateTime: endDateTime, Reversed: false }
+    on write failure: abort + log error (nothing to reverse)
+
+4. COUNT CHECK
+   POST /api/explorer  Data.Records.Get  tableName
+   { startDateTime: lastDateTime, endDateTime, take: 1, fieldNumbers: [1] }
+    noOfRecords
+   If noOfRecords === 0:
+      log "Skipped  no records in range [lastDateTime  endDateTime]"
+      done  (timestamp is kept as a heartbeat)
+
+5. FETCH + PUSH
+   POST /api/mirror  { action: "mirror-table",
+                       bcConn, tableName, tableId,
+                       fieldNumbers, tableView,
+                       startDateTime: lastDateTime,    omitted on first run
+                       endDateTime,
+                       mirrorConn }
+   Function internally:
+     a. Authenticate to BC (OAuth2 client credentials)
+     b. POST /tasks   CSV.Records.Get   response URL
+     c. GET  response URL               raw CSV text
+     d. Authenticate to ADLS Gen2 (ClientSecretCredential)
+     e. Upload CSV  {mirrorUrl}/Tables/{tableName}/{YYYY}/{MM}/{DD}/{timestamp}.csv
+     f. Return { recordCount, csvPath, bytesUploaded }
+
+6a. SUCCESS
+     update table card: last-run timestamp + record count
+     append run-log row: time | table | N records |  | duration
+
+6b. FAILURE  (any step in 5 throws)
+     POST /api/explorer  reverse_integration_timestamp
+      (finds latest non-reversed entry for "BC Open Mirror" + tableId, sets Reversed=true)
+     update table card: error badge + message
+     append run-log row: time | table |  | error message
+     table state  Active / Error  (scheduler still running; next interval will retry)
+```
+
+---
+
+## Azure Function `/api/mirror`  Action Reference
+
+All actions: `POST /api/mirror` with JSON body.
+
+### `"test-connection"`
+
+```json
+{
+  "action": "test-connection",
+  "mirrorConn": { "mirrorUrl": "...", "tenant": "...", "clientId": "...", "clientSecret": "..." }
+}
+```
+
+Attempts to read properties of the ADLS Gen2 path using `ClientSecretCredential`.
+Returns `{ ok: true }` or `{ ok: false, error: "..." }`.
+
+### `"upload-ddl"`
+
+```json
+{
+  "action": "upload-ddl",
+  "mirrorConn": { ... },
+  "tableName": "Customer",
+  "ddl": { /* DDL object built by browser from get_table_fields result */ }
+}
+```
+
+Uploads `ddl` as JSON to `{mirrorUrl}/Tables/{tableName}/_metadata/DDL.json`.
+Returns `{ ok: true, path: "..." }` or `{ ok: false, error: "..." }`.
+
+### `"mirror-table"`
+
+```json
+{
+  "action":       "mirror-table",
+  "bcConn":       { "tenantId": "...", "clientId": "...", "clientSecret": "...", "environment": "...", "companyId": "..." },
+  "mirrorConn":   { "mirrorUrl": "...", "tenant": "...", "clientId": "...", "clientSecret": "..." },
+  "tableName":    "Customer",
+  "tableId":      18,
+  "fieldNumbers": [1, 2, 5, 7],
+  "tableView":    "WHERE(Blocked=CONST( ))",
+  "startDateTime": "2026-03-17T10:00:00.000Z",
+  "endDateTime":   "2026-03-17T14:29:59.000Z"
+}
+```
+
+`startDateTime` is omitted on first run. `bcConn` is omitted in server mode (function
+uses env vars). Returns `{ recordCount, csvPath, bytesUploaded }` or throws on error.
+
+---
+
+## Encrypt / Decrypt Flow (browser  /api/mcp)
+
+**Save connection config:**
+
+```javascript
+// 1. Encrypt
+const encRes = await mcpCall("encrypt_data", { plaintext: JSON.stringify(mirrorConn) });
+// encRes.ciphertext is already encrypted  store it as a plain string (no double-encrypt)
+
+// 2. Store in BC
+await mcpCall("set_config", {
+  source: "BC Open Mirror",
+  id:     "11111111-1111-1111-1111-000000000001",
+  data:   encRes.ciphertext,   // plain string storage
+  encrypt: false
+});
+```
+
+**Load connection config:**
+
+```javascript
+// 1. Read from BC
+const cfg = await mcpCall("get_config", {
+  source: "BC Open Mirror",
+  id:     "11111111-1111-1111-1111-000000000001"
+});
+// cfg.data is the ciphertext string
+
+// 2. Decrypt
+const dec = await mcpCall("decrypt_data", { ciphertext: cfg.data });
+const mirrorConn = JSON.parse(dec.plaintext);
+// mirrorConn lives only in JS memory  never in localStorage
+```
+
+---
+
+## Page Layout (wireframe)
+
+```
+
+   Home    BC Open Mirror                     [Language] [BC Status]
+
+                                                                       
+  
+   MIRROR DESTINATION                    [Edit]  [Save & Verify]   
+    ADLS URL:  https://account.dfs.core.windows.net/container/path 
+    Tenant:    my-tenant.onmicrosoft.com                           
+    Client ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx                
+    Secret:                                            
+    Status:     Verified                                          
+  
+                                                                       
+  MIRROR TABLES                                        [+ Add Table]  
+  
+    Customer (18)        Every [60] min    Active   [ Run Now]   
+    Fields: No., Name, Address, City (+4 more)                      
+    Filter: WHERE(Blocked=CONST( ))                                 
+    Last run: 2026-03-17 14:29  247 records                    
+                                            [Deactivate]            
+  
+    Item (27)            Every [15] min    Inactive                
+    Fields: all fields                                               
+    Filter:                                                         
+    Last run:     Not yet mirrored                                
+                                  [ Edit]  [ Remove]  [Activate] 
+  
+                                                                       
+  SESSION RUN LOG                                 [Clear]             
+  
+    14:29:59  Customer   247 records     0.8 s                    
+    14:14:58  Item        0 records  skipped (none in range)       
+    13:59:57  Customer    12 records     0.5 s                    
+  
+
+```
+
+---
+
+## Add / Edit Table Panel (modal)
+
+| Field | Control | Editable when Active |
 |---|---|---|
-| Table | Text input with BC table lookup / autocomplete | Resolved to table number via `Help.Tables.Get` |
-| Fields | Multi-select or comma-separated field numbers | Blank = all fields |
-| `tableView` filter | Text input | Optional BC AL filter expression |
-| Mirror interval | Number input (minutes) | Per-table; minimum TBD (see Q6) |
-| Active | Toggle | Start/stop auto-scheduling for this table |
-| Display name | Text input | Optional friendly name (see Q6) |
+| Table name / number | Text input + Lookup button (`get_table_info`) | No |
+| Field numbers | Comma-separated integers, blank = all | No |
+| Filter (`tableView`) | Text input, BC AL expression | No |
+| Interval (min) | Number input, min 1, default 60 | Yes |
+
+The panel is disabled for Active tables (Deactivate first). The interval field is also
+inline-editable on the table card while Active to allow quick adjustments.
 
 ---
 
-## Translation strings (provisional)
+## Navigation Card (index.html)
+
+```html
+<a href="bc-open-mirror.html" class="nav-card">
+  <div class="nav-card-icon"></div>
+  <div class="nav-card-title">Open Mirror</div>
+  <div class="nav-card-desc">Mirror BC tables to Fabric ADLS landing zone</div>
+</a>
+```
+
+---
+
+## Translation Strings
 
 ```javascript
 const UI_STRINGS = [
   "Mirror Destination",
   "Edit",
-  "Test Connection",
+  "Save & Verify",
   "Mirror Tables",
   "Add Table",
   "Run Now",
+  "Activate",
+  "Deactivate",
   "Active",
+  "Inactive",
   "Interval (minutes)",
   "Last run",
   "records",
   "Not yet mirrored",
-  "Run Log",
-  "Success",
-  "Skipped (no records)",
-  "Error",
-  "Connecting…",
-  "Saving configuration…",
-  "Loading configuration…",
+  "Session Run Log",
+  "Clear",
+  "Skipped  no new records in range",
   "Table",
-  "Fields",
+  "Fields (blank = all)",
   "Filter",
-  "Display name",
   "Save",
   "Cancel",
-  "Delete table",
-  "Confirm delete?",
-  "Nothing to mirror — no new records in range",
-  "Connection saved",
+  "Remove",
+  "Confirm remove?",
+  "Connection verified",
   "Connection test failed",
+  "Uploading schema to Fabric",
+  "Schema uploaded  table is now active",
+  "Mirror connection must be verified before activating a table",
+  "Deactivate table before editing field configuration",
+  "skipped",
+  "bytes uploaded",
+  "Open Mirror",
+  "Mirror BC tables to Fabric ADLS landing zone",
 ];
 ```
 
 ---
 
-## Implementation Order (draft — pending answers)
+## npm Dependencies (api/package.json additions)
 
-| Priority | Item | Blocked by |
+```json
+"@azure/identity": "^4.x",
+"@azure/storage-file-datalake": "^12.x"
+```
+
+---
+
+## Implementation Order
+
+| Priority | Item |
+|---|---|
+|  1 | `api/package.json`  add `@azure/identity`, `@azure/storage-file-datalake` |
+|  2 | `api/mirror/function.json` + `index.js` skeleton + `test-connection` action |
+|  3 | `api/mirror/index.js`  `upload-ddl` action (DDL build + ADLS write) |
+|  4 | `api/mirror/index.js`  `mirror-table` action (BC CSV fetch + ADLS upload, server-side hop) |
+|  5 | `bc-open-mirror.html`  page scaffold,  Home, `settings.js` integration, language |
+|  6 | Mirror Destination section  form, save/verify, encrypt/decrypt via MCP |
+|  7 | Config load on page start (get_config + decrypt_data) |
+|  8 | Add / Edit Table panel  modal, field lookup, `set_config` persist |
+|  9 | Table card rendering (Active / Inactive / Error states) |
+|  10 | Activation flow: get_table_fields  build DDL  upload-ddl  lock + start interval |
+|  11 | Timestamp workflow: get/set/reverse via Cloud Events Integration |
+|  12 | Mirror run function wiring (count check + mirror-table call) |
+|  13 | Session Run Log panel  live append |
+|  14 | "Run Now" button |
+|  15 | Inline interval editing while Active |
+|  16 | `index.html` nav card + `staticwebapp.config.json` route |
+|  17 | Translation strings (Icelandic) |
+
+---
+
+## Minor Open Points (resolve during implementation)
+
+| # | Question | Recommendation |
 |---|---|---|
-| 🔴 High | §Q1 — Mirror destination type | User answer |
-| 🔴 High | §Q2 — Connection fields | Q1 |
-| 🔴 High | §Q3 — Encryption mechanism | Q1 |
-| 🔴 High | §Q11 — Server-side vs browser-side CSV transit | Q1 |
-| 🟡 Medium | Config storage (Cloud Events Storage read/write) | None |
-| 🟡 Medium | Timestamp workflow (Cloud Events Integration) | None |
-| 🟡 Medium | Table config panel (add/edit/delete tables) | Q6 |
-| 🟡 Medium | Manual "Run Now" trigger | Q4 |
-| 🟢 Low | Per-table interval scheduler | Q9 |
-| 🟢 Low | Run log display | Q10 |
-| 🟢 Low | Translation strings (Icelandic) | After UI finalized |
+| M1 | Exact Fabric Open Mirroring DDL JSON field names | Validate against current [Microsoft docs](https://learn.microsoft.com/en-us/fabric/database/mirrored-database/open-mirroring-landing-zone-format) |
+| M2 | `type` field for incremental data files after initial load | Likely `"Incremental"`  confirm from Fabric spec |
+| M3 | `$Company` column  include in DDL? | Yes, always, as `varchar(250)` |
+| M4 | When `fieldNumbers` is empty, DDL should include all non-BLOB fields from `get_table_fields` + system fields | Yes |
+| M5 | ADLS path for `test-connection`  use root container or `Tables/` prefix? | Use root; just authenticate and check access |
