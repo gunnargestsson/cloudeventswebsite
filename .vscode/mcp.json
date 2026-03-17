@@ -2,7 +2,10 @@
   "servers": {
     "bc-metadata": {
       "type": "http",
-      "url": "https://dynamics.is/api/mcp"
+      "url": "https://dynamics.is/api/mcp",
+      "headers": {
+        "x-encrypted-conn": ""
+      }
     }
   }
 }

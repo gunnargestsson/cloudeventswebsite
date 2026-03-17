@@ -1087,7 +1087,7 @@ const TOOLS = [
 
 // ── JSON-RPC 2.0 dispatcher ────────────────────────────────────────────────────
 
-async function handleMessage(msg) {
+async function handleMessage(msg, { headerEncryptedConn = "" } = {}) {
   if (!msg || msg.jsonrpc !== "2.0") {
     return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } };
   }
@@ -1133,6 +1133,9 @@ async function handleMessage(msg) {
       case "tools/call": {
         const toolName = (params || {}).name;
         const args     = (params || {}).arguments || {};
+        // Inject the header-provided encryptedConn as a workspace-level default
+        // (per-call argument takes priority — only inject if not already supplied).
+        if (headerEncryptedConn && !args.encryptedConn) args.encryptedConn = headerEncryptedConn;
         let content;
 
         switch (toolName) {
@@ -1371,7 +1374,7 @@ module.exports = async function (context, req) {
       headers: {
         "Access-Control-Allow-Origin":  "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Headers": "Content-Type, x-encrypted-conn",
       },
     };
     return;
@@ -1390,17 +1393,21 @@ module.exports = async function (context, req) {
     return;
   }
 
+  // Read per-workspace encrypted connection from the x-encrypted-conn header
+  // (set in .vscode/mcp.json → headers → "x-encrypted-conn").
+  const headerEncryptedConn = req.headers["x-encrypted-conn"] || "";
+
   const body = req.body;
   const corsHeaders = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
 
   // Batch request (array of messages)
   if (Array.isArray(body)) {
-    const responses = (await Promise.all(body.map(handleMessage))).filter((r) => r !== null);
+    const responses = (await Promise.all(body.map(msg => handleMessage(msg, { headerEncryptedConn })))).filter((r) => r !== null);
     context.res = { status: 200, headers: corsHeaders, body: JSON.stringify(responses) };
     return;
   }
 
-  const response = await handleMessage(body);
+  const response = await handleMessage(body, { headerEncryptedConn });
   if (response === null) {
     // Notification — acknowledge with 202, no body
     context.res = { status: 202, headers: { "Access-Control-Allow-Origin": "*" } };
