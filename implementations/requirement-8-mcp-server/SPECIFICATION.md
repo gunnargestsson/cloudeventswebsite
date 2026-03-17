@@ -1011,6 +1011,7 @@ case "set_translations":  content = await toolSetTranslations(args);  break;
 | 🟡 Medium | §16 — `set_records` tool — generic table write | ~1 h |
 | 🟡 Medium | §17 — `call_message_type` tool — generic Cloud Event caller | ~30 min |
 | ✅ Done | §18 — `x-encrypted-conn` header — workspace-level encrypted credentials | Done |
+| ✅ Done | §19 — `set_config` / `get_config` — BC-hosted JSON config via Cloud Events Storage | Done |
 
 ---
 
@@ -1146,6 +1147,106 @@ case "tools/call": {
   if (headerEncryptedConn && !args.encryptedConn) args.encryptedConn = headerEncryptedConn;
   // ...
 }
+```
+
+---
+
+### 19. BC-hosted JSON config — `set_config` / `get_config`
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**Files:** `api/mcp/index.js`
+
+**Background:**  
+Persistent configuration objects (connection strings, feature flags, user preferences, cached data, etc.) can be stored server-side in the `Cloud Events Storage` table in BC. The table has a two-field primary key (`Source` Text + `Id` GUID/Text) and a BLOB `Data` field. The tools handle the necessary Base64 encoding/decoding transparently and can optionally apply AES-256-GCM encryption via the server-side `MCP_ENCRYPTION_KEY`.
+
+---
+
+#### `set_config` — Upsert a config record
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `source` | string | ✅ | Logical namespace / app name, e.g. `"BC Portal"` |
+| `id` | string | ✅ | Record identifier — any string or GUID |
+| `data` | any | ✅ | JSON object or plain string to persist |
+| `encrypt` | boolean | — | Encrypt with server-side key before storing (default `false`) |
+
+Returns `{ company, source, id, encrypted, written: 1 }`.
+
+The `data` argument is JSON-serialised if it is not already a string, then optionally encrypted, then Base64-encoded before being stored in the BLOB field. Upsert semantics: inserts a new row or replaces an existing one.
+
+#### `get_config` — Read a config record
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `source` | string | ✅ | Logical namespace / app name |
+| `id` | string | ✅ | Record identifier |
+| `decrypt` | boolean | — | Decrypt the stored value (default `false`) |
+
+Returns `{ company, source, id, found: true, encrypted, data }` when the record exists, or `{ …, found: false }` when it does not.
+
+The BLOB is Base64-decoded, optionally decrypted, then JSON-parsed. If parsing fails the raw string is returned as `data`.
+
+---
+
+#### Internal design
+
+```js
+const CS_TABLE = "Cloud Events Storage";
+
+async function toolSetConfig({ source, id, data, encrypt = false, ... }) {
+  let dataString = typeof data === "string" ? data : JSON.stringify(data);
+  if (encrypt) dataString = toolEncryptData({ plaintext: dataString }).ciphertext;
+  const blobValue = Buffer.from(dataString).toString("base64");
+
+  await bcTask(conn, company.id, {
+    type:    "Data.Records.Set",
+    subject: CS_TABLE,
+    data:    JSON.stringify({
+      mode: "upsert",
+      data: [{ primaryKey: { Source: source, Id: id }, fields: { Data: blobValue } }],
+    }),
+  });
+}
+
+async function toolGetConfig({ source, id, decrypt = false, ... }) {
+  const result  = await bcTask(conn, company.id, { type: "Data.Records.Get", ... });
+  const records = result.result || [];
+  if (!records.length) return { found: false };
+  let rawString = Buffer.from(records[0].fields.Data, "base64").toString("utf8");
+  if (decrypt) rawString = toolDecryptData({ ciphertext: rawString }).plaintext;
+  return { found: true, data: JSON.parse(rawString) };
+}
+```
+
+#### End-to-end encrypted config example
+
+```powershell
+# Write encrypted config
+$body = @{
+  jsonrpc = "2.0"; id = 1; method = "tools/call"
+  params  = @{
+    name      = "set_config"
+    arguments = @{
+      source  = "BC Portal"
+      id      = "connection-settings"
+      data    = @{ apiUrl = "https://example.com"; timeout = 30 }
+      encrypt = $true
+    }
+  }
+} | ConvertTo-Json -Depth 10 -Compress
+Invoke-WebRequest -Uri "https://dynamics.is/api/mcp" -Method POST `
+  -ContentType "application/json" -Body $body -UseBasicParsing
+
+# Read and decrypt
+$body = @{
+  jsonrpc = "2.0"; id = 1; method = "tools/call"
+  params  = @{
+    name      = "get_config"
+    arguments = @{ source = "BC Portal"; id = "connection-settings"; decrypt = $true }
+  }
+} | ConvertTo-Json -Depth 10 -Compress
+Invoke-WebRequest -Uri "https://dynamics.is/api/mcp" -Method POST `
+  -ContentType "application/json" -Body $body -UseBasicParsing
 ```
 
 **CORS — `x-encrypted-conn` is allowed:**

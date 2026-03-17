@@ -9,7 +9,8 @@ description: >
   discovery via the BC Metadata MCP server at https://dynamics.is/api/mcp (tools:
   list_tables, get_table_fields, get_table_info, list_companies, list_message_types,
   get_records, get_record_count, search_customers, search_items, list_translations, set_translations,
-  get_integration_timestamp, set_integration_timestamp, reverse_integration_timestamp;
+  get_integration_timestamp, set_integration_timestamp, reverse_integration_timestamp,
+  set_config, get_config, encrypt_data, decrypt_data;
   resources: bc://tables, bc://tables/{name}, bc://message-types, bc://companies;
   prompts: customer_lookup_pattern, item_lookup_pattern, sales_order_creation_workflow,
   describe_table, find_tables_for_entity, data_model_overview), selecting only needed
@@ -2465,4 +2466,94 @@ const result = await cePost(companyId, {
     take: 50
   })
 });
+```
+
+---
+
+#### `set_config` — Persist a JSON config object in BC
+
+Upserts a record in the **Cloud Events Storage** table (`Source` + `Id` primary key, `Data` BLOB).  
+The value is JSON-serialised, optionally AES-256-GCM encrypted, then Base64-encoded before storage.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `source` | string | ✅ | Logical namespace / app name (e.g. `"BC Portal"`) |
+| `id` | string | ✅ | Record identifier — any string or GUID |
+| `data` | any | ✅ | JSON object or plain string to persist |
+| `encrypt` | boolean | | Encrypt with server-side `MCP_ENCRYPTION_KEY` before storing (default `false`) |
+
+**Returns:** `{ company, source, id, encrypted, written: 1 }`
+
+```json
+// Example: store connection settings encrypted
+{
+  "name": "set_config",
+  "arguments": {
+    "source": "BC Portal",
+    "id":     "connection-settings",
+    "data":   { "apiUrl": "https://example.com", "timeout": 30 },
+    "encrypt": true
+  }
+}
+```
+
+---
+
+#### `get_config` — Read a JSON config object from BC
+
+Reads a record from the **Cloud Events Storage** table by `Source + Id`. Base64-decodes the BLOB,
+optionally decrypts it, then JSON-parses the result. Returns `{ found: false }` when no record
+exists.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `source` | string | ✅ | Logical namespace / app name |
+| `id` | string | ✅ | Record identifier |
+| `decrypt` | boolean | | Decrypt with server-side `MCP_ENCRYPTION_KEY` (default `false`) |
+
+**Returns:** `{ company, source, id, found: true, encrypted, data }` or `{ …, found: false }`
+
+```json
+// Example: read back the encrypted config
+{
+  "name": "get_config",
+  "arguments": {
+    "source":  "BC Portal",
+    "id":      "connection-settings",
+    "decrypt": true
+  }
+}
+// → { "found": true, "data": { "apiUrl": "https://example.com", "timeout": 30 } }
+```
+
+---
+
+#### `encrypt_data` / `decrypt_data` — Server-side AES-256-GCM encryption
+
+`encrypt_data` encrypts any string with the server-side `MCP_ENCRYPTION_KEY` (AES-256-GCM).  
+The output is a single Base64 string containing the IV (12 bytes) + auth tag (16 bytes) + ciphertext.
+
+`decrypt_data` reverses the operation. Throws if the payload is tampered with or a different key is used.
+
+**`encrypt_data` parameters:** `{ plaintext: string }` → `{ ciphertext: string }`  
+**`decrypt_data` parameters:** `{ ciphertext: string }` → `{ plaintext: string }`
+
+**Typical use — encrypt BC credentials for `x-encrypted-conn` header:**
+```powershell
+$body = @{
+  jsonrpc = "2.0"; id = 1; method = "tools/call"
+  params  = @{
+    name      = "encrypt_data"
+    arguments = @{
+      plaintext = '{"tenantId":"...","clientId":"...","clientSecret":"...","environment":"Production"}'
+    }
+  }
+} | ConvertTo-Json -Depth 10 -Compress
+Invoke-WebRequest -Uri "https://dynamics.is/api/mcp" -Method POST `
+  -ContentType "application/json" -Body $body -UseBasicParsing
+# → { "ciphertext": "<base64>" }  ← paste into .vscode/mcp.json as x-encrypted-conn value
 ```

@@ -811,6 +811,78 @@ async function toolReverseIntegrationTimestamp({ source, tableId, companyId, ten
   return { company: company.name, source, tableId: Number(tableId), reversed: true, dateTime };
 }
 
+const CS_TABLE = "Cloud Events Storage";
+
+async function toolSetConfig({ source, id, data, encrypt = false, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!source) throw new Error("Parameter 'source' is required");
+  if (!id)     throw new Error("Parameter 'id' is required");
+  if (data === undefined || data === null) throw new Error("Parameter 'data' is required");
+
+  let dataString = typeof data === "string" ? data : JSON.stringify(data);
+
+  if (encrypt) {
+    dataString = toolEncryptData({ plaintext: dataString }).ciphertext;
+  }
+
+  const blobValue = Buffer.from(dataString).toString("base64");
+  const conn      = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company   = await getCompany(companyId, conn);
+
+  await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Set",
+    source:      "BC Metadata MCP v1.0",
+    subject:     CS_TABLE,
+    data:        JSON.stringify({
+      mode: "upsert",
+      data: [{
+        primaryKey: { Source: String(source), Id: String(id) },
+        fields:     { Data: blobValue },
+      }],
+    }),
+  });
+
+  return { company: company.name, source, id, encrypted: encrypt, written: 1 };
+}
+
+async function toolGetConfig({ source, id, decrypt = false, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!source) throw new Error("Parameter 'source' is required");
+  if (!id)     throw new Error("Parameter 'id' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify({
+      tableName: CS_TABLE,
+      tableView: `WHERE(Source=CONST(${source}),Id=CONST(${id}))`,
+      skip:      0,
+      take:      1,
+    }),
+  });
+
+  const records = result.result || result.value || [];
+  if (!records.length) {
+    return { company: company.name, source, id, found: false };
+  }
+
+  const blobBase64  = (records[0].fields || {}).Data || "";
+  let   rawString   = Buffer.from(blobBase64, "base64").toString("utf8");
+
+  if (decrypt) {
+    rawString = toolDecryptData({ ciphertext: rawString }).plaintext;
+  }
+
+  let parsed;
+  try   { parsed = JSON.parse(rawString); }
+  catch { parsed = rawString; }
+
+  return { company: company.name, source, id, found: true, encrypted: decrypt, data: parsed };
+}
+
 // ── MCP Tool definitions (JSON Schema) ────────────────────────────────────────
 
 const TOOLS = [
@@ -1062,6 +1134,33 @@ const TOOLS = [
     },
   },
   {
+    name:        "set_config",
+    description: "Writes a JSON configuration object to the Cloud Events Storage table (Source + Id primary key). Uses upsert semantics — creates a new record or updates the existing one. Optionally encrypts the data with the server-side AES-256-GCM key before storing.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        source:  { type: "string",  description: "Logical namespace / application name (e.g. 'BC Portal')." },
+        id:      { type: "string",  description: "Record identifier — any string or GUID." },
+        data:    { description: "The configuration to store. Can be a JSON object or a plain string." },
+        encrypt: { type: "boolean", description: "When true, encrypts the data with the server-side MCP_ENCRYPTION_KEY before storing. Default false." },
+      },
+      required: ["source", "id", "data"],
+    },
+  },
+  {
+    name:        "get_config",
+    description: "Reads a JSON configuration object from the Cloud Events Storage table by Source + Id. Returns { found: false } when the record does not exist. Optionally decrypts the stored value with the server-side AES-256-GCM key.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        source:  { type: "string",  description: "Logical namespace / application name (e.g. 'BC Portal')." },
+        id:      { type: "string",  description: "Record identifier — any string or GUID." },
+        decrypt: { type: "boolean", description: "When true, decrypts the stored BLOB with the server-side MCP_ENCRYPTION_KEY before returning. Default false." },
+      },
+      required: ["source", "id"],
+    },
+  },
+  {
     name:        "encrypt_data",
     description: "Encrypts a plaintext string using AES-256-GCM with the server-side MCP_ENCRYPTION_KEY. Returns a self-contained base64 ciphertext that includes the IV and authentication tag. Safe for strings up to tens of thousands of characters.",
     inputSchema: {
@@ -1158,6 +1257,8 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "get_integration_timestamp":     content = await toolGetIntegrationTimestamp(args);     break;
           case "set_integration_timestamp":     content = await toolSetIntegrationTimestamp(args);     break;
           case "reverse_integration_timestamp": content = await toolReverseIntegrationTimestamp(args); break;
+          case "set_config":                    content = await toolSetConfig(args);                    break;
+          case "get_config":                    content = await toolGetConfig(args);                    break;
           case "encrypt_data":                  content = toolEncryptData(args);                       break;
           case "decrypt_data":                  content = toolDecryptData(args);                       break;
           default:
