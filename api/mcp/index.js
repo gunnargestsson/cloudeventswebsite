@@ -38,7 +38,7 @@
 
 // ── Input validation ───────────────────────────────────────────────────────────
 
-const TABLE_NAME_RE = /^[\w\s.\-]{1,80}$/;
+const TABLE_NAME_RE = /^[\w\s.\-\/]{1,80}$/;
 
 function validateTableName(table) {
   if (!TABLE_NAME_RE.test(String(table))) {
