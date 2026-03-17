@@ -23,6 +23,7 @@
  *   set_translations   — Cloud Event Translation — upsert UI translation pairs
  *   get_record_count             — Data.Records.Get (take:1, field 1 only) — total record count for any table with optional filter
  *   get_sales_order_statistics  — Sales.Order.Statistics — amounts, VAT totals, quantities for a sales order
+ *   call_message_type  — any Cloud Event type — generic caller: send any message type with subject + data; use get_message_type_help first to understand the schema
  *   get_integration_timestamp   — Cloud Events Integration — latest non-reversed DateTime for source+tableId
  *   set_integration_timestamp   — Cloud Events Integration — insert a DateTime entry for source+tableId
  *   reverse_integration_timestamp — Cloud Events Integration — mark the latest non-reversed entry as reversed
@@ -672,6 +673,35 @@ async function toolGetSalesOrderStatistics({ orderNo, companyId } = {}) {
   return result;
 }
 
+async function toolCallMessageType({ type, subject, data, lcid = 1033, companyId } = {}) {
+  if (!type) throw new Error("Parameter 'type' is required (e.g. 'Customer.Create', 'Sales.Order.Statistics')");
+
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const company  = await getCompany(companyId);
+
+  const envelope = {
+    specversion: "1.0",
+    type:        String(type),
+    source:      "BC Metadata MCP v1.0",
+    lcid,
+  };
+  if (subject !== undefined && subject !== null && subject !== "") {
+    envelope.subject = String(subject);
+  }
+  if (data !== undefined && data !== null) {
+    envelope.data = typeof data === "string" ? data : JSON.stringify(data);
+  }
+
+  const result = await bcTask(tenantId, env, company.id, envelope);
+
+  if (typeof result === "string") {
+    try { return { company: company.name, type: String(type), result: JSON.parse(result) }; }
+    catch { return { company: company.name, type: String(type), result }; }
+  }
+  return { company: company.name, type: String(type), result };
+}
+
 async function toolReverseIntegrationTimestamp({ source, tableId, companyId } = {}) {
   if (!source)  throw new Error("Parameter 'source' is required");
   if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
@@ -784,6 +814,20 @@ const TOOLS = [
       properties: {
         type: { type: "string",  description: "Message type name (e.g. 'Customer.Create', 'SalesOrder.Post')." },
         lcid: { type: "integer", description: "Language LCID for the help content (default 1033 = English)." },
+      },
+      required: ["type"],
+    },
+  },
+  {
+    name:        "call_message_type",
+    description: "Calls any Cloud Event message type supported by Business Central. Use list_message_types to discover available types, and get_message_type_help to understand the request schema and interpret the response before calling this tool.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        type:    { type: "string",  description: "Message type name (e.g. 'Sales.Order.Statistics', 'Customer.Create'). Use list_message_types to find available types." },
+        subject: { type: "string",  description: "Cloud Event subject field — typically the document number, customer number, or identifier. See get_message_type_help for what each type expects." },
+        data:    { type: "object",  description: "Optional data payload as a JSON object. See get_message_type_help for the exact fields and structure required by each message type." },
+        lcid:    { type: "integer", description: "Language LCID for captions in the response (default 1033 = English, 1039 = Icelandic)." },
       },
       required: ["type"],
     },
@@ -1006,6 +1050,7 @@ async function handleMessage(msg) {
           case "list_companies":        content = await toolListCompanies();              break;
           case "list_message_types":    content = await toolListMessageTypes(args);       break;
           case "get_message_type_help": content = await toolGetMessageTypeHelp(args);     break;
+          case "call_message_type":     content = await toolCallMessageType(args);         break;
           case "get_record_count":            content = await toolGetRecordCount(args);            break;
           case "get_sales_order_statistics":  content = await toolGetSalesOrderStatistics(args);   break;
           case "get_records":           content = await toolGetRecords(args);              break;

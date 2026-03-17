@@ -1009,11 +1009,74 @@ case "set_translations":  content = await toolSetTranslations(args);  break;
 | 🟡 Medium | §14 — translation tools (`list_translations`, `set_translations`) | ~1 h |
 | 🟡 Medium | §15 — `get_message_type_help` tool + `implement_message_type` prompt | ~1 h |
 | 🟡 Medium | §16 — `set_records` tool — generic table write | ~1 h |
+| 🟡 Medium | §17 — `call_message_type` tool — generic Cloud Event caller | ~30 min |
 
 ---
 
-### 16. New Tool: `set_records`
+---
+
+### 17. New Tool: `call_message_type`
 **Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Generic caller that can invoke **any** Cloud Event message type supported by the BC environment. The agent should first call `list_message_types` to discover available types and `get_message_type_help` to understand the required request shape and interpret the response — then use this tool to execute the call.
+
+This makes the MCP server self-describing: new message types added to BC are immediately callable without any server-side changes.
+
+**AI workflow:**
+1. `list_message_types` — discover available types
+2. `get_message_type_help({ type })` — read request schema, required fields, response format
+3. `call_message_type({ type, subject, data })` — execute the call with the correct parameters
+4. Interpret the response using the knowledge from step 2
+
+**Input parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | ✅ | Message type name (e.g. `'Sales.Order.Statistics'`, `'Customer.Create'`) |
+| `subject` | string | — | Cloud Event subject — typically the document/customer/item number. See `get_message_type_help` for what each type uses. |
+| `data` | object | — | Optional data payload as a JSON object. Structure varies by message type. |
+| `lcid` | integer | — | Language LCID (default 1033 = English) |
+| `companyId` | string | — | Target company GUID or name (defaults to server default) |
+
+**Implementation:**
+```js
+async function toolCallMessageType({ type, subject, data, lcid = 1033, companyId } = {}) {
+  // Builds Cloud Event envelope from params
+  // Sends via bcTask()
+  // Returns { company, type, result }
+}
+```
+
+**Example — call Sales.Order.Statistics:**
+```jsonc
+// 1. Discover
+{ "name": "list_message_types", "arguments": {} }
+
+// 2. Read schema
+{ "name": "get_message_type_help", "arguments": { "type": "Sales.Order.Statistics" } }
+
+// 3. Execute
+{ "name": "call_message_type", "arguments": { "type": "Sales.Order.Statistics", "subject": "101016" } }
+```
+
+**Returns:**
+```jsonc
+{
+  "company": "CRONUS IS",
+  "type": "Sales.Order.Statistics",
+  "result": {
+    "status": "Success",
+    "orderNo": "101016",
+    "order": { "totalInclVAT": 699790, ... }
+  }
+}
+```
+
+---
+
+### 16. New Tool: `set_records`  
 **Priority:** 🟡 Medium  
 **File:** `api/mcp/index.js`
 
