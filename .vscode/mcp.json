@@ -4,7 +4,8 @@
       "type": "http",
       "url": "https://dynamics.is/api/mcp",
       "headers": {
-        "x-encrypted-conn": ""
+        "x-encrypted-conn": "",
+        "x-company-id": ""
       }
     }
   }
