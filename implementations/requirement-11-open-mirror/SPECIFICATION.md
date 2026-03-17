@@ -285,7 +285,7 @@ Triggered by: setInterval or "Run Now" button
                                  take: 1 } }
     lastDateTime = records[0].primaryKey.DateTime  (null if no records)
 
-   [OR call GET /api/explorer with get_integration_timestamp via cloud events /tasks]
+   [OR call GET /api/explorer with get_integration_timestamp via cloud events /queues]
 
 2. endDateTime = new Date(Date.now() - 1000).toISOString()
 
@@ -310,33 +310,34 @@ Triggered by: setInterval or "Run Now" button
                        endDateTime }
    Function internally:
      a. Authenticate to BC (OAuth2 client credentials)
-     b. POST /tasks  CSV.Records.Get  →  { taskId, statusUrl }
-   Return { taskId, statusUrl } to browser.
-   Browser stores { taskId, statusUrl, attempts: 0 } in session state for this table.
+     b. POST /queues  CSV.Records.Get  →  returns immediately with { queueId }
+        The /queues endpoint starts a background job and returns the queue ID at once.
+   Return { queueId } to browser.
+   Browser stores { queueId, attempts: 0 } in session state for this table.
    Schedule checkStatus() in 30 s.
 
 5b. POLL  (checkStatus — fires every 30 s until done or max retries reached)
-   POST /api/mirror  { action: "check-status", bcConn, statusUrl }
+   POST /api/mirror  { action: "check-status", bcConn, queueId }
    Function internally:
      a. Authenticate to BC
-     b. GET statusUrl  →  { status: "Running" | "Ready" | "Failed" | … }
+     b. GET /queues/{queueId}  →  { status: "Running" | "Ready" | "Failed" | … }
 
    If "Running":   reschedule checkStatus() in 30 s.
    If "Failed":    attempts += 1
                    If attempts < 5:
-                     POST /api/mirror  { action: "retry-task", bcConn, taskId }
-                       Function: POST /tasks/{taskId}/retry
+                     POST /api/mirror  { action: "retry-task", bcConn, queueId }
+                       Function: POST /queues/{queueId}/retry
                      Reschedule checkStatus() in 30 s.
                    If attempts >= 5:  → go to 6b (FAILURE)
    If "Ready":     → go to 5c.
 
 5c. FETCH + PUSH
    POST /api/mirror  { action: "fetch-upload",
-                       bcConn, statusUrl,
+                       bcConn, queueId,
                        mirrorConn, tableName, endDateTime }
    Function internally:
      a. Authenticate to BC
-     b. GET statusUrl  →  raw CSV text (file is ready in queue)
+     b. GET /queues/{queueId}  →  raw CSV text (the same ID used for status/retry also delivers the result package)
      c. Authenticate to ADLS Gen2 (ClientSecretCredential)
      d. Upload CSV  {mirrorUrl}/Tables/{tableName}/{YYYY}/{MM}/{DD}/{timestamp}.csv
      e. Return { recordCount, csvPath, bytesUploaded }
@@ -387,7 +388,9 @@ Returns `{ ok: true, path: "..." }` or `{ ok: false, error: "..." }`.
 
 ### `"enqueue-table"`
 
-Submits a CSV generation job to the BC task queue. Returns the task handle for polling.
+POSTs to the BC `/queues` endpoint to start a background CSV generation job. The
+endpoint returns immediately with a `queueId`. That same ID is used for all subsequent
+operations: status polling, retry, and fetching the result package.
 
 ```json
 {
@@ -403,17 +406,17 @@ Submits a CSV generation job to the BC task queue. Returns the task handle for p
 ```
 
 `startDateTime` is omitted on first run. `bcConn` is omitted in server mode.
-Returns `{ taskId, statusUrl }`.  Browser stores this in session state for the table.
+Returns `{ queueId }`.  Browser stores `{ queueId, attempts: 0 }` in session state for the table.
 
 ### `"check-status"`
 
-Polls the BC task queue for the status of an enqueued CSV job.
+Polls the BC `/queues/{queueId}` endpoint for the current job status.
 
 ```json
 {
-  "action":    "check-status",
-  "bcConn":    { "tenantId": "...", "clientId": "...", "clientSecret": "...", "environment": "...", "companyId": "..." },
-  "statusUrl": "https://…/api/…/tasks/{taskId}"
+  "action":  "check-status",
+  "bcConn":  { "tenantId": "...", "clientId": "...", "clientSecret": "...", "environment": "...", "companyId": "..." },
+  "queueId": "…"
 }
 ```
 
@@ -421,14 +424,14 @@ Returns `{ status }` where `status` is `"Running"`, `"Ready"`, `"Failed"`, or si
 
 ### `"retry-task"`
 
-Requests BC to retry a failed CSV generation task. Called after a `"Failed"` status,
-up to 4 times (5 total attempts).
+POSTs to BC `/queues/{queueId}/retry` to restart a failed CSV generation job.
+Called after a `"Failed"` status, up to 4 times (5 total attempts).
 
 ```json
 {
-  "action": "retry-task",
-  "bcConn": { "tenantId": "...", "clientId": "...", "clientSecret": "...", "environment": "...", "companyId": "..." },
-  "taskId": "…"
+  "action":  "retry-task",
+  "bcConn":  { "tenantId": "...", "clientId": "...", "clientSecret": "...", "environment": "...", "companyId": "..." },
+  "queueId": "…"
 }
 ```
 
@@ -436,15 +439,16 @@ Returns `{ ok: true }` or throws on error.
 
 ### `"fetch-upload"`
 
-Retrieves the completed CSV from the BC task queue and uploads it to the ADLS Gen2
-mirroring destination. Called only after `check-status` returns `"Ready"`.
+GETs the ready result package from BC `/queues/{queueId}` (the same ID used for
+status and retry) and uploads it to ADLS Gen2. Called only after `check-status`
+returns `"Ready"`.
 
 ```json
 {
   "action":      "fetch-upload",
   "bcConn":      { "tenantId": "...", "clientId": "...", "clientSecret": "...", "environment": "...", "companyId": "..." },
   "mirrorConn":  { "mirrorUrl": "...", "tenant": "...", "clientId": "...", "clientSecret": "..." },
-  "statusUrl":   "https://…/api/…/tasks/{taskId}",
+  "queueId":     "…",
   "tableName":   "Customer",
   "endDateTime": "2026-03-17T14:29:59.000Z"
 }
