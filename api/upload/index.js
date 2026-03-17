@@ -75,7 +75,7 @@ function parseMultipart(req) {
 
 // ── File → Claude content block(s) ────────────────────────────────────────────
 
-function fileToContent(file) {
+async function fileToContent(file) {
   const { mimeType, buffer, filename } = file;
   const ext = (filename || "").split(".").pop().toLowerCase();
 
@@ -190,7 +190,7 @@ module.exports = async function (context, req) {
     // Override mimeType with client hint if more specific
     if (fields.mimeType) file.mimeType = fields.mimeType;
 
-    const contentBlocks = fileToContent(file);
+    const contentBlocks = await fileToContent(file);
 
     // PDFs: no beta header needed for claude-sonnet-4 (native document block support)
     const extraHeaders = {};
