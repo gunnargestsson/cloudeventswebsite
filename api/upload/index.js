@@ -4,6 +4,9 @@ const Busboy     = require("busboy");
 const XLSX       = require("xlsx");
 const { callAnthropic } = require("../shared/bcClient");
 
+let pdfParse;
+try { pdfParse = require("pdf-parse"); } catch (_) { /* optional — falls back to document block */ }
+
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 const CORS_HEADERS = {
@@ -87,6 +90,17 @@ function fileToContent(file) {
 
   // PDF
   if (mimeType.includes("pdf") || ext === "pdf") {
+    // Try server-side text extraction first (reliable for text-based PDFs)
+    if (pdfParse) {
+      try {
+        const parsed = await pdfParse(buffer);
+        const text = (parsed.text || "").trim();
+        if (text.length > 50) {
+          return [{ type: "text", text: `PDF file: ${filename}\n\n${text.slice(0, 16000)}` }];
+        }
+      } catch (_) { /* fall through to document block */ }
+    }
+    // Fallback: send as native document block (Claude handles image-based PDFs)
     return [{
       type:   "document",
       source: { type: "base64", media_type: "application/pdf", data: buffer.toString("base64") },
@@ -178,9 +192,8 @@ module.exports = async function (context, req) {
 
     const contentBlocks = fileToContent(file);
 
-    // PDFs require the beta header; passing it on non-PDF calls is harmless
-    const hasPdf = contentBlocks.some(b => b.type === "document");
-    const extraHeaders = hasPdf ? { "anthropic-beta": "pdfs-2024-09-25" } : {};
+    // PDFs: no beta header needed for claude-sonnet-4 (native document block support)
+    const extraHeaders = {};
     const modelPayload = (blocks, prompt) => ({
       model:      "claude-sonnet-4-20250514",
       max_tokens: 1024,
