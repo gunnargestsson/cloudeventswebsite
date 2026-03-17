@@ -58,6 +58,9 @@ select.ci{cursor:pointer;appearance:auto}
 .tbl-item.active{background:var(--bg4);color:var(--accent);border-left-color:var(--accent)}
 .tbl-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tbl-no{font-size:9px;color:var(--text3);flex-shrink:0}
+.dpc-badge{font-size:8px;padding:1px 5px;border-radius:2px;flex-shrink:0;font-weight:600;letter-spacing:.3px}
+.dpc-co{background:rgba(0,255,136,.12);color:var(--green);border:1px solid rgba(0,255,136,.25)}
+.dpc-gl{background:rgba(255,255,255,.06);color:var(--text3);border:1px solid var(--border)}
 .sb-count{padding:6px 13px;font-size:9px;color:var(--text3);border-bottom:1px solid var(--border)}
 .spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:sp .6s linear infinite;flex-shrink:0}
 @keyframes sp{to{transform:rotate(360deg)}}
@@ -435,11 +438,17 @@ function renderTableList(){
   if(!filteredTables.length){
     cont.innerHTML=`<div class="sb-empty">No tables match</div>`; return;
   }
-  cont.innerHTML = filteredTables.map(t=>`
+  cont.innerHTML = filteredTables.map(t=>{
+    const dpcHtml = t.dataPerCompany
+      ? `<span class="dpc-badge dpc-co">Per Co.</span>`
+      : `<span class="dpc-badge dpc-gl">Global</span>`;
+    return `
     <button class="tbl-item${currentTable&&currentTable.id===t.id?' active':''}" onclick="selectTable(${t.id})" data-tid="${t.id}">
       <span class="tbl-name">${esc(t.name)}</span>
       <span class="tbl-no">#${t.id}</span>
-    </button>`).join('');
+      ${dpcHtml}
+    </button>`;
+  }).join('');
 }
 
 // ── SELECT TABLE ──────────────────────────────────────────────────────────────
@@ -508,19 +517,25 @@ function renderFields(){
     <div class="stat-div"></div>
     <div class="stat"><span class="k">Read</span><span class="v ${perm.readPermission?'ok':'no'}">${perm.readPermission?'✓':'✗'}</span></div>
     <div class="stat"><span class="k">Write</span><span class="v ${perm.writePermission?'ok':'no'}">${perm.writePermission?'✓':'✗'}</span></div>` : '';
+  const dpcHtml = currentTable != null ? `
+    <div class="stat-div"></div>
+    <div class="stat"><span class="k">Data</span><span class="v ${currentTable.dataPerCompany?'ok':''}">${currentTable.dataPerCompany?'Per Company':'Global'}</span></div>` : '';
   statsBar.innerHTML=`
     <div class="stat"><span class="k">Fields</span><span class="v hi">${fields.length}</span></div>
     <div class="stat"><span class="k">PK fields</span><span class="v ok">${pkFields.length}</span></div>
     <div class="stat"><span class="k">FlowFields</span><span class="v" style="color:var(--purple)">${flowFields.length}</span></div>
     <div class="stat"><span class="k">Normal</span><span class="v">${fields.length-flowFields.length}</span></div>
     ${pkFields.length?`<div class="stat"><span class="k">Primary key</span><span class="v ok">${pkFields.map(f=>esc(f.name)).join(', ')}</span></div>`:''}
-    ${permHtml}
+    ${permHtml}${dpcHtml}
   `;
   if(perm != null){
     const captionPart = currentTable.caption&&currentTable.caption!==currentTable.name?` · ${esc(currentTable.caption)}`:'';
     const readBadge  = `<span style="color:${perm.readPermission ?'var(--green)':'var(--red)'};font-weight:600">${perm.readPermission ?'✓':'✗'} Read</span>`;
     const writeBadge = `<span style="color:${perm.writePermission?'var(--green)':'var(--red)'};font-weight:600">${perm.writePermission?'✓':'✗'} Write</span>`;
-    document.getElementById('mtd').innerHTML = `Table #${currentTable.id}${captionPart} &nbsp;·&nbsp; ${readBadge} &nbsp; ${writeBadge}`;
+    const dpcBadge   = currentTable.dataPerCompany != null
+      ? ` &nbsp;·&nbsp; <span style="color:${currentTable.dataPerCompany?'var(--green)':'var(--text3)'}">${currentTable.dataPerCompany?'Per Company':'Global'}</span>`
+      : '';
+    document.getElementById('mtd').innerHTML = `Table #${currentTable.id}${captionPart} &nbsp;·&nbsp; ${readBadge} &nbsp; ${writeBadge}${dpcBadge}`;
   }
 
   const pkSection = fields.filter(f=>f.isPartOfPrimaryKey);

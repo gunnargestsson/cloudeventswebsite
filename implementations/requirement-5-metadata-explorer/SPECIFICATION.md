@@ -4,7 +4,7 @@
 A developer tool for browsing the complete table and field catalogue of a Business Central company via the Cloud Events API. Shows field names (AL), JSON keys, captions (in the selected language), types, lengths, class (Normal / FlowField), primary key membership, and enumeration values with captions. Includes table-level read/write permission checking and bulk export to YAML / JSON / CSV / Markdown.
 
 **Key Features:**
-- ✅ **Full Table Catalogue**: All BC tables loaded via `Help.Tables.Get`, sortable and searchable
+- ✅ **Full Table Catalogue**: All BC tables loaded via `Help.Tables.Get`, sortable and searchable; each entry includes `dataPerCompany` indicating whether data is stored per-company or shared globally across the environment
 - ✅ **Field Detail View**: All fields per table via `Help.Fields.Get` — name, JSON key, caption, type, length, class, PK membership, enum values, enum captions
 - ✅ **Read/Write Permission Check**: `Help.Permissions.Get` called in parallel with `Help.Fields.Get`; badges displayed in stats bar and table subtitle
 - ✅ **Dynamic Language Selection**: Available languages loaded from BC `Allowed Language` → `Language` tables; LCID selector updates captions on change
@@ -74,7 +74,7 @@ Two-column layout (`280px | flex`):
 
 | Message Type | Purpose |
 |---|---|
-| `Help.Tables.Get` | Load all tables for the company (lcid sent for captions) |
+| `Help.Tables.Get` | Load all tables; response includes `id`, `name`, `caption`, `dataPerCompany` per table |
 | `Help.Fields.Get` | Load field metadata for a specific table |
 | `Help.Permissions.Get` | Check read/write permissions for a table (subject = table name) |
 | `Data.Records.Get` on `Allowed Language` | Get LCIDs available in this BC company |
@@ -159,8 +159,9 @@ Displayed above the field table after a table is selected. Shows:
 - Primary key field names (joined)
 - **Read** badge: ✓ (green) or ✗ (red)
 - **Write** badge: ✓ (green) or ✗ (red)
+- **Data** badge: `Per Company` (green pill) or `Global` (grey pill) — from `currentTable.dataPerCompany`
 
-Permission badges also appear inline in the table subtitle below the table name.
+Permission badges and the Data badge also appear inline in the table subtitle below the table name.
 
 ## Caching Strategy
 
@@ -191,13 +192,14 @@ Export builds a map of `{ tableName → fields[] }`, iterates through all tables
 
 | Function | Description |
 |---|---|
-| `loadTables()` | Calls `Help.Tables.Get`, populates sidebar, then calls `loadLanguages()` |
+| `loadTables()` | Calls `Help.Tables.Get`, populates `allTables` (each entry retains `dataPerCompany`), then calls `loadLanguages()` |
 | `loadLanguages()` | Two-step BC query to populate language `<select>` dynamically |
 | `getLcid()` | Reads current value of `#cfgLcid` select |
 | `onLangChange()` | Clears caches, re-runs `loadTables()` on language switch |
 | `filterTables(q)` | Client-side search by name or table number |
+| `renderTableList()` | Renders sidebar list; each item shows name, `#id`, and a `Per Co.`/`Global` pill from `dataPerCompany` |
 | `selectTable(tableId)` | Parallel fetch of fields + permissions; updates main panel |
-| `renderFields()` | Splits fields into PK / Normal / FlowField sections, renders stats bar |
+| `renderFields()` | Splits fields into PK / Normal / FlowField sections, renders stats bar including Data badge |
 | `fieldsTable(fields)` | Renders HTML table with 10 columns |
 | `openDownloadModal(scope)` | Opens export scope/format selection modal |
 | `startDownload()` | Fetches all missing field data, serializes, triggers download |
@@ -208,7 +210,9 @@ Export builds a map of `{ tableName → fields[] }`, iterates through all tables
 - [ ] Connect with valid credentials → table list loads, status turns green
 - [ ] Language selector populated from BC `Allowed Language` table
 - [ ] Switching language clears cache and reloads tables with new captions
+- [ ] Sidebar list items show `Per Co.` (green) or `Global` (grey) pill correctly
 - [ ] Selecting a table → fields shown in three sections (PK / Normal / FlowField)
+- [ ] Stats bar and subtitle show Data badge (`Per Company` or `Global`)
 - [ ] Permissions bar shows ✓/✗ Read and Write badges correctly
 - [ ] Caption column show localized caption when it differs from AL name
 - [ ] Enum columns show value tags and caption tags separately
