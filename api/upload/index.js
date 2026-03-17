@@ -13,6 +13,10 @@ let pdfjsLib;
 try { pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js"); } catch (_) {
   try { pdfjsLib = require("pdfjs-dist/build/pdf.js"); } catch (_2) { /* optional */ }
 }
+// Disable background worker — required for Node.js / Azure Functions environments
+if (pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+}
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 
@@ -85,6 +89,7 @@ function parseMultipart(req) {
 async function fileToContent(file) {
   const { mimeType, buffer, filename } = file;
   const ext = (filename || "").split(".").pop().toLowerCase();
+  const log = [];
 
   // Excel
   if (mimeType.includes("spreadsheetml") || mimeType.includes("excel") || ext === "xlsx" || ext === "xls") {
@@ -92,16 +97,16 @@ async function fileToContent(file) {
     const ws   = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
     const text = `Excel file: ${filename}\n\n${JSON.stringify(rows, null, 2)}`;
-    return [{ type: "text", text }];
+    return { blocks: [{ type: "text", text }], log };
   }
 
   // PDF
   if (mimeType.includes("pdf") || ext === "pdf") {
-    // Try pdfjs-dist direct extraction (more thorough than pdf-parse wrapper)
+    // Try pdfjs-dist direct text extraction
     if (pdfjsLib) {
       try {
-        const data = new Uint8Array(buffer);
-        const doc  = await pdfjsLib.getDocument({ data }).promise;
+        const pdfData = new Uint8Array(buffer);
+        const doc  = await pdfjsLib.getDocument({ data: pdfData }).promise;
         let text = "";
         for (let i = 1; i <= doc.numPages; i++) {
           const page    = await doc.getPage(i);
@@ -110,9 +115,13 @@ async function fileToContent(file) {
         }
         text = text.trim();
         if (text.length > 10) {
-          return [{ type: "text", text: `PDF file: ${filename}\n\n${text.slice(0, 16000)}` }];
+          log.push(`pdfjs: ${text.length} chars`);
+          return { blocks: [{ type: "text", text: `PDF file: ${filename}\n\n${text.slice(0, 16000)}` }], log };
         }
-      } catch (_) { /* fall through */ }
+        log.push(`pdfjs: ${text.length} chars (too short, likely image-based)`);
+      } catch (e) { log.push(`pdfjs error: ${e.message.slice(0, 100)}`); }
+    } else {
+      log.push("pdfjs: not loaded");
     }
     // Try pdf-parse as second option
     if (pdfParse) {
@@ -120,24 +129,29 @@ async function fileToContent(file) {
         const parsed = await pdfParse(buffer);
         const text = (parsed.text || "").trim();
         if (text.length > 10) {
-          return [{ type: "text", text: `PDF file: ${filename}\n\n${text.slice(0, 16000)}` }];
+          log.push(`pdf-parse: ${text.length} chars`);
+          return { blocks: [{ type: "text", text: `PDF file: ${filename}\n\n${text.slice(0, 16000)}` }], log };
         }
-      } catch (_) { /* fall through to document block */ }
+        log.push(`pdf-parse: ${text.length} chars (too short)`);
+      } catch (e) { log.push(`pdf-parse error: ${e.message.slice(0, 100)}`); }
+    } else {
+      log.push("pdf-parse: not loaded");
     }
-    // Fallback: send as native document block (works for image-based PDFs with OCR-capable models)
-    return [{
+    // Fallback: send as native document block (Claude handles via vision/OCR)
+    log.push("document-block fallback");
+    return { blocks: [{
       type:   "document",
       source: { type: "base64", media_type: "application/pdf", data: buffer.toString("base64") },
-    }];
+    }], log };
   }
 
   // Image
   if (mimeType.includes("jpeg") || mimeType.includes("jpg") || mimeType.includes("png") || ext === "jpg" || ext === "png") {
     const imgMime = (mimeType.includes("png") || ext === "png") ? "image/png" : "image/jpeg";
-    return [{
+    return { blocks: [{
       type:   "image",
       source: { type: "base64", media_type: imgMime, data: buffer.toString("base64") },
-    }];
+    }], log };
   }
 
   // .eml — strip MIME headers to just key fields + plain text body
@@ -149,7 +163,7 @@ async function fileToContent(file) {
     const bodyStart = raw.indexOf("\r\n\r\n") > -1 ? raw.indexOf("\r\n\r\n") + 4 : raw.indexOf("\n\n") + 2;
     const bodyText  = raw.slice(bodyStart, bodyStart + 8000); // cap at 8 KB
     const text = `Email:\n${headerLines.join("\n")}\n\n${bodyText}`;
-    return [{ type: "text", text }];
+    return { blocks: [{ type: "text", text }], log };
   }
 
   // .msg — use msg-parser if available, fall back to raw text
@@ -159,15 +173,15 @@ async function fileToContent(file) {
       const reader    = new MsgReader(buffer);
       const info      = reader.getFileData();
       const text = `Email:\nSubject: ${info.subject || ""}\nFrom: ${info.senderName || ""} <${info.senderEmail || ""}>\n\n${info.body || ""}`;
-      return [{ type: "text", text }];
+      return { blocks: [{ type: "text", text }], log };
     } catch {
       // msg-parser not available or parse failed — treat as binary text best-effort
-      return [{ type: "text", text: `MSG file: ${filename} (could not parse body)` }];
+      return { blocks: [{ type: "text", text: `MSG file: ${filename} (could not parse body)` }], log };
     }
   }
 
   // Fallback: treat as plain text
-  return [{ type: "text", text: buffer.toString("utf8").slice(0, 16000) }];
+  return { blocks: [{ type: "text", text: buffer.toString("utf8").slice(0, 16000) }], log };
 }
 
 // ── Azure Function entry point ─────────────────────────────────────────────────
@@ -214,11 +228,10 @@ module.exports = async function (context, req) {
     // Override mimeType with client hint if more specific
     if (fields.mimeType) file.mimeType = fields.mimeType;
 
-    const contentBlocks = await fileToContent(file);
+    const { blocks: contentBlocks, log: extractionLog } = await fileToContent(file);
 
-    // Use beta header for document blocks — required for some model versions, harmless for others
-    const hasPdf = contentBlocks.some(b => b.type === "document");
-    const extraHeaders = hasPdf ? { "anthropic-beta": "pdfs-2024-09-25" } : {};
+    // claude-sonnet-4 supports document blocks natively — no beta header needed
+    const extraHeaders = {};
     const modelPayload = (blocks, prompt) => ({
       model:      "claude-sonnet-4-20250514",
       max_tokens: 1024,
@@ -258,7 +271,7 @@ module.exports = async function (context, req) {
     context.res = {
       status: 200,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
-      body: JSON.stringify({ extractedData: extracted, rawText: raw }),
+      body: JSON.stringify({ extractedData: extracted, rawText: raw, extractionLog }),
     };
   } catch (e) {
     context.res = {

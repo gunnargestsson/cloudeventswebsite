@@ -518,7 +518,10 @@ async function uploadFile(file) {
 
     // PDF/document was unreadable (image-based or protected)
     if (extracted.intent === 'unreadable') {
-      const msg = `I wasn't able to read the content of **${file.name}**. This usually means the PDF uses scanned images rather than selectable text.\n\nYou can:\n1. Copy and paste the order details directly into the chat\n2. Describe the customer name and items with quantities`;
+      const diagLine = data.extractionLog?.length
+        ? `\n\n*Diagnostic: ${data.extractionLog.join(' → ')}*`
+        : '';
+      const msg = `I wasn't able to read the content of **${file.name}**. This usually means the PDF uses scanned images rather than selectable text.${diagLine}\n\nYou can:\n1. Copy and paste the order details directly into the chat\n2. Describe the customer name and items with quantities`;
       appendMessage('assistant', msg);
       messages.push({ role: 'assistant', content: msg });
       return;
