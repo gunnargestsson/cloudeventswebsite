@@ -8,6 +8,7 @@
   "dependencies": {
     "busboy": "^1.6.0",
     "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^3.11.174",
     "xlsx": "^0.18.5",
     "@kenjiuno/msgreader": "^1.28.0"
   }
