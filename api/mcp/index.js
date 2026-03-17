@@ -33,7 +33,11 @@
  *            sales_order_creation_workflow, customer_lookup_pattern, item_lookup_pattern,
  *            implement_message_type
  *
+ *   encrypt_data   — AES-256-GCM symmetric encryption using server-side MCP_ENCRYPTION_KEY
+ *   decrypt_data   — AES-256-GCM symmetric decryption using server-side MCP_ENCRYPTION_KEY
+ *
  * Required env vars: BC_TENANT_ID, BC_CLIENT_ID, BC_CLIENT_SECRET
+ *                    MCP_ENCRYPTION_KEY  (64 hex chars = 32 bytes, required for encrypt_data / decrypt_data)
  * Optional env vars: BC_ENVIRONMENT  (default "production")
  *                    BC_COMPANY_ID   (GUID — pin a specific company)
  *                    BC_COMPANY_NAME (display name fallback)
@@ -57,7 +61,8 @@ function validateTableName(table) {
   }
 }
 
-const https = require("https");
+const https  = require("https");
+const crypto = require("crypto");
 
 const BC_HOST   = "api.businesscentral.dynamics.com";
 const MSFT_HOST = "login.microsoftonline.com";
@@ -245,6 +250,49 @@ function toMarkdownTable(headers, rows) {
     ...rows.map(r => "| " + r.map(v => String(v ?? "").replace(/\|/g, "\\|")).join(" | ") + " |"),
   ];
   return lines.join("\n");
+}
+// ── Symmetric encryption (AES-256-GCM) ───────────────────────────────────────
+// Key is stored as MCP_ENCRYPTION_KEY env var (64 hex chars = 32 bytes).
+// Ciphertext format: base64( iv[12] | authTag[16] | ciphertext )
+
+function getEncryptionKey() {
+  const hex = process.env.MCP_ENCRYPTION_KEY;
+  if (!hex) throw new Error("MCP_ENCRYPTION_KEY is not configured on this server");
+  if (!/^[0-9a-fA-F]{64}$/.test(hex))
+    throw new Error("MCP_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)");
+  return Buffer.from(hex, "hex");
+}
+
+function toolEncryptData({ plaintext } = {}) {
+  if (typeof plaintext !== "string" || !plaintext)
+    throw new Error("Parameter 'plaintext' is required and must be a non-empty string");
+  const key    = getEncryptionKey();
+  const iv     = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const enc    = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag    = cipher.getAuthTag();
+  const combined = Buffer.concat([iv, tag, enc]);
+  return { ciphertext: combined.toString("base64") };
+}
+
+function toolDecryptData({ ciphertext } = {}) {
+  if (typeof ciphertext !== "string" || !ciphertext)
+    throw new Error("Parameter 'ciphertext' is required and must be a non-empty string");
+  const key  = getEncryptionKey();
+  let buf;
+  try { buf = Buffer.from(ciphertext, "base64"); } catch { throw new Error("ciphertext is not valid base64"); }
+  if (buf.length < 28) throw new Error("ciphertext is too short to be a valid encrypted payload");
+  const iv     = buf.subarray(0, 12);
+  const tag    = buf.subarray(12, 28);
+  const enc    = buf.subarray(28);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  try {
+    const plain = Buffer.concat([decipher.update(enc), decipher.final()]);
+    return { plaintext: plain.toString("utf8") };
+  } catch {
+    throw new Error("Decryption failed — ciphertext is corrupted or the wrong key is in use");
+  }
 }
 
 // ── Tool implementations ───────────────────────────────────────────────────────
@@ -999,6 +1047,28 @@ const TOOLS = [
       required: ["source", "lcid", "translations"],
     },
   },
+  {
+    name:        "encrypt_data",
+    description: "Encrypts a plaintext string using AES-256-GCM with the server-side MCP_ENCRYPTION_KEY. Returns a self-contained base64 ciphertext that includes the IV and authentication tag. Safe for strings up to tens of thousands of characters.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        plaintext: { type: "string", description: "The string to encrypt." },
+      },
+      required: ["plaintext"],
+    },
+  },
+  {
+    name:        "decrypt_data",
+    description: "Decrypts a base64 ciphertext string previously produced by encrypt_data. Uses the server-side MCP_ENCRYPTION_KEY. Throws if the ciphertext is tampered with or a different key was used.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        ciphertext: { type: "string", description: "The base64 ciphertext produced by encrypt_data." },
+      },
+      required: ["ciphertext"],
+    },
+  },
 ];
 
 // ── JSON-RPC 2.0 dispatcher ────────────────────────────────────────────────────
@@ -1069,6 +1139,8 @@ async function handleMessage(msg) {
           case "get_integration_timestamp":     content = await toolGetIntegrationTimestamp(args);     break;
           case "set_integration_timestamp":     content = await toolSetIntegrationTimestamp(args);     break;
           case "reverse_integration_timestamp": content = await toolReverseIntegrationTimestamp(args); break;
+          case "encrypt_data":                  content = toolEncryptData(args);                       break;
+          case "decrypt_data":                  content = toolDecryptData(args);                       break;
           default:
             return {
               jsonrpc: "2.0", id,
