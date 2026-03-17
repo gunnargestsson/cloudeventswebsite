@@ -230,8 +230,9 @@ module.exports = async function (context, req) {
 
     const { blocks: contentBlocks, log: extractionLog } = await fileToContent(file);
 
-    // claude-sonnet-4 supports document blocks natively — no beta header needed
-    const extraHeaders = {};
+    // PDF document blocks require the beta header even on newer models
+    const hasPdf = contentBlocks.some(b => b.type === "document");
+    const extraHeaders = hasPdf ? { "anthropic-beta": "pdfs-2024-09-25" } : {};
     const modelPayload = (blocks, prompt) => ({
       model:      "claude-sonnet-4-20250514",
       max_tokens: 1024,
@@ -257,9 +258,10 @@ module.exports = async function (context, req) {
         const descResp  = await callAnthropic(apiKey, modelPayload(contentBlocks, DESCRIBE_PROMPT), extraHeaders);
         const descBlock = (descResp.content || []).find(b => b.type === "text");
         const descText  = (descBlock?.text || "").trim();
-        // Check if Claude is saying the document is unreadable
-        const BLANK_SIGNALS = ["completely blank", "no visible content", "entirely white", "no text", "cannot see", "no content", "blank page", "empty page", "unreadable"];
-        const appearsBlank = BLANK_SIGNALS.some(s => descText.toLowerCase().includes(s));
+        // Only treat as unreadable if Claude clearly has nothing to describe
+        // (short response, or phrases that indicate zero visible content)
+        const HARD_BLANK = ["completely blank", "no visible content", "entirely white", "no content visible", "blank page", "empty page", "empty document"];
+        const appearsBlank = descText.length < 40 || HARD_BLANK.some(s => descText.toLowerCase().includes(s));
         if (descText && !appearsBlank) {
           extracted = { intent: "description", description: descText };
         } else {
