@@ -4,8 +4,9 @@
  * Implements the Model Context Protocol (JSON-RPC 2.0, protocol version 2024-11-05)
  * over a single HTTP POST endpoint at /api/mcp.
  *
- * Company resolution: honours BC_COMPANY_ID and BC_COMPANY_NAME env vars; falls
- * back to the first company returned by BC when neither is set.
+ * Company resolution: all tools accept an optional `companyId` parameter (GUID or
+ * exact company name) to target any company per-call.  Falls back to the
+ * BC_COMPANY_ID / BC_COMPANY_NAME env vars, then the first company in the environment.
  *
  * Tools exposed:
  *   list_tables        — Help.Tables.Get  — all tables (filter / paging supported)
@@ -165,20 +166,39 @@ async function bcTask(tenantId, env, companyId, envelope) {
 
 // ── Company resolution (module-level cache) ────────────────────────────────────
 
-let _companyId   = null;
-let _companyName = null;
+let _defaultCompanyId   = null;
+let _defaultCompanyName = null;
+let _companiesCache     = null;
 
-async function getCompany() {
-  if (_companyId) return { id: _companyId, name: _companyName };
+async function _getCompanies() {
+  if (_companiesCache) return _companiesCache;
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const result   = await bcGet(`/v2.0/${tenantId}/${env}/api/v2.0/companies`);
+  _companiesCache = Array.isArray(result) ? result : (result.value || []);
+  return _companiesCache;
+}
 
-  const tenantId   = process.env.BC_TENANT_ID;
-  const env        = process.env.BC_ENVIRONMENT || "production";
+async function getCompany(companyIdOverride) {
+  const companies = await _getCompanies();
+  if (!companies.length) throw new Error("No companies found in Business Central");
+
+  // Explicit per-call override — match by GUID or exact name (case-insensitive)
+  if (companyIdOverride) {
+    const needle = String(companyIdOverride).toLowerCase();
+    const found  = companies.find(
+      c => c.id === companyIdOverride || (c.name || "").toLowerCase() === needle,
+    );
+    if (!found) throw new Error(`Company '${companyIdOverride}' not found. Use list_companies to see available companies.`);
+    return { id: found.id, name: found.name };
+  }
+
+  // Cached default
+  if (_defaultCompanyId) return { id: _defaultCompanyId, name: _defaultCompanyName };
+
+  // Resolve from env vars
   const targetId   = process.env.BC_COMPANY_ID;
   const targetName = (process.env.BC_COMPANY_NAME || "").toLowerCase();
-
-  const result    = await bcGet(`/v2.0/${tenantId}/${env}/api/v2.0/companies`);
-  const companies = Array.isArray(result) ? result : (result.value || []);
-  if (!companies.length) throw new Error("No companies found in Business Central");
 
   let company;
   if (targetId) {
@@ -194,9 +214,9 @@ async function getCompany() {
     company = companies[0];
   }
 
-  _companyId   = company.id;
-  _companyName = company.name;
-  return { id: _companyId, name: _companyName };
+  _defaultCompanyId   = company.id;
+  _defaultCompanyName = company.name;
+  return { id: _defaultCompanyId, name: _defaultCompanyName };
 }
 
 // ── Markdown helper ────────────────────────────────────────────────────────────
@@ -213,13 +233,13 @@ function toMarkdownTable(headers, rows) {
 
 // ── Tool implementations ───────────────────────────────────────────────────────
 
-async function toolListTables({ lcid = 1033, filter, skip = 0, take = 200 } = {}) {
+async function toolListTables({ lcid = 1033, filter, skip = 0, take = 200, companyId } = {}) {
   take = Math.min(Number(take) || 200, 500);
   skip = Math.max(Number(skip) || 0, 0);
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const result = await bcTask(tenantId, env, company.id, {
     specversion: "1.0",
@@ -238,13 +258,13 @@ async function toolListTables({ lcid = 1033, filter, skip = 0, take = 200 } = {}
   return { company: company.name, total, skip, take, tableCount: tables.length, tables };
 }
 
-async function toolGetTableInfo({ table, lcid = 1033 } = {}) {
+async function toolGetTableInfo({ table, lcid = 1033, companyId } = {}) {
   if (!table) throw new Error("Parameter 'table' is required (table name or number)");
   validateTableName(table);
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const result = await bcTask(tenantId, env, company.id, {
     specversion: "1.0",
@@ -258,13 +278,13 @@ async function toolGetTableInfo({ table, lcid = 1033 } = {}) {
   return { company: company.name, table: tableData };
 }
 
-async function toolGetTableFields({ table, lcid = 1033, format = "json" } = {}) {
+async function toolGetTableFields({ table, lcid = 1033, format = "json", companyId } = {}) {
   if (!table) throw new Error("Parameter 'table' is required (table name or number)");
   validateTableName(table);
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const [fieldsResult, permsResult] = await Promise.all([
     bcTask(tenantId, env, company.id, {
@@ -301,18 +321,14 @@ async function toolGetTableFields({ table, lcid = 1033, format = "json" } = {}) 
 }
 
 async function toolListCompanies() {
-  const tenantId = process.env.BC_TENANT_ID;
-  const env      = process.env.BC_ENVIRONMENT || "production";
-  const result    = await bcGet(`/v2.0/${tenantId}/${env}/api/v2.0/companies`);
-  const companies = (Array.isArray(result) ? result : (result.value || []))
-    .map(c => ({ id: c.id, name: c.name, displayName: c.displayName }));
-  return { companies };
+  const companies = await _getCompanies();
+  return { companies: companies.map(c => ({ id: c.id, name: c.name, displayName: c.displayName })) };
 }
 
-async function toolListMessageTypes({ filter } = {}) {
+async function toolListMessageTypes({ filter, companyId } = {}) {
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const result = await bcTask(tenantId, env, company.id, {
     specversion: "1.0",
@@ -328,12 +344,12 @@ async function toolListMessageTypes({ filter } = {}) {
   return { company: company.name, typeCount: types.length, types };
 }
 
-async function toolGetMessageTypeHelp({ type, lcid = 1033 } = {}) {
+async function toolGetMessageTypeHelp({ type, lcid = 1033, companyId } = {}) {
   if (!type) throw new Error("Parameter 'type' is required (message type name, e.g. 'Customer.Create')");
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const result = await bcTask(tenantId, env, company.id, {
     specversion: "1.0",
@@ -355,7 +371,7 @@ async function toolGetMessageTypeHelp({ type, lcid = 1033 } = {}) {
   return { company: company.name, type: String(type), markdown };
 }
 
-async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid = 1033, format = "json" } = {}) {
+async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid = 1033, format = "json", companyId } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   validateTableName(table);
   take = Math.min(Number(take) || 50, 200);
@@ -363,7 +379,7 @@ async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const data = { tableName: String(table), skip, take };
   if (filter) data.tableView = String(filter);
@@ -400,7 +416,7 @@ async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid
   return ret;
 }
 
-async function toolSetRecords({ table, data, mode = "upsert" } = {}) {
+async function toolSetRecords({ table, data, mode = "upsert", companyId } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   if (!Array.isArray(data) || !data.length) throw new Error("Parameter 'data' must be a non-empty array");
   validateTableName(table);
@@ -418,7 +434,7 @@ async function toolSetRecords({ table, data, mode = "upsert" } = {}) {
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const payload = mode === "upsert" ? { data } : { mode, data };
 
@@ -434,13 +450,13 @@ async function toolSetRecords({ table, data, mode = "upsert" } = {}) {
   return { company: company.name, table: String(table), mode, written: data.length, records };
 }
 
-async function toolSearchCustomers({ query, take = 10 } = {}) {
+async function toolSearchCustomers({ query, take = 10, companyId } = {}) {
   if (!query) throw new Error("Parameter 'query' is required");
   take = Math.min(Number(take) || 10, 50);
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const isNo   = /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20;
   const filter = isNo
@@ -458,13 +474,13 @@ async function toolSearchCustomers({ query, take = 10 } = {}) {
   return { company: company.name, query, count: records.length, customers: records };
 }
 
-async function toolSearchItems({ query, take = 10 } = {}) {
+async function toolSearchItems({ query, take = 10, companyId } = {}) {
   if (!query) throw new Error("Parameter 'query' is required");
   take = Math.min(Number(take) || 10, 50);
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const filter = /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20
     ? `WHERE(No.=FILTER(${query}*)|Description=FILTER(*${query}*))`
@@ -481,13 +497,13 @@ async function toolSearchItems({ query, take = 10 } = {}) {
   return { company: company.name, query, count: records.length, items: records };
 }
 
-async function toolListTranslations({ source, lcid, missingOnly = false } = {}) {
+async function toolListTranslations({ source, lcid, missingOnly = false, companyId } = {}) {
   if (!source) throw new Error("Parameter 'source' is required");
   if (!lcid)   throw new Error("Parameter 'lcid' is required");
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const tableView = `WHERE(Windows Language ID=CONST(${Number(lcid)}),Source=CONST(${source}))`;
   const result = await bcTask(tenantId, env, company.id, {
@@ -515,7 +531,7 @@ async function toolListTranslations({ source, lcid, missingOnly = false } = {}) 
   };
 }
 
-async function toolSetTranslations({ source, lcid, translations } = {}) {
+async function toolSetTranslations({ source, lcid, translations, companyId } = {}) {
   if (!source)       throw new Error("Parameter 'source' is required");
   if (!lcid)         throw new Error("Parameter 'lcid' is required");
   if (!Array.isArray(translations) || !translations.length)
@@ -523,7 +539,7 @@ async function toolSetTranslations({ source, lcid, translations } = {}) {
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const data = translations.map(t => ({
     primaryKey: {
@@ -559,13 +575,13 @@ function ciTableView(source, tableId) {
   return `SORTING(Source,Table Id,Date & Time) ORDER(Descending) WHERE(Source=CONST(${source}),Table Id=CONST(${tableId}),Reversed=CONST(false))`;
 }
 
-async function toolGetIntegrationTimestamp({ source, tableId } = {}) {
+async function toolGetIntegrationTimestamp({ source, tableId, companyId } = {}) {
   if (!source)  throw new Error("Parameter 'source' is required");
   if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const result = await bcTask(tenantId, env, company.id, {
     specversion: "1.0",
@@ -588,14 +604,14 @@ async function toolGetIntegrationTimestamp({ source, tableId } = {}) {
   return { company: company.name, source, tableId: Number(tableId), dateTime };
 }
 
-async function toolSetIntegrationTimestamp({ source, tableId, dateTime } = {}) {
+async function toolSetIntegrationTimestamp({ source, tableId, dateTime, companyId } = {}) {
   if (!source)   throw new Error("Parameter 'source' is required");
   if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
   if (!dateTime) throw new Error("Parameter 'dateTime' is required (ISO 8601 string, e.g. '2026-03-17T12:00:00Z')");
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   await bcTask(tenantId, env, company.id, {
     specversion: "1.0",
@@ -613,13 +629,13 @@ async function toolSetIntegrationTimestamp({ source, tableId, dateTime } = {}) {
   return { company: company.name, source, tableId: Number(tableId), dateTime: String(dateTime), written: 1 };
 }
 
-async function toolGetRecordCount({ table, filter } = {}) {
+async function toolGetRecordCount({ table, filter, companyId } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   validateTableName(table);
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const data = { tableName: String(table), skip: 0, take: 1, fieldNumbers: [1] };
   if (filter) data.tableView = String(filter);
@@ -635,12 +651,12 @@ async function toolGetRecordCount({ table, filter } = {}) {
   return { company: company.name, table: String(table), filter: filter || null, count: noOfRecords };
 }
 
-async function toolGetSalesOrderStatistics({ orderNo } = {}) {
+async function toolGetSalesOrderStatistics({ orderNo, companyId } = {}) {
   if (!orderNo) throw new Error("Parameter 'orderNo' is required");
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   const result = await bcTask(tenantId, env, company.id, {
     specversion: "1.0",
@@ -656,13 +672,13 @@ async function toolGetSalesOrderStatistics({ orderNo } = {}) {
   return result;
 }
 
-async function toolReverseIntegrationTimestamp({ source, tableId } = {}) {
+async function toolReverseIntegrationTimestamp({ source, tableId, companyId } = {}) {
   if (!source)  throw new Error("Parameter 'source' is required");
   if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
 
   const tenantId = process.env.BC_TENANT_ID;
   const env      = process.env.BC_ENVIRONMENT || "production";
-  const company  = await getCompany();
+  const company  = await getCompany(companyId);
 
   // Step 1: find the latest non-reversed record
   const readResult = await bcTask(tenantId, env, company.id, {
@@ -969,8 +985,14 @@ async function handleMessage(msg) {
       case "ping":
         return { jsonrpc: "2.0", id, result: {} };
 
-      case "tools/list":
-        return { jsonrpc: "2.0", id, result: { tools: TOOLS } };
+      case "tools/list": {
+        const coProp  = { type: "string", description: "Target company: BC company GUID or exact company name. Omit to use the server default company." };
+        const toolsOut = TOOLS.map(t => {
+          if (t.name === "list_companies") return t;
+          return { ...t, inputSchema: { ...t.inputSchema, properties: { ...t.inputSchema.properties, companyId: coProp } } };
+        });
+        return { jsonrpc: "2.0", id, result: { tools: toolsOut } };
+      }
 
       case "tools/call": {
         const toolName = (params || {}).name;
