@@ -113,7 +113,7 @@ function sanitizeFilter(s) {
 
 // ── Anthropic Messages API helper ──────────────────────────────────────────────
 
-async function callAnthropic(apiKey, payload) {
+async function callAnthropic(apiKey, payload, extraHeaders = {}) {
   const bodyBuf = Buffer.from(JSON.stringify(payload), "utf8");
   const { statusCode, raw } = await httpsRequest(
     "api.anthropic.com",
@@ -123,6 +123,7 @@ async function callAnthropic(apiKey, payload) {
       "x-api-key":         apiKey,
       "anthropic-version": "2023-06-01",
       "Content-Type":      "application/json",
+      ...extraHeaders,
     },
     bodyBuf,
   );

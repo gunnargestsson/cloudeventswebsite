@@ -13,11 +13,13 @@ const CORS_HEADERS = {
 };
 
 const EXTRACT_PROMPT =
-  "Extract any sales order intent from this document. " +
-  "Return a JSON object with: customerName, customerNo (if mentioned), " +
+  "Extract customer and order line information from this document. " +
+  "The document may be a sales order, purchase order, draft invoice, quote, email, or any document listing items to be ordered or delivered. " +
+  "Return a JSON object with: customerName (string), customerNo (string or null), " +
   "orderLines (array of { itemNo, description, quantity, unitOfMeasure }), " +
-  "requestedDeliveryDate, and any notes. " +
-  "If no order intent is found, return { \"intent\": \"none\" }. " +
+  "requestedDeliveryDate (ISO date string or null), and notes (string or null). " +
+  "Extract as much as you can even if some fields are missing. " +
+  "Only return { \"intent\": \"none\" } if the document contains absolutely no customer or product/item information whatsoever. " +
   "Respond with ONLY the JSON object, no explanation.";
 
 // ── Parse multipart/form-data using busboy ─────────────────────────────────────
@@ -172,11 +174,15 @@ module.exports = async function (context, req) {
     const contentBlocks = fileToContent(file);
     contentBlocks.push({ type: "text", text: EXTRACT_PROMPT });
 
+    // PDFs require the beta header; passing it on non-PDF calls is harmless
+    const hasPdf = contentBlocks.some(b => b.type === "document");
+    const extraHeaders = hasPdf ? { "anthropic-beta": "pdfs-2024-09-25" } : {};
+
     const response = await callAnthropic(apiKey, {
       model:      "claude-sonnet-4-20250514",
       max_tokens: 1024,
       messages:   [{ role: "user", content: contentBlocks }],
-    });
+    }, extraHeaders);
 
     const textBlock = (response.content || []).find(b => b.type === "text");
     const raw       = (textBlock?.text || "").trim();
