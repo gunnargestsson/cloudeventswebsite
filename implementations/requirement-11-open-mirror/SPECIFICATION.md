@@ -100,7 +100,47 @@ Stored as a JSON array in the second Cloud Events Storage record:
 ]
 ```
 
-`fieldNumbers: []` means all fields (omitted from the BC API request).
+`fieldNumbers: []` means all user-selectable fields (omitted from the BC API request — BC returns everything in range 1..1999999999).
+
+**System fields (field numbers 0 and 2000000000–2000000004) are always appended automatically** by `CSV.Records.Get` and must never appear in `fieldNumbers`. They are added to the DDL unconditionally — see the Field Selection Rules section.
+
+---
+
+## Field Selection Rules
+
+### Valid field number range
+
+Only fields with field numbers in the range **1..1999999999** are valid for user selection. This is the range of application-defined BC fields returned by `Help.Fields.Get`.
+
+Field numbers outside this range are system-level and are handled automatically:
+
+| Column | Field No. | Always included | Description |
+|---|---|---|---|
+| `Timestamp-0` | 0 | ✅ | Internal timestamp (BigInteger) |
+| `SystemId-2000000000` | 2000000000 | ✅ | Record GUID — Fabric primary key |
+| `SystemCreatedAt-2000000001` | 2000000001 | ✅ | Creation timestamp (UTC) |
+| `SystemCreatedBy-2000000002` | 2000000002 | ✅ | Created by user GUID |
+| `SystemModifiedAt-2000000003` | 2000000003 | ✅ | Last modified timestamp (UTC) — Fabric watermark |
+| `SystemModifiedBy-2000000004` | 2000000004 | ✅ | Last modified by user GUID |
+
+The `$Company` column is also always appended (before system fields) for per-company tables.
+
+**These system columns must never appear in the `fieldNumbers` array in stored config.** The Add/Edit Table panel must reject any entry with a field number of `0` or `>= 2000000000`.
+
+### Primary key indication in field picker
+
+When the user opens the Add/Edit Table panel and loads fields for a table (via `get_table_fields`), each field is displayed with a **🔑** badge if `isPartOfPrimaryKey === true`. This helps the user understand which fields form the record identity — though PK fields are ordinary user-selectable fields (range 1..1999999999) and can be included or excluded from `fieldNumbers` freely.
+
+> Note: The Fabric primary key for the mirrored table is always `SystemId-2000000000`, regardless of the BC table's own primary key. The BC primary key fields are informational — they help the user choose which fields to mirror.
+
+### Behaviour in the Add/Edit panel
+
+- The field picker loads all fields from `get_table_fields` for the chosen table.
+- Fields are displayed as: `[🔑] No. (1) — Code 20` / `Name (2) — Text 100` etc.
+- Fields of unsupported types (BLOB, Media, MediaSet, RecordId, OemCode, OemText, TableFilter) are shown greyed-out and cannot be selected.
+- System fields (numbers outside 1..1999999999) are not shown in the picker at all.
+- The user may select any subset of the valid fields, or leave all unchecked to mirror all fields.
+- Stored `fieldNumbers` contains only numbers in range 1..1999999999.
 
 ---
 
@@ -412,9 +452,11 @@ const mirrorConn = JSON.parse(dec.plaintext);
 | Field | Control | Editable when Active |
 |---|---|---|
 | Table name / number | Text input + Lookup button (`get_table_info`) | No |
-| Field numbers | Comma-separated integers, blank = all | No |
+| Fields | Multi-select list loaded from `get_table_fields`; each entry shows field name, number, type, and 🔑 if part of BC primary key; unsupported types greyed-out; system fields (no. outside 1..1999999999) hidden; blank selection = all fields | No |
 | Filter (`tableView`) | Text input, BC AL expression | No |
 | Interval (min) | Number input, min 1, default 60 | Yes |
+
+**Validation:** The panel rejects any manually-entered field number of `0` or `>= 2000000000`. System fields are always included by the API automatically and must not be in `fieldNumbers`.
 
 The panel is disabled for Active tables (Deactivate first). The interval field is also
 inline-editable on the table card while Active to allow quick adjustments.
@@ -516,5 +558,5 @@ const UI_STRINGS = [
 | M1 | Exact Fabric Open Mirroring DDL JSON field names | Validate against current [Microsoft docs](https://learn.microsoft.com/en-us/fabric/database/mirrored-database/open-mirroring-landing-zone-format) |
 | M2 | `type` field for incremental data files after initial load | Likely `"Incremental"`  confirm from Fabric spec |
 | M3 | `$Company` column  include in DDL? | Yes, always, as `varchar(250)` |
-| M4 | When `fieldNumbers` is empty, DDL should include all non-BLOB fields from `get_table_fields` + system fields | Yes |
+| M4 | When `fieldNumbers` is empty, DDL includes all non-BLOB / non-unsupported fields from `get_table_fields` (range 1..1999999999) + the 7 system columns | ✅ Confirmed |
 | M5 | ADLS path for `test-connection`  use root container or `Tables/` prefix? | Use root; just authenticate and check access |
