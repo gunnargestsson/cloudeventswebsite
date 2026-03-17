@@ -41,6 +41,7 @@
  * Optional env vars: BC_ENVIRONMENT  (default "production")
  *                    BC_COMPANY_ID   (GUID — pin a specific company)
  *                    BC_COMPANY_NAME (display name fallback)
+ *                    MCP_DECRYPT_ALLOWED_HOSTS (comma-separated extra allowed hosts for decrypt_data/get_config decrypt)
  *
  * All tools also accept per-call connection parameters (tenantId, clientId,
  * clientSecret, environment, companyId) that override the env vars. This lets
@@ -96,7 +97,7 @@ function resolveConn({ tenantId, clientId, clientSecret, environment, encryptedC
   if (encryptedConn) {
     let parsed;
     try {
-      parsed = JSON.parse(toolDecryptData({ ciphertext: String(encryptedConn) }).plaintext);
+      parsed = JSON.parse(decryptCiphertext(String(encryptedConn)));
     } catch (e) {
       throw new Error(`encryptedConn could not be decrypted: ${e.message}`);
     }
@@ -265,6 +266,55 @@ function toMarkdownTable(headers, rows) {
   ];
   return lines.join("\n");
 }
+
+function parseHeaderHost(value) {
+  if (!value) return "";
+  const first = String(value).split(",")[0].trim();
+  if (!first) return "";
+
+  try {
+    if (/^https?:\/\//i.test(first)) {
+      return new URL(first).hostname.toLowerCase();
+    }
+  } catch {
+    return "";
+  }
+
+  // Host header may include a port (example.com:443)
+  return first.split(":")[0].toLowerCase();
+}
+
+function buildAllowedDecryptHosts(req) {
+  const hosts = new Set();
+
+  const requestHost =
+    parseHeaderHost(req.headers["x-forwarded-host"]) ||
+    parseHeaderHost(req.headers["host"]);
+  if (requestHost) hosts.add(requestHost);
+
+  const websiteHost = parseHeaderHost(process.env.WEBSITE_HOSTNAME || "");
+  if (websiteHost) hosts.add(websiteHost);
+
+  const configuredHosts = String(process.env.MCP_DECRYPT_ALLOWED_HOSTS || "")
+    .split(",")
+    .map(parseHeaderHost)
+    .filter(Boolean);
+  configuredHosts.forEach(h => hosts.add(h));
+
+  return hosts;
+}
+
+function isTrustedDecryptCaller(req) {
+  const allowedHosts = buildAllowedDecryptHosts(req);
+  if (!allowedHosts.size) return false;
+
+  const originHost  = parseHeaderHost(req.headers["origin"]);
+  const refererHost = parseHeaderHost(req.headers["referer"]);
+
+  return (originHost && allowedHosts.has(originHost)) ||
+    (refererHost && allowedHosts.has(refererHost));
+}
+
 // ── Symmetric encryption (AES-256-GCM) ───────────────────────────────────────
 // Key is stored as MCP_ENCRYPTION_KEY env var (64 hex chars = 32 bytes).
 // Ciphertext format: base64( iv[12] | authTag[16] | ciphertext )
@@ -289,7 +339,7 @@ function toolEncryptData({ plaintext } = {}) {
   return { ciphertext: combined.toString("base64") };
 }
 
-function toolDecryptData({ ciphertext } = {}) {
+function decryptCiphertext(ciphertext) {
   if (typeof ciphertext !== "string" || !ciphertext)
     throw new Error("Parameter 'ciphertext' is required and must be a non-empty string");
   const key  = getEncryptionKey();
@@ -303,10 +353,19 @@ function toolDecryptData({ ciphertext } = {}) {
   decipher.setAuthTag(tag);
   try {
     const plain = Buffer.concat([decipher.update(enc), decipher.final()]);
-    return { plaintext: plain.toString("utf8") };
+    return plain.toString("utf8");
   } catch {
     throw new Error("Decryption failed — ciphertext is corrupted or the wrong key is in use");
   }
+}
+
+function toolDecryptData({ ciphertext } = {}, { allowExternal = false } = {}) {
+  if (!allowExternal) {
+    throw new Error(
+      "Decryption is restricted. Only same-host website callers are allowed to decrypt via MCP tools."
+    );
+  }
+  return { plaintext: decryptCiphertext(ciphertext) };
 }
 
 // ── Tool implementations ───────────────────────────────────────────────────────
@@ -845,7 +904,7 @@ async function toolSetConfig({ source, id, data, encrypt = false, companyId, ten
   return { company: company.name, source, id, encrypted: encrypt, written: 1 };
 }
 
-async function toolGetConfig({ source, id, decrypt = false, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+async function toolGetConfig({ source, id, decrypt = false, __allowDecrypt = false, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!source) throw new Error("Parameter 'source' is required");
   if (!id)     throw new Error("Parameter 'id' is required");
 
@@ -873,7 +932,7 @@ async function toolGetConfig({ source, id, decrypt = false, companyId, tenantId,
   let   rawString   = Buffer.from(blobBase64, "base64").toString("utf8");
 
   if (decrypt) {
-    rawString = toolDecryptData({ ciphertext: rawString }).plaintext;
+    rawString = toolDecryptData({ ciphertext: rawString }, { allowExternal: __allowDecrypt }).plaintext;
   }
 
   let parsed;
@@ -1173,7 +1232,7 @@ const TOOLS = [
   },
   {
     name:        "decrypt_data",
-    description: "Decrypts a base64 ciphertext string previously produced by encrypt_data. Uses the server-side MCP_ENCRYPTION_KEY. Throws if the ciphertext is tampered with or a different key was used.",
+    description: "Decrypts a base64 ciphertext string previously produced by encrypt_data. Uses the server-side MCP_ENCRYPTION_KEY. Restricted to callers coming from websites on the same host as the MCP endpoint.",
     inputSchema: {
       type:       "object",
       properties: {
@@ -1186,7 +1245,7 @@ const TOOLS = [
 
 // ── JSON-RPC 2.0 dispatcher ────────────────────────────────────────────────────
 
-async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = "" } = {}) {
+async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = "", allowDecrypt = false } = {}) {
   if (!msg || msg.jsonrpc !== "2.0") {
     return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } };
   }
@@ -1232,6 +1291,7 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
       case "tools/call": {
         const toolName = (params || {}).name;
         const args     = (params || {}).arguments || {};
+        args.__allowDecrypt = !!allowDecrypt;
         // Inject header-provided defaults as workspace-level fallbacks
         // (per-call arguments always take priority).
         if (headerEncryptedConn && !args.encryptedConn) args.encryptedConn = headerEncryptedConn;
@@ -1260,7 +1320,7 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "set_config":                    content = await toolSetConfig(args);                    break;
           case "get_config":                    content = await toolGetConfig(args);                    break;
           case "encrypt_data":                  content = toolEncryptData(args);                       break;
-          case "decrypt_data":                  content = toolDecryptData(args);                       break;
+          case "decrypt_data":                  content = toolDecryptData(args, { allowExternal: !!allowDecrypt }); break;
           default:
             return {
               jsonrpc: "2.0", id,
@@ -1499,18 +1559,19 @@ module.exports = async function (context, req) {
   // Set in .vscode/mcp.json → headers → "x-encrypted-conn" / "x-company-id".
   const headerEncryptedConn = req.headers["x-encrypted-conn"] || "";
   const headerCompanyId     = req.headers["x-company-id"]     || "";
+  const allowDecrypt        = isTrustedDecryptCaller(req);
 
   const body = req.body;
   const corsHeaders = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
 
   // Batch request (array of messages)
   if (Array.isArray(body)) {
-    const responses = (await Promise.all(body.map(msg => handleMessage(msg, { headerEncryptedConn, headerCompanyId })))).filter((r) => r !== null);
+    const responses = (await Promise.all(body.map(msg => handleMessage(msg, { headerEncryptedConn, headerCompanyId, allowDecrypt })))).filter((r) => r !== null);
     context.res = { status: 200, headers: corsHeaders, body: JSON.stringify(responses) };
     return;
   }
 
-  const response = await handleMessage(body, { headerEncryptedConn, headerCompanyId });
+  const response = await handleMessage(body, { headerEncryptedConn, headerCompanyId, allowDecrypt });
   if (response === null) {
     // Notification — acknowledge with 202, no body
     context.res = { status: 202, headers: { "Access-Control-Allow-Origin": "*" } };
