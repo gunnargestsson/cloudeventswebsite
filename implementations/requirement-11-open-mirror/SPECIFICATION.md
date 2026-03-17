@@ -370,6 +370,15 @@ Triggered by: setInterval or "Run Now" button
 
 All actions: `POST /api/mirror` with JSON body.
 
+**BC credential passing:** `/api/mirror` reads BC credentials from the same `x-bc-*`
+request headers used by all other API functions (`x-bc-tenant`, `x-bc-environment`,
+`x-bc-company`, `x-bc-client-id`, `x-bc-client-secret`). The browser sets these via
+`bcSettingsHeaders()` from `settings.js`. The `bcConn` body property shown in action
+examples below is for documentation purposes only — the function reads from headers.
+
+The `mirrorConn` object **is** passed in the request body (it is decrypted in the
+browser from BC config and forwarded over HTTPS to the function).
+
 ### `"test-connection"`
 
 ```json
@@ -633,20 +642,22 @@ const UI_STRINGS = [
 |  1 | `api/package.json`  add `@azure/identity`, `@azure/storage-file-datalake` |
 |  2 | `api/mirror/function.json` + `index.js` skeleton + `test-connection` action |
 |  3 | `api/mirror/index.js`  `upload-ddl` action (DDL build + ADLS write) |
-|  4 | `api/mirror/index.js`  `mirror-table` action (BC CSV fetch + ADLS upload, server-side hop) |
-|  5 | `bc-open-mirror.html`  page scaffold,  Home, `settings.js` integration, language |
-|  6 | Mirror Destination section  form, save/verify, encrypt/decrypt via MCP |
-|  7 | Config load on page start (get_config + decrypt_data) |
-|  8 | Add / Edit Table panel  modal, field lookup, `set_config` persist |
-|  9 | Table card rendering (Active / Inactive / Error states) |
-|  10 | Activation flow: get_table_fields  build DDL  upload-ddl  lock + start interval |
-|  11 | Timestamp workflow: get/set/reverse via Cloud Events Integration |
-|  12 | Mirror run function wiring (count check + mirror-table call) |
-|  13 | Session Run Log panel  live append |
-|  14 | "Run Now" button |
-|  15 | Inline interval editing while Active |
-|  16 | `index.html` nav card + `staticwebapp.config.json` route |
-|  17 | Translation strings (Icelandic) |
+|  4 | `api/mirror/index.js`  `enqueue-table` action (POST BC `/queues`) |
+|  5 | `api/mirror/index.js`  `check-status` + `retry-task` actions (GET/POST BC `/queues/{id}`) |
+|  6 | `api/mirror/index.js`  `fetch-upload` action (GET ready CSV from BC + ADLS upload) |
+|  7 | `bc-open-mirror.html`  page scaffold,  Home, `settings.js` integration, language |
+|  8 | Mirror Destination section  form, save/verify, encrypt/decrypt via MCP |
+|  9 | Config load on page start (get_config + decrypt_data) |
+|  10 | Add / Edit Table panel  modal, field lookup, `set_config` persist |
+|  11 | Table card rendering (Active / Inactive / Error states) |
+|  12 | Activation flow: get_table_fields  build DDL  upload-ddl  lock + start interval |
+|  13 | Timestamp workflow: get/set/reverse via Cloud Events Integration |
+|  14 | Mirror run function wiring (count check  enqueue  poll  fetch-upload) |
+|  15 | Session Run Log panel  live append |
+|  16 | "Run Now" button |
+|  17 | Inline interval editing while Active |
+|  18 | `index.html` nav card + `staticwebapp.config.json` route |
+|  19 | Translation strings (Icelandic) |
 
 ---
 
