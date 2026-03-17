@@ -198,6 +198,38 @@ Each requirement is stored in its own subfolder with complete implementation det
 - `encryptedConn` — Base64 AES-256-GCM blob containing JSON credentials; see §18 in SPECIFICATION.md
 - `x-encrypted-conn` HTTP header — workspace-level encrypted credentials set once in `.vscode/mcp.json`; automatically injected into every tool call (§18)
 
+**Selecting the default company (`x-company-id`):**
+
+Set the `x-company-id` header in `.vscode/mcp.json` to pin a specific company GUID for every tool call:
+```json
+{
+  "servers": {
+    "bc-metadata": {
+      "type": "http",
+      "url": "https://dynamics.is/api/mcp",
+      "headers": {
+        "x-encrypted-conn": "",
+        "x-company-id": "<company GUID>"
+      }
+    }
+  }
+}
+```
+
+If `x-company-id` is **empty or omitted**, the server falls back to the `BC_COMPANY_ID` env var, then the first company in the environment. To find the right GUID, ask the AI assistant:
+
+> "Give me a list of companies and their IDs"
+
+It will call the `list_companies` tool and return a table like:
+
+| Name | ID |
+|---|---|
+| CRONUS IS | `1998a733-7a01-f111-a1f9-6045bd750e1f` |
+| DataShip Test1 | `8a1b4113-af17-f111-8340-0022489b46a1` |
+| … | … |
+
+Copy the GUID of the company you want and paste it into `x-company-id` in `.vscode/mcp.json`.
+
 **Planned Additions**:
 - Optional `MCP_API_KEY` bearer token guard (§11a)
 - Updated `/.well-known/mcp.json` discovery document (§13)
