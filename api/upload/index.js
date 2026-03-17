@@ -14,13 +14,18 @@ const CORS_HEADERS = {
 
 const EXTRACT_PROMPT =
   "Extract customer and order line information from this document. " +
-  "The document may be a sales order, purchase order, draft invoice, quote, email, or any document listing items to be ordered or delivered. " +
-  "Return a JSON object with: customerName (string), customerNo (string or null), " +
+  "The document may be a sales order, purchase order, draft invoice, quote, email, or any business document. " +
+  "Return a JSON object with: customerName (string or null), customerNo (string or null), " +
   "orderLines (array of { itemNo, description, quantity, unitOfMeasure }), " +
   "requestedDeliveryDate (ISO date string or null), and notes (string or null). " +
-  "Extract as much as you can even if some fields are missing. " +
-  "Only return { \"intent\": \"none\" } if the document contains absolutely no customer or product/item information whatsoever. " +
+  "Always extract as much as possible. " +
+  "Only return { \"intent\": \"none\" } if the document is completely unreadable or contains zero business-relevant text. " +
   "Respond with ONLY the JSON object, no explanation.";
+
+const DESCRIBE_PROMPT =
+  "Please describe the contents of this document in plain text. " +
+  "List any customer name, customer number, company name, item descriptions, quantities, prices, dates, and any other relevant business information you can see. " +
+  "Be as specific as possible.";
 
 // ── Parse multipart/form-data using busboy ─────────────────────────────────────
 
@@ -172,28 +177,39 @@ module.exports = async function (context, req) {
     if (fields.mimeType) file.mimeType = fields.mimeType;
 
     const contentBlocks = fileToContent(file);
-    contentBlocks.push({ type: "text", text: EXTRACT_PROMPT });
 
     // PDFs require the beta header; passing it on non-PDF calls is harmless
     const hasPdf = contentBlocks.some(b => b.type === "document");
     const extraHeaders = hasPdf ? { "anthropic-beta": "pdfs-2024-09-25" } : {};
-
-    const response = await callAnthropic(apiKey, {
+    const modelPayload = (blocks, prompt) => ({
       model:      "claude-sonnet-4-20250514",
       max_tokens: 1024,
-      messages:   [{ role: "user", content: contentBlocks }],
-    }, extraHeaders);
+      messages:   [{ role: "user", content: [...blocks, { type: "text", text: prompt }] }],
+    });
 
+    // Step 1: structured extraction
+    const response = await callAnthropic(apiKey, modelPayload(contentBlocks, EXTRACT_PROMPT), extraHeaders);
     const textBlock = (response.content || []).find(b => b.type === "text");
     const raw       = (textBlock?.text || "").trim();
 
     let extracted;
     try {
-      // Claude may wrap JSON in markdown fences — strip them
       const jsonStr = raw.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/i, "").trim();
       extracted     = JSON.parse(jsonStr);
     } catch {
-      extracted = { intent: "none", rawText: raw };
+      extracted = { intent: "none", parseError: raw.slice(0, 200) };
+    }
+
+    // Step 2: if structured extraction failed, do a plain-text description fallback
+    if (!extracted || extracted.intent === "none") {
+      try {
+        const descResp  = await callAnthropic(apiKey, modelPayload(contentBlocks, DESCRIBE_PROMPT), extraHeaders);
+        const descBlock = (descResp.content || []).find(b => b.type === "text");
+        const descText  = (descBlock?.text || "").trim();
+        if (descText) {
+          extracted = { intent: "description", description: descText };
+        }
+      } catch (_) { /* fallback failed — keep intent:none */ }
     }
 
     context.res = {

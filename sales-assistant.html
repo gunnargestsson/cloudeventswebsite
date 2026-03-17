@@ -509,9 +509,20 @@ async function uploadFile(file) {
 
     const extracted = data.extractedData;
     if (!extracted || extracted.intent === 'none') {
-      const msg = `I couldn't find any sales order intent in **${file.name}**. What would you like to do with it?`;
+      const parseHint = extracted?.parseError ? `\n\nDiagnostic: ${extracted.parseError}` : '';
+      const msg = `${t('File processing error: {0}').replace('{0}', file.name + ' — no recognisable content')}${parseHint}`;
       appendMessage('assistant', msg);
       messages.push({ role: 'assistant', content: msg });
+      return;
+    }
+
+    // Fallback: Claude described the document but couldn't extract structured data
+    if (extracted.intent === 'description') {
+      const userMsg = `[From file: ${file.name}]\n\n${extracted.description}\n\nPlease extract the customer and order lines from the above description, look them up in Business Central, and prepare the sales order for confirmation.`;
+      appendMessage('user', userMsg);
+      messages.push({ role: 'user', content: userMsg });
+      isBusy = false;
+      await _callChatApi();
       return;
     }
 
