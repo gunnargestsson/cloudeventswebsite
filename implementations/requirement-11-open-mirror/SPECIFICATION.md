@@ -82,25 +82,29 @@ Stored as a JSON array in the second Cloud Events Storage record:
 ```json
 [
   {
-    "tableId":      18,
-    "tableName":    "Customer",
-    "fieldNumbers": [1, 2, 5, 7, 35, 102],
-    "tableView":    "WHERE(Blocked=CONST( ))",
-    "intervalMin":  60,
-    "active":       true
+    "tableId":        18,
+    "tableName":      "Customer",
+    "dataPerCompany": true,
+    "fieldNumbers":   [1, 2, 5, 7, 35, 102],
+    "tableView":      "WHERE(Blocked=CONST( ))",
+    "intervalMin":    60,
+    "active":         true
   },
   {
-    "tableId":      27,
-    "tableName":    "Item",
-    "fieldNumbers": [],
-    "tableView":    "",
-    "intervalMin":  15,
-    "active":       false
+    "tableId":        27,
+    "tableName":      "Item",
+    "dataPerCompany": true,
+    "fieldNumbers":   [],
+    "tableView":      "",
+    "intervalMin":    15,
+    "active":         false
   }
 ]
 ```
 
 `fieldNumbers: []` means all user-selectable fields (omitted from the BC API request — BC returns everything in range 1..1999999999).
+
+`dataPerCompany` is read from `Help.Tables.Get` (`result[].dataPerCompany`) when a table is first added and stored here. It determines whether a `$Company` column appears as the very last column in the CSV and DDL.
 
 **System fields (field numbers 0 and 2000000000–2000000004) are always appended automatically** by `CSV.Records.Get` and must never appear in `fieldNumbers`. They are added to the DDL unconditionally — see the Field Selection Rules section.
 
@@ -123,7 +127,7 @@ Field numbers outside this range are system-level and are handled automatically:
 | `SystemModifiedAt-2000000003` | 2000000003 | ✅ | Last modified timestamp (UTC) — Fabric watermark |
 | `SystemModifiedBy-2000000004` | 2000000004 | ✅ | Last modified by user GUID |
 
-The `$Company` column is also always appended (before system fields) for per-company tables.
+The `$Company` column is also always appended **as the very last column** (after all system fields) for per-company tables (`dataPerCompany: true`). Its value in the CSV is the current company name, double-quoted and escaped. It is not a user-selectable field and must never appear in `fieldNumbers`.
 
 **These system columns must never appear in the `fieldNumbers` array in stored config.** The Add/Edit Table panel must reject any entry with a field number of `0` or `>= 2000000000`.
 
@@ -196,18 +200,22 @@ Column names follow the convention **`{washedName}-{fieldNo}`**, identical to `C
   "columns": [
     { "columnName": "No-1",   "columnDataType": "varchar", "columnLength": 20,  "isNullable": true,  "isPrimaryKey": false },
     { "columnName": "Name-2", "columnDataType": "varchar", "columnLength": 100, "isNullable": true,  "isPrimaryKey": false },
-    { "columnName": "$Company",                   "columnDataType": "varchar", "columnLength": 250, "isNullable": true,  "isPrimaryKey": false },
-    { "columnName": "Timestamp-0",                "columnDataType": "bigint",                       "isNullable": true,  "isPrimaryKey": false },
-    { "columnName": "SystemId-2000000000",         "columnDataType": "uniqueidentifier",             "isNullable": false, "isPrimaryKey": true  },
-    { "columnName": "SystemCreatedAt-2000000001",  "columnDataType": "datetime2",                    "isNullable": true,  "isPrimaryKey": false },
-    { "columnName": "SystemCreatedBy-2000000002",  "columnDataType": "uniqueidentifier",             "isNullable": true,  "isPrimaryKey": false },
-    { "columnName": "SystemModifiedAt-2000000003", "columnDataType": "datetime2",                    "isNullable": true,  "isPrimaryKey": false },
-    { "columnName": "SystemModifiedBy-2000000004", "columnDataType": "uniqueidentifier",             "isNullable": true,  "isPrimaryKey": false }
+    { "columnName": "Timestamp-0",                "columnDataType": "bigint",          "isNullable": true,  "isPrimaryKey": false },
+    { "columnName": "SystemId-2000000000",         "columnDataType": "uniqueidentifier", "isNullable": false, "isPrimaryKey": true  },
+    { "columnName": "SystemCreatedAt-2000000001",  "columnDataType": "datetime2",        "isNullable": true,  "isPrimaryKey": false },
+    { "columnName": "SystemCreatedBy-2000000002",  "columnDataType": "uniqueidentifier", "isNullable": true,  "isPrimaryKey": false },
+    { "columnName": "SystemModifiedAt-2000000003", "columnDataType": "datetime2",        "isNullable": true,  "isPrimaryKey": false },
+    { "columnName": "SystemModifiedBy-2000000004", "columnDataType": "uniqueidentifier", "isNullable": true,  "isPrimaryKey": false },
+    { "columnName": "$Company",                   "columnDataType": "varchar", "columnLength": 250, "isNullable": true,  "isPrimaryKey": false }
   ],
   "primaryKey": ["SystemId-2000000000"],
   "watermarkColumn": "SystemModifiedAt-2000000003"
 }
 ```
+
+> The `$Company` entry is only included when `dataPerCompany: true`. It is always the
+> last column. The column name is the literal string `$Company` — it does not follow
+> the `{washedName}-{fieldNo}` convention as it is not a BC table field.
 
 Data upload files (subsequent incremental runs) use `"type": "Incremental"` instead of
 `"FullInitialLoad"`. Confirm exact enum values against the current
@@ -240,7 +248,9 @@ Only the 13 supported types appear in the DDL and CSV. Every other type is silen
 BLOB, Media, MediaSet, RecordId, OemCode, OemText, TableFilter, and any other type not in the supported list above.
 
 System fields are always appended to every DDL regardless of `fieldNumbers`, with the
-types shown in the example above. `$Company` is always included for per-company tables.
+types shown in the example above. `$Company` is appended as the very last column only
+for per-company tables (`dataPerCompany: true`). The value in the CSV is the current
+company name, double-quoted and escaped.
 
 ---
 
@@ -647,5 +657,5 @@ const UI_STRINGS = [
 | M1 | Exact Fabric Open Mirroring DDL JSON field names | Validate against current [Microsoft docs](https://learn.microsoft.com/en-us/fabric/database/mirrored-database/open-mirroring-landing-zone-format) |
 | M2 | `type` field for incremental data files after initial load | Likely `"Incremental"`  confirm from Fabric spec |
 | M3 | `$Company` column  include in DDL? | Yes, always, as `varchar(250)` |
-| M4 | When `fieldNumbers` is empty, DDL includes all Normal fields from `get_table_fields` whose type is in the supported set (BigInteger, Boolean, Code, Date, DateFormula, DateTime, Decimal, Duration, Guid, Integer, Option, Text, Time), class = Normal, range 1..1999999999, + the 7 system columns. FlowFields and fields of unsupported types are never included. | ✅ Confirmed |
+| M4 | When `fieldNumbers` is empty, DDL includes all Normal fields from `get_table_fields` whose type is in the supported set (BigInteger, Boolean, Code, Date, DateFormula, DateTime, Decimal, Duration, Guid, Integer, Option, Text, Time), class = Normal, range 1..1999999999, + the 7 system columns + `$Company` last if `dataPerCompany: true`. FlowFields and fields of unsupported types are never included. | ✅ Confirmed |
 | M5 | ADLS path for `test-connection`  use root container or `Tables/` prefix? | Use root; just authenticate and check access |
