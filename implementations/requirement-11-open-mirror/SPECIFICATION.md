@@ -138,7 +138,7 @@ When the user opens the Add/Edit Table panel and loads fields for a table (via `
 - The field picker loads all fields from `get_table_fields` for the chosen table.
 - Fields are displayed as: `[🔑] No. (1) — Code 20` / `Name (2) — Text 100` etc.
 - **FlowFields (`class === "FlowField"`) are not shown in the picker at all** — they are not supported by `CSV.Records.Get`.
-- Fields of unsupported types (BLOB, Media, MediaSet, RecordId, OemCode, OemText, TableFilter) are shown greyed-out and cannot be selected.
+- Fields whose type is not in the supported set are shown greyed-out and cannot be selected. **Supported types:** BigInteger, Boolean, Code, Date, DateFormula, DateTime, Decimal, Duration, Guid, Integer, Option, Text, Time. All other types (BLOB, Media, MediaSet, RecordId, OemCode, OemText, TableFilter, and any future types not in this list) are unsupported.
 - System fields (numbers outside 1..1999999999) are not shown in the picker at all.
 - The user may select any subset of the valid fields, or leave all unchecked to mirror all Normal fields.
 - Stored `fieldNumbers` contains only numbers in range 1..1999999999 belonging to Normal fields.
@@ -211,24 +211,30 @@ Data upload files (subsequent incremental runs) use `"type": "Incremental"` inst
 [Fabric Open Mirroring landing zone format docs](https://learn.microsoft.com/en-us/fabric/database/mirrored-database/open-mirroring-landing-zone-format)
 during implementation.
 
-#### BC Field Type  Fabric DDL Type Mapping
+#### BC Field Type → Fabric DDL Type Mapping
+
+Only the 13 supported types appear in the DDL and CSV. Every other type is silently omitted.
+
+**Supported types:**
 
 | BC Type | `columnDataType` | `columnLength` | Notes |
 |---|---|---|---|
 | Text[n] | `varchar` | n | |
 | Code[n] | `varchar` | n | |
-| Integer | `int` |  | |
-| BigInteger | `bigint` |  | |
-| Decimal | `decimal` | precision 38, scale 20 | |
-| Boolean | `bit` |  | |
-| Date | `date` |  | |
-| Time | `time` |  | |
-| DateTime | `datetime2` |  | |
+| Integer | `int` | — | |
+| BigInteger | `bigint` | — | |
+| Decimal | `decimal` | — | precision 38, scale 20 |
+| Boolean | `bit` | — | |
+| Date | `date` | — | |
+| Time | `time` | — | |
+| DateTime | `datetime2` | — | |
 | DateFormula | `varchar` | 250 | |
-| Duration | `bigint` |  | Milliseconds |
-| Guid | `uniqueidentifier` |  | |
-| Option / Enum | `varchar` | 250 | Enum value name |
-| BLOB, Media, MediaSet, RecordId | **omit** |  | Not in DDL or CSV |
+| Duration | `bigint` | — | Milliseconds |
+| Guid | `uniqueidentifier` | — | |
+| Option | `varchar` | 250 | Enum value name |
+
+**Unsupported types (omitted from DDL and CSV):**
+BLOB, Media, MediaSet, RecordId, OemCode, OemText, TableFilter, and any other type not in the supported list above.
 
 System fields are always appended to every DDL regardless of `fieldNumbers`, with the
 types shown in the example above. `$Company` is always included for per-company tables.
@@ -453,7 +459,7 @@ const mirrorConn = JSON.parse(dec.plaintext);
 | Field | Control | Editable when Active |
 |---|---|---|
 | Table name / number | Text input + Lookup button (`get_table_info`) | No |
-| Fields | Multi-select list loaded from `get_table_fields`; only Normal fields (class = Normal, no. 1..1999999999) shown; FlowFields hidden; unsupported types (BLOB, Media, etc.) greyed-out; each entry shows field name, number, type, and 🔑 if part of BC primary key; blank selection = all Normal fields | No |
+| Fields | Multi-select list loaded from `get_table_fields`; only Normal fields (class = Normal, no. 1..1999999999) shown; FlowFields hidden; fields whose type is not in the 13 supported types (BigInteger, Boolean, Code, Date, DateFormula, DateTime, Decimal, Duration, Guid, Integer, Option, Text, Time) are greyed-out and unselectable; each entry shows field name, number, type, and 🔑 if part of BC primary key; blank selection = all supported Normal fields | No |
 | Filter (`tableView`) | Text input, BC AL expression | No |
 | Interval (min) | Number input, min 1, default 60 | Yes |
 
@@ -559,5 +565,5 @@ const UI_STRINGS = [
 | M1 | Exact Fabric Open Mirroring DDL JSON field names | Validate against current [Microsoft docs](https://learn.microsoft.com/en-us/fabric/database/mirrored-database/open-mirroring-landing-zone-format) |
 | M2 | `type` field for incremental data files after initial load | Likely `"Incremental"`  confirm from Fabric spec |
 | M3 | `$Company` column  include in DDL? | Yes, always, as `varchar(250)` |
-| M4 | When `fieldNumbers` is empty, DDL includes all Normal, non-BLOB / non-unsupported fields from `get_table_fields` (class = Normal, range 1..1999999999) + the 7 system columns. FlowFields are never included. | ✅ Confirmed |
+| M4 | When `fieldNumbers` is empty, DDL includes all Normal fields from `get_table_fields` whose type is in the supported set (BigInteger, Boolean, Code, Date, DateFormula, DateTime, Decimal, Duration, Guid, Integer, Option, Text, Time), class = Normal, range 1..1999999999, + the 7 system columns. FlowFields and fields of unsupported types are never included. | ✅ Confirmed |
 | M5 | ADLS path for `test-connection`  use root container or `Tables/` prefix? | Use root; just authenticate and check access |
