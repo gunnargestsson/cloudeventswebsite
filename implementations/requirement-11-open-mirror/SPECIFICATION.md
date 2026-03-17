@@ -182,8 +182,11 @@ When a table is **activated** (or **re-activated** after a config change), the p
 
 ### DDL Format
 
-The DDL uses the `{strippedName}-{fieldNo}` column naming convention identical to
-`CSV.Records.Get` output, so Fabric column names always match the CSV headers exactly.
+Column names follow the convention **`{washedName}-{fieldNo}`**, identical to `CSV.Records.Get` output, so Fabric column names always match the CSV headers exactly.
+
+**Name washing rule:** retain only characters in `[a-zA-Z0-9%]` from the BC field name — all other characters are stripped. The field number is then appended as a suffix: `-{fieldNo}`.
+
+> Example: a field named `"Unit of Measure Code"` (field 5) becomes `UnitofMeasureCode-5`.
 
 ```json
 {
