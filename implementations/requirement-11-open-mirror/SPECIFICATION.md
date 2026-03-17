@@ -479,36 +479,74 @@ returns `"Ready"`.
 
 ## Encrypt / Decrypt Flow (browser  /api/mcp)
 
+The Open Mirror page makes exactly **4 MCP tool calls** — no others:
+
+| Tool | BC credentials needed? | Purpose |
+|---|---|---|
+| `encrypt_data` | ❌ No | Encrypt `mirrorConn` JSON before storing in BC |
+| `set_config` | ✅ Yes (`x-encrypted-conn` + `x-company-id` headers) | Write ciphertext to `Cloud Events Storage` |
+| `get_config` | ✅ Yes (`x-encrypted-conn` + `x-company-id` headers) | Read ciphertext from `Cloud Events Storage` |
+| `decrypt_data` | ❌ No | Decrypt ciphertext back to `mirrorConn` JSON |
+
+`encrypt_data` and `decrypt_data` use only the server-side `MCP_ENCRYPTION_KEY` — **BC credentials must NOT be sent** when calling these two tools. Use a plain fetch with no BC headers for encryption/decryption calls. `set_config` and `get_config` require BC credentials because they talk to BC.
+
+```javascript
+// mcpCallEncryption — NO BC credential headers
+async function mcpCallEncryption(toolName, args) {
+  const res = await fetch('/api/mcp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: { name: toolName, arguments: args } }),
+  });
+  const json = await res.json();
+  return JSON.parse(json.result.content[0].text);
+}
+
+// mcpCallConfig — BC credential headers required
+async function mcpCallConfig(toolName, args) {
+  const h = bcSettingsHeaders();   // returns { 'x-encrypted-conn': '...', 'x-company-id': '...', ... }
+  const res = await fetch('/api/mcp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json',
+               'x-encrypted-conn': h['x-encrypted-conn'],
+               'x-company-id':     h['x-bc-company'] },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+      params: { name: toolName, arguments: args } }),
+  });
+  const json = await res.json();
+  return JSON.parse(json.result.content[0].text);
+}
+```
+
 **Save connection config:**
 
 ```javascript
-// 1. Encrypt
-const encRes = await mcpCall("encrypt_data", { plaintext: JSON.stringify(mirrorConn) });
-// encRes.ciphertext is already encrypted  store it as a plain string (no double-encrypt)
+// 1. Encrypt (no BC headers)
+const encRes = await mcpCallEncryption("encrypt_data", { plaintext: JSON.stringify(mirrorConn) });
 
-// 2. Store in BC
-await mcpCall("set_config", {
-  source: "BC Open Mirror",
-  id:     "11111111-1111-1111-1111-000000000001",
-  data:   encRes.ciphertext,   // plain string storage
-  encrypt: false
+// 2. Store in BC (BC headers required)
+await mcpCallConfig("set_config", {
+  source:  "BC Open Mirror",
+  id:      "11111111-1111-1111-1111-000000000001",
+  data:    encRes.ciphertext,
+  encrypt: false,
 });
 ```
 
 **Load connection config:**
 
 ```javascript
-// 1. Read from BC
-const cfg = await mcpCall("get_config", {
+// 1. Read from BC (BC headers required)
+const cfg = await mcpCallConfig("get_config", {
   source: "BC Open Mirror",
-  id:     "11111111-1111-1111-1111-000000000001"
+  id:     "11111111-1111-1111-1111-000000000001",
 });
-// cfg.data is the ciphertext string
 
-// 2. Decrypt
-const dec = await mcpCall("decrypt_data", { ciphertext: cfg.data });
+// 2. Decrypt (no BC headers)
+const dec = await mcpCallEncryption("decrypt_data", { ciphertext: cfg.data });
 const mirrorConn = JSON.parse(dec.plaintext);
-// mirrorConn lives only in JS memory  never in localStorage
+// mirrorConn lives only in JS memory — never in localStorage
 ```
 
 ---
