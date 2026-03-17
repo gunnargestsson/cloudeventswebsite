@@ -5,7 +5,14 @@ const XLSX       = require("xlsx");
 const { callAnthropic } = require("../shared/bcClient");
 
 let pdfParse;
-try { pdfParse = require("pdf-parse"); } catch (_) { /* optional — falls back to document block */ }
+try { pdfParse = require("pdf-parse/lib/pdf-parse"); } catch (_) {
+  try { pdfParse = require("pdf-parse"); } catch (_2) { /* optional — falls back to document block */ }
+}
+
+let pdfjsLib;
+try { pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js"); } catch (_) {
+  try { pdfjsLib = require("pdfjs-dist/build/pdf.js"); } catch (_2) { /* optional */ }
+}
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 
@@ -90,17 +97,34 @@ async function fileToContent(file) {
 
   // PDF
   if (mimeType.includes("pdf") || ext === "pdf") {
-    // Try server-side text extraction first (reliable for text-based PDFs)
+    // Try pdfjs-dist direct extraction (more thorough than pdf-parse wrapper)
+    if (pdfjsLib) {
+      try {
+        const data = new Uint8Array(buffer);
+        const doc  = await pdfjsLib.getDocument({ data }).promise;
+        let text = "";
+        for (let i = 1; i <= doc.numPages; i++) {
+          const page    = await doc.getPage(i);
+          const content = await page.getTextContent();
+          text += content.items.map(item => item.str).join(" ") + "\n";
+        }
+        text = text.trim();
+        if (text.length > 10) {
+          return [{ type: "text", text: `PDF file: ${filename}\n\n${text.slice(0, 16000)}` }];
+        }
+      } catch (_) { /* fall through */ }
+    }
+    // Try pdf-parse as second option
     if (pdfParse) {
       try {
         const parsed = await pdfParse(buffer);
         const text = (parsed.text || "").trim();
-        if (text.length > 50) {
+        if (text.length > 10) {
           return [{ type: "text", text: `PDF file: ${filename}\n\n${text.slice(0, 16000)}` }];
         }
       } catch (_) { /* fall through to document block */ }
     }
-    // Fallback: send as native document block (Claude handles image-based PDFs)
+    // Fallback: send as native document block (works for image-based PDFs with OCR-capable models)
     return [{
       type:   "document",
       source: { type: "base64", media_type: "application/pdf", data: buffer.toString("base64") },
@@ -192,8 +216,9 @@ module.exports = async function (context, req) {
 
     const contentBlocks = await fileToContent(file);
 
-    // PDFs: no beta header needed for claude-sonnet-4 (native document block support)
-    const extraHeaders = {};
+    // Use beta header for document blocks — required for some model versions, harmless for others
+    const hasPdf = contentBlocks.some(b => b.type === "document");
+    const extraHeaders = hasPdf ? { "anthropic-beta": "pdfs-2024-09-25" } : {};
     const modelPayload = (blocks, prompt) => ({
       model:      "claude-sonnet-4-20250514",
       max_tokens: 1024,
@@ -219,8 +244,13 @@ module.exports = async function (context, req) {
         const descResp  = await callAnthropic(apiKey, modelPayload(contentBlocks, DESCRIBE_PROMPT), extraHeaders);
         const descBlock = (descResp.content || []).find(b => b.type === "text");
         const descText  = (descBlock?.text || "").trim();
-        if (descText) {
+        // Check if Claude is saying the document is unreadable
+        const BLANK_SIGNALS = ["completely blank", "no visible content", "entirely white", "no text", "cannot see", "no content", "blank page", "empty page", "unreadable"];
+        const appearsBlank = BLANK_SIGNALS.some(s => descText.toLowerCase().includes(s));
+        if (descText && !appearsBlank) {
           extracted = { intent: "description", description: descText };
+        } else {
+          extracted = { intent: "unreadable", description: descText };
         }
       } catch (_) { /* fallback failed — keep intent:none */ }
     }

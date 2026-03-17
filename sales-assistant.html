@@ -516,6 +516,14 @@ async function uploadFile(file) {
       return;
     }
 
+    // PDF/document was unreadable (image-based or protected)
+    if (extracted.intent === 'unreadable') {
+      const msg = `I wasn't able to read the content of **${file.name}**. This usually means the PDF uses scanned images rather than selectable text.\n\nYou can:\n1. Copy and paste the order details directly into the chat\n2. Describe the customer name and items with quantities`;
+      appendMessage('assistant', msg);
+      messages.push({ role: 'assistant', content: msg });
+      return;
+    }
+
     // Fallback: Claude described the document but couldn't extract structured data
     if (extracted.intent === 'description') {
       const userMsg = `[From file: ${file.name}]\n\n${extracted.description}\n\nPlease extract the customer and order lines from the above description, look them up in Business Central, and prepare the sales order for confirmation.`;
