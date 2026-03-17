@@ -20,6 +20,7 @@
  *   search_items       — Data.Records.Get — item lookup by description or number
  *   list_translations  — Cloud Event Translation — list UI translations (filter by source/lcid)
  *   set_translations   — Cloud Event Translation — upsert UI translation pairs
+ *   get_record_count        — Data.Records.Get (take:1, field 1 only) — total record count for any table with optional filter
  *   get_integration_timestamp   — Cloud Events Integration — latest non-reversed DateTime for source+tableId
  *   set_integration_timestamp   — Cloud Events Integration — insert a DateTime entry for source+tableId
  *   reverse_integration_timestamp — Cloud Events Integration — mark the latest non-reversed entry as reversed
@@ -605,6 +606,28 @@ async function toolSetIntegrationTimestamp({ source, tableId, dateTime } = {}) {
   return { company: company.name, source, tableId: Number(tableId), dateTime: String(dateTime), written: 1 };
 }
 
+async function toolGetRecordCount({ table, filter } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required");
+  validateTableName(table);
+
+  const tenantId = process.env.BC_TENANT_ID;
+  const env      = process.env.BC_ENVIRONMENT || "production";
+  const company  = await getCompany();
+
+  const data = { tableName: String(table), skip: 0, take: 1, fieldNumbers: [1] };
+  if (filter) data.tableView = String(filter);
+
+  const result = await bcTask(tenantId, env, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(data),
+  });
+
+  const noOfRecords = result.noOfRecords !== undefined ? result.noOfRecords : (result.result || []).length;
+  return { company: company.name, table: String(table), filter: filter || null, count: noOfRecords };
+}
+
 async function toolReverseIntegrationTimestamp({ source, tableId } = {}) {
   if (!source)  throw new Error("Parameter 'source' is required");
   if (!tableId && tableId !== 0) throw new Error("Parameter 'tableId' is required");
@@ -719,6 +742,18 @@ const TOOLS = [
         lcid: { type: "integer", description: "Language LCID for the help content (default 1033 = English)." },
       },
       required: ["type"],
+    },
+  },
+  {
+    name:        "get_record_count",
+    description: "Returns the total number of records in a Business Central table (optionally filtered). Uses take:1 + fieldNumbers:[1] so only a single minimal record is fetched; the count comes from the noOfRecords field in the BC response.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:  { type: "string", description: "BC table name (e.g. 'Customer', 'G/L Account')." },
+        filter: { type: "string", description: "Optional BC tableView filter, e.g. \"WHERE(Blocked=CONST( ))\"." },
+      },
+      required: ["table"],
     },
   },
   {
@@ -910,6 +945,7 @@ async function handleMessage(msg) {
           case "list_companies":        content = await toolListCompanies();              break;
           case "list_message_types":    content = await toolListMessageTypes(args);       break;
           case "get_message_type_help": content = await toolGetMessageTypeHelp(args);     break;
+          case "get_record_count":      content = await toolGetRecordCount(args);          break;
           case "get_records":           content = await toolGetRecords(args);              break;
           case "set_records":           content = await toolSetRecords(args);              break;
           case "search_customers":      content = await toolSearchCustomers(args);        break;

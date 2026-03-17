@@ -8,7 +8,7 @@ description: >
   field name normalization, or convert enum values. Also covers: dynamic schema
   discovery via the BC Metadata MCP server at https://dynamics.is/api/mcp (tools:
   list_tables, get_table_fields, get_table_info, list_companies, list_message_types,
-  get_records, search_customers, search_items, list_translations, set_translations,
+  get_records, get_record_count, search_customers, search_items, list_translations, set_translations,
   get_integration_timestamp, set_integration_timestamp, reverse_integration_timestamp;
   resources: bc://tables, bc://tables/{name}, bc://message-types, bc://companies;
   prompts: customer_lookup_pattern, item_lookup_pattern, sales_order_creation_workflow,
@@ -2310,6 +2310,40 @@ Returns complete field metadata plus read/write permissions for the table.
 | `class` | `Normal` or `FlowField` |
 | `isPartOfPrimaryKey` | `true` if field is part of the primary key |
 | `enum` | Array of `{ value, caption }` for Option/Enum fields |
+
+---
+
+#### `get_record_count` — Total records in any table (with optional filter)
+
+Returns the exact total number of records matching an optional filter, without fetching
+full record data. Internally fires `Data.Records.Get` with `take:1` and `fieldNumbers:[1]`
+(only the first field) so the response payload is minimal; the count is read from
+`noOfRecords` in the BC response.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `table` | string | ✅ | BC table name (e.g. `'Customer'`, `'G/L Account'`). |
+| `filter` | string | | Optional BC tableView filter (e.g. `"WHERE(Blocked=CONST( ))"`). |
+
+**Returns:** `{ company, table, filter, count }`
+
+```json
+{ "company": "CRONUS IS", "table": "G/L Account", "filter": null, "count": 282 }
+```
+
+**Usage examples:**
+```
+// Total customers
+get_record_count({ table: "Customer" })
+
+// Only non-blocked customers
+get_record_count({ table: "Customer", filter: "WHERE(Blocked=CONST( ))" })
+
+// G/L accounts
+get_record_count({ table: "G/L Account" })
+```
 
 ---
 
