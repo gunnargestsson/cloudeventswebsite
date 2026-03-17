@@ -36,9 +36,11 @@ A conversational AI assistant powered by Anthropic Claude that helps users creat
 ```json
 {
   "dependencies": {
-    "busboy":     "^1.6.0",
-    "xlsx":       "^0.18.5",
-    "msg-parser": "^2.0.0"
+    "busboy":              "^1.6.0",
+    "xlsx":               "^0.18.5",
+    "@kenjiuno/msgreader": "^1.28.0",
+    "pdfjs-dist":         "^3.11.174",
+    "pdf-parse":          "^1.1.1"
   }
 }
 ```
@@ -187,10 +189,10 @@ Multipart form-data with a single `file` field. Max size: 10 MB.
 | Extension | Parsing Method | Sent to Claude as |
 |---|---|---|
 | `.xlsx`, `.xls`, `.csv` | `XLSX.utils.sheet_to_json()` → JSON array as text | Text block |
-| `.pdf` | Buffer → base64 | Document block (`application/pdf`) |
+| `.pdf` | 1) `pdfjs-dist` — page-by-page text extraction (same engine used to parse local PDFs in Node).<br>2) `pdf-parse` fallback if pdfjs-dist yields < 10 chars (e.g. older PDFs).<br>3) Native base64 document block as final fallback for fully image-based PDFs (Claude OCR). | Text block (steps 1-2) or Document block (step 3) |
 | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` | Buffer → base64 | Image block |
 | `.eml` | Strip to From/To/Subject/Date headers + plain body (8 KB cap) | Text block |
-| `.msg` | `msg-parser` library → subject + body | Text block (with fallback) |
+| `.msg` | `@kenjiuno/msgreader` library → subject + body | Text block (with fallback) |
 
 ### Claude Extraction Prompt
 
