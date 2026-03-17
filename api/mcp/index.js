@@ -370,6 +370,7 @@ async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid
   });
 
   const records = result.result || result.value || (Array.isArray(result) ? result : []);
+  const noOfRecords = result.noOfRecords !== undefined ? result.noOfRecords : undefined;
 
   if (format === "markdown") {
     // Flatten each record: merge primaryKey + fields into a single object
@@ -381,10 +382,14 @@ async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid
     });
     const headers = flat.length ? [...new Set(flat.flatMap(r => Object.keys(r)))] : [];
     const md = toMarkdownTable(headers, flat.map(r => headers.map(h => r[h])));
-    return { company: company.name, table: String(table), skip, take, count: records.length, markdown: md };
+    const ret = { company: company.name, table: String(table), skip, take, count: records.length, markdown: md };
+    if (noOfRecords !== undefined) ret.noOfRecords = noOfRecords;
+    return ret;
   }
 
-  return { company: company.name, table: String(table), skip, take, count: records.length, records };
+  const ret = { company: company.name, table: String(table), skip, take, count: records.length, records };
+  if (noOfRecords !== undefined) ret.noOfRecords = noOfRecords;
+  return ret;
 }
 
 async function toolSetRecords({ table, data, mode = "upsert" } = {}) {
