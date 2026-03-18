@@ -785,50 +785,53 @@ async function runMirror(conn, token, companyId, tableId) {
   const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
+  const runTableView = buildRunTableView(tableCfg, previousTs, endIso);
 
+  // Count first — only proceed if there are records to mirror.
+  const runResult = await withTableRefFallback(tableCfg, async (tableRef) => {
+    const tableSelector = parseTableRef(tableRef);
+    const countResult = await dataRecordsGet(conn, token, companyId, {
+      ...tableSelector,
+      tableView: runTableView || undefined,
+      skip: 0,
+      take: 1,
+      fieldNumbers: [1],
+    });
+
+    const noOfRecords = Number(countResult.noOfRecords || 0);
+    if (noOfRecords === 0) {
+      return { noOfRecords, csv: "" };
+    }
+
+    const csvResult = await bcTask(conn, token, companyId, "CSV.Records.Get", null, {
+      ...tableSelector,
+      tableView: runTableView || undefined,
+      fieldNumbers: tableCfg.fieldNumbers && tableCfg.fieldNumbers.length ? tableCfg.fieldNumbers : undefined,
+    }, true);
+
+    return { noOfRecords, csv: extractCsvPayload(csvResult) };
+  });
+
+  const noOfRecords = Number(runResult.noOfRecords || 0);
+
+  // Nothing changed — skip without writing any timestamp or file.
+  if (noOfRecords === 0) {
+    return {
+      tableId: tableCfg.tableId,
+      tableName: tableCfg.tableName,
+      skipped: true,
+      reason: "No records to mirror",
+      endDateTime: null,
+    };
+  }
+
+  const csv = runResult.csv;
+  if (!csv) throw new Error("CSV.Records.Get returned no CSV payload");
+
+  // Records exist — now write the timestamp and upload the file.
   await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableId, endIso);
 
   try {
-    const runTableView = buildRunTableView(tableCfg, previousTs, endIso);
-
-    const runResult = await withTableRefFallback(tableCfg, async (tableRef) => {
-      const tableSelector = parseTableRef(tableRef);
-      const countResult = await dataRecordsGet(conn, token, companyId, {
-        ...tableSelector,
-        tableView: runTableView || undefined,
-        skip: 0,
-        take: 1,
-        fieldNumbers: [1],
-      });
-
-      const noOfRecords = Number(countResult.noOfRecords || 0);
-      if (noOfRecords === 0) {
-        return { noOfRecords, csv: "" };
-      }
-
-      const csvResult = await bcTask(conn, token, companyId, "CSV.Records.Get", null, {
-        ...tableSelector,
-        tableView: runTableView || undefined,
-        fieldNumbers: tableCfg.fieldNumbers && tableCfg.fieldNumbers.length ? tableCfg.fieldNumbers : undefined,
-      }, true);
-
-      return { noOfRecords, csv: extractCsvPayload(csvResult) };
-    });
-
-    const noOfRecords = Number(runResult.noOfRecords || 0);
-    if (noOfRecords === 0) {
-      return {
-        tableId: tableCfg.tableId,
-        tableName: tableCfg.tableName,
-        skipped: true,
-        reason: "No records to mirror",
-        endDateTime: endIso,
-      };
-    }
-
-    const csv = runResult.csv;
-    if (!csv) throw new Error("CSV.Records.Get returned no CSV payload");
-
     const yyyy = format(endDt, "yyyy");
     const mm = format(endDt, "MM");
     const dd = format(endDt, "dd");

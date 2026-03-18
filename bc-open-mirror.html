@@ -1434,9 +1434,11 @@ window.toggleActivation = async function toggleActivation(tableId, currentlyActi
 window.runTableNow = async function runTableNow(tableId) {
   try {
     const result = await api('runNow', { tableId });
-    const idx = state.tables.findIndex((row) => Number(row.tableId) === Number(tableId));
-    if (idx >= 0) state.tables[idx].lastRunAt = result.endDateTime || new Date().toISOString();
-    state.lastRunAt = result.endDateTime || t('Updated just now');
+    if (result.endDateTime) {
+      const idx = state.tables.findIndex((row) => Number(row.tableId) === Number(tableId));
+      if (idx >= 0) state.tables[idx].lastRunAt = result.endDateTime;
+      state.lastRunAt = result.endDateTime;
+    }
     renderTables();
     refreshMetrics();
     addLog(result.skipped ? `${t('Mirror run skipped')}: ${result.tableName}` : `${t('Mirror run completed')}: ${result.tableName}`, result.skipped ? 'warn' : 'ok');
