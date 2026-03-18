@@ -149,7 +149,7 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
     <div class="hsub">Origo · Business Central · Claude</div>
   </div>
   <div class="hsp"></div>
-  <button class="hpill" onclick="toggleSettings()" id="settingsToggle" data-t="⚙ Language / Key">⚙ Language / Key</button>
+  <button class="hpill" onclick="toggleSettings()" id="settingsToggle" data-t="⚙ API Key">⚙ API Key</button>
   <a href="index.html" class="hpill" data-t="← Home">← Home</a>
 </header>
 
@@ -163,15 +163,6 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
     </div>
     <div class="sp-body">
       <div class="sp-section">
-        <div>
-          <div class="lbl" data-t="Language">Language</div>
-          <select class="ci" id="cfgLcid" disabled>
-            <option value="1033">English</option>
-            <option value="1039">Icelandic</option>
-            <option value="1030">Danish</option>
-            <option value="1044">Norwegian</option>
-          </select>
-        </div>
         <div>
           <div class="lbl" data-t="API Key">API Key</div>
           <input class="ci" type="password" id="cfgClaudeKey" placeholder="sk-ant-…" autocomplete="off">
@@ -230,12 +221,11 @@ const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',
 
 const UI_STRINGS = [
   // Header
-  'AI Sales Assistant', '⚙ Language / Key', '← Home',
+  'AI Sales Assistant', '⚙ API Key', '← Home',
   // Settings panel
   'Claude API Key', 'Stored in localStorage — never sent to our server',
   'API Key', 'Stored in localStorage — persists across sessions',
   'Save Key', '✓ Key saved',
-  'Language',
   // Upload zone
   '📎 Drop PDF, Excel, email or image — or click to browse',
   'Processing file',
@@ -300,10 +290,6 @@ function getActiveLcid() {
 function loadSettings() {
   const saved = bcClaudeApiKeyLoad();
   if (saved) document.getElementById('cfgClaudeKey').value = saved;
-  const savedLcid = localStorage.getItem('bc_portal_lcid');
-  if (savedLcid && document.getElementById('cfgLcid')) {
-    document.getElementById('cfgLcid').value = savedLcid;
-  }
 }
 
 function saveClaudeKey() {
@@ -755,11 +741,6 @@ function startNew() {
 (function(){
   if(!bcSettingsReady()){ location.href='index.html'; return; }
   loadSettings();
-  // Restore saved language selection
-  const savedLcid = localStorage.getItem('bc_portal_lcid');
-  if (savedLcid && document.getElementById('cfgLcid')) {
-    document.getElementById('cfgLcid').value = savedLcid;
-  }
   // Load translations then apply them
   loadUiTranslations().then(applyUiTranslations);
   // Auto-collapse key panel if key is already saved
