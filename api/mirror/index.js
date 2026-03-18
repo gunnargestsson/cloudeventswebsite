@@ -694,9 +694,24 @@ async function uploadTextToMirror(connection, relativePath, content) {
   const fs = serviceClient.getFileSystemClient(fileSystemName);
 
   const fullPath = pathJoin(basePath, relativePath);
+  const parts = fullPath.split("/").filter(Boolean);
+  if (parts.length > 1) {
+    let current = "";
+    for (let i = 0; i < parts.length - 1; i++) {
+      current = pathJoin(current, parts[i]);
+      await fs.getDirectoryClient(current).createIfNotExists();
+    }
+  }
+
   const fileClient = fs.getFileClient(fullPath);
-  const payload = Buffer.from(content, "utf8");
-  await fileClient.uploadData(payload, { overwrite: true });
+  await fileClient.deleteIfExists();
+  await fileClient.create();
+
+  const payload = Buffer.from(String(content ?? ""), "utf8");
+  if (payload.length > 0) {
+    await fileClient.append(payload, 0, payload.length);
+  }
+  await fileClient.flush(payload.length);
 }
 
 async function uploadDdl(conn, token, companyId, connection, tableCfg) {
