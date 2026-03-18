@@ -22,6 +22,7 @@
  *   list_translations  — Cloud Event Translation — list UI translations (filter by source/lcid)
  *   set_translations   — Cloud Event Translation — upsert UI translation pairs
  *   get_record_count             — Data.Records.Get (take:1, field 1 only) — total record count for any table with optional filter
+ *   get_decimal_total            — Data.Totals.Get — sum one decimal field across records in any table with optional filter
  *   get_sales_order_statistics  — Sales.Order.Statistics — amounts, VAT totals, quantities for a sales order
  *   call_message_type  — any Cloud Event type — generic caller: send any message type with subject + data; use get_message_type_help first to understand the schema
  *   get_integration_timestamp   — Cloud Events Integration — latest non-reversed DateTime for source+tableId
@@ -775,6 +776,96 @@ async function toolGetRecordCount({ table, filter, companyId, tenantId, clientId
   return { company: company.name, table: String(table), filter: filter || null, count: noOfRecords };
 }
 
+function normalizeDecimalFieldRef(decimalField) {
+  if (decimalField === undefined || decimalField === null || String(decimalField).trim() === "") {
+    throw new Error("Parameter 'decimalField' is required (field name or field number)");
+  }
+
+  const raw = String(decimalField).trim();
+  if (/^\d+$/.test(raw)) {
+    const fieldNo = Number(raw);
+    if (!Number.isFinite(fieldNo) || fieldNo < 1) {
+      throw new Error("Parameter 'decimalField' as a number must be >= 1");
+    }
+    return { fieldNo, fieldName: null, normalized: fieldNo };
+  }
+
+  return { fieldNo: null, fieldName: raw, normalized: raw };
+}
+
+function extractTotalNumber(raw) {
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+
+  const tryRead = (obj) => {
+    if (!obj || typeof obj !== "object") return null;
+    const keys = ["total", "sum", "value", "amount", "result"];
+    for (const key of keys) {
+      const value = obj[key];
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
+      if (value && typeof value === "object") {
+        const nested = tryRead(value);
+        if (nested !== null) return nested;
+      }
+    }
+    return null;
+  };
+
+  if (typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Number(raw))) return Number(raw);
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const value = extractTotalNumber(item);
+      if (value !== null) return value;
+    }
+    return null;
+  }
+  return tryRead(raw);
+}
+
+async function toolGetDecimalTotal({ table, decimalField, filter, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required");
+  validateTableName(table);
+
+  const { fieldNo, fieldName, normalized } = normalizeDecimalFieldRef(decimalField);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = {
+    tableName: String(table),
+    // Keep both aliases for compatibility with implementations that expect one naming style.
+    field: fieldNo !== null ? fieldNo : fieldName,
+  };
+  if (fieldNo !== null) {
+    data.fieldNo = fieldNo;
+    data.fieldNumber = fieldNo;
+  }
+  if (fieldName) {
+    data.fieldName = fieldName;
+  }
+  if (filter) data.tableView = String(filter);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Data.Totals.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(data),
+  });
+
+  const total = extractTotalNumber(result);
+  if (total === null) {
+    throw new Error("Data.Totals.Get did not return a numeric total");
+  }
+
+  return {
+    company: company.name,
+    table: String(table),
+    decimalField: normalized,
+    filter: filter || null,
+    total,
+  };
+}
+
 async function toolGetSalesOrderStatistics({ orderNo, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!orderNo) throw new Error("Parameter 'orderNo' is required");
 
@@ -1034,6 +1125,19 @@ const TOOLS = [
         filter: { type: "string", description: "Optional BC tableView filter, e.g. \"WHERE(Blocked=CONST( ))\"." },
       },
       required: ["table"],
+    },
+  },
+  {
+    name:        "get_decimal_total",
+    description: "Returns the aggregated total for a decimal field in a Business Central table using Data.Totals.Get. Supports optional tableView filtering.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:        { type: "string", description: "BC table name (e.g. 'Customer', 'G/L Entry', 'Sales Line')." },
+        decimalField: { type: "string", description: "Decimal field to total. Accepts BC field name (e.g. 'Amount') or field number as text (e.g. '15')." },
+        filter:       { type: "string", description: "Optional BC tableView filter, e.g. \"WHERE(Posting Date=FILTER(>=2026-01-01&<=2026-12-31))\"." },
+      },
+      required: ["table", "decimalField"],
     },
   },
   {
@@ -1307,6 +1411,7 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "get_message_type_help": content = await toolGetMessageTypeHelp(args);     break;
           case "call_message_type":     content = await toolCallMessageType(args);         break;
           case "get_record_count":            content = await toolGetRecordCount(args);            break;
+          case "get_decimal_total":           content = await toolGetDecimalTotal(args);           break;
           case "get_sales_order_statistics":  content = await toolGetSalesOrderStatistics(args);   break;
           case "get_records":           content = await toolGetRecords(args);              break;
           case "set_records":           content = await toolSetRecords(args);              break;

@@ -1,5 +1,5 @@
 ---
-name: cloud-events-bc-integration
+name: bc-cloud-events
 description: >
   Domain knowledge for building integration code that calls the Origo Cloud Events
   API on Microsoft Business Central. Use when a developer asks to: connect to BC via
@@ -8,7 +8,7 @@ description: >
   field name normalization, or convert enum values. Also covers: dynamic schema
   discovery via the BC Metadata MCP server at https://dynamics.is/api/mcp (tools:
   list_tables, get_table_fields, get_table_info, list_companies, list_message_types,
-  get_records, get_record_count, search_customers, search_items, list_translations, set_translations,
+  get_records, get_record_count, get_decimal_total, search_customers, search_items, list_translations, set_translations,
   get_integration_timestamp, set_integration_timestamp, reverse_integration_timestamp,
   set_config, get_config, encrypt_data, decrypt_data;
   resources: bc://tables, bc://tables/{name}, bc://message-types, bc://companies;
@@ -422,6 +422,45 @@ Response:
 - Blank `Date` fields return as `null` or `"0001-01-01"`
 - Currency Code blank = LCY code (see §9)
 - Dimension Set ID returns as array (see §9)
+
+#### `Data.Totals.Get` — Aggregate one decimal field
+
+Direction: **Outbound**
+
+Returns the sum of a single decimal field across all records matching an optional
+`tableView` filter. This is ideal when you need totals without transferring full
+record sets.
+
+```json
+{
+  "specversion": "1.0",
+  "type": "Data.Totals.Get",
+  "source": "MyApp v1.0",
+  "data": "{\"tableName\":\"G/L Entry\",\"fieldName\":\"Amount\",\"tableView\":\"WHERE(Posting Date=FILTER(>=2026-01-01&<=2026-12-31),Global Dimension 1 Code=CONST(SALES))\"}"
+}
+```
+
+Input parameters:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `tableName` | string | — | Table name (e.g. `"G/L Entry"`) |
+| `tableNumber` / `tableNo` / `tableId` | integer | — | Table number (optional alternative to `tableName`) |
+| `fieldName` | string | — | Decimal field name to sum (e.g. `"Amount"`) |
+| `fieldNo` / `fieldNumber` | integer | — | Decimal field number to sum (optional alternative to `fieldName`) |
+| `tableView` | string | — | Optional BC table view filter (see §11) |
+
+Typical response shape includes a numeric total (commonly `total`, `sum`, or
+`value` depending on implementation).
+
+```json
+{ "status": "Success", "total": 125430.55 }
+```
+
+Notes:
+- Use AL field names (from `Help.Fields.Get`) in `tableView` filters.
+- The target field must be decimal-compatible.
+- This operation aggregates server-side and avoids paging logic.
 
 #### `Data.RecordIds.Get` — IDs + timestamps (fast incremental sync)
 
@@ -2442,6 +2481,50 @@ get_record_count({ table: "Customer", filter: "WHERE(Blocked=CONST( ))" })
 
 // G/L accounts
 get_record_count({ table: "G/L Account" })
+```
+
+---
+
+#### `get_decimal_total` — Sum a decimal field in any table (with optional filter)
+
+Returns a server-side aggregated total for one decimal field by calling
+`Data.Totals.Get`. This is the fastest way to compute totals because it avoids
+fetching all matching records.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `table` | string | ✅ | BC table name (e.g. `'G/L Entry'`, `'Sales Line'`). |
+| `decimalField` | string | ✅ | Decimal field to sum, by field name (e.g. `'Amount'`) or field number as text (e.g. `'15'`). |
+| `filter` | string | | Optional BC tableView filter (e.g. `'WHERE(Document Type=CONST(Invoice))'`). |
+
+**Returns:** `{ company, table, decimalField, filter, total }`
+
+```json
+{
+  "company": "CRONUS IS",
+  "table": "G/L Entry",
+  "decimalField": "Amount",
+  "filter": "WHERE(Posting Date=FILTER(>=2026-01-01&<=2026-12-31))",
+  "total": 125430.55
+}
+```
+
+**Usage examples:**
+```
+// Total amount for all G/L entries
+get_decimal_total({ table: "G/L Entry", decimalField: "Amount" })
+
+// Total amount by filter
+get_decimal_total({
+  table: "G/L Entry",
+  decimalField: "Amount",
+  filter: "WHERE(Posting Date=FILTER(>=2026-01-01&<=2026-12-31),Global Dimension 1 Code=CONST(SALES))"
+})
+
+// Using a field number
+get_decimal_total({ table: "Sales Line", decimalField: "15", filter: "WHERE(Document Type=CONST(Order))" })
 ```
 
 ---

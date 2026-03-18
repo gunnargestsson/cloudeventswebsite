@@ -185,7 +185,7 @@
   }
   .field-row { display: grid; gap: 6px; }
   .field-row.full { grid-column: 1 / -1; }
-  .field-row label {
+  .field-row > label {
     display: block;
     font-size: 0.66rem;
     color: var(--text-dim);
@@ -596,8 +596,8 @@
       </div>
     </section>
 
-    <section class="panel" style="margin-bottom: 18px;">
-      <div class="section-title" id="tables-title">Table Configuration</div>
+    <section class="panel" id="table-config-panel" style="margin-bottom: 18px;">
+      <div class="section-title collapsible" id="tables-title">Table Configuration</div>
       <div class="section-subtitle" id="tables-copy">Add a table, choose supported fields, set interval, and activate after DDL upload succeeds.</div>
       <div id="table-banner" class="inline-banner hidden"></div>
       <div class="field-grid">
@@ -780,6 +780,7 @@ const state = {
   uiTranslations: {},
   connection: null,
   connectionPanelCollapsed: null,
+  tablePanelCollapsed: null,
   tableCatalog: [],
   tableCatalogPromise: null,
   tableSearchResults: [],
@@ -824,11 +825,31 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function readFirstProperty(source, keys) {
+  if (!source || typeof source !== 'object') return undefined;
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  const lowered = {};
+  for (const [key, value] of Object.entries(source)) {
+    lowered[key.toLowerCase()] = value;
+  }
+  for (const key of keys) {
+    const value = lowered[String(key).toLowerCase()];
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return undefined;
+}
+
 function normalizeTableEntry(table) {
+  const tableIdValue = readFirstProperty(table, ['id', 'number', 'tableId', 'tableNo', 'no']);
+  const tableNameValue = readFirstProperty(table, ['name', 'tableName']);
+  const captionValue = readFirstProperty(table, ['caption']);
   return {
-    tableId: Number(table.number || table.tableId || table.tableNo || table.no || 0),
-    tableName: String(table.name || table.tableName || table.caption || ''),
-    caption: String(table.caption || '')
+    tableId: Number(tableIdValue || 0),
+    tableName: String(tableNameValue || captionValue || ''),
+    caption: String(captionValue || tableNameValue || '')
   };
 }
 
@@ -954,6 +975,11 @@ function populateConnectionForm() {
 function setConnectionPanelCollapsed(collapsed) {
   state.connectionPanelCollapsed = collapsed;
   document.getElementById('connection-panel').classList.toggle('collapsed', collapsed);
+}
+
+function setTablePanelCollapsed(collapsed) {
+  state.tablePanelCollapsed = collapsed;
+  document.getElementById('table-config-panel').classList.toggle('collapsed', collapsed);
 }
 
 function refreshConnectionIndicators() {
@@ -1324,6 +1350,7 @@ function refreshMetrics() {
 window.editTable = function editTable(tableId) {
   const table = state.tables.find((row) => Number(row.tableId) === Number(tableId));
   if (!table) return;
+  setTablePanelCollapsed(false);
   document.getElementById('input-table-id').value = table.tableId;
   setTableFieldsEditable(false);
   document.getElementById('input-table-name').value = table.tableName;
@@ -1377,6 +1404,9 @@ async function loadSettings() {
   const data = await api('getSettings');
   state.connection = data.connection;
   state.tables = data.tables || [];
+  if (state.tablePanelCollapsed === null) {
+    setTablePanelCollapsed(state.tables.length > 0);
+  }
   populateConnectionForm();
   renderTables();
   refreshMetrics();
@@ -1481,6 +1511,9 @@ function bindEvents() {
   document.getElementById('conn-title').addEventListener('click', () => {
     if (!state.connection || state.connection.status !== 'verified') return;
     setConnectionPanelCollapsed(!state.connectionPanelCollapsed);
+  });
+  document.getElementById('tables-title').addEventListener('click', () => {
+    setTablePanelCollapsed(!state.tablePanelCollapsed);
   });
   document.getElementById('btn-save-connection').addEventListener('click', () => saveConnection().catch(handleUiError));
   document.getElementById('btn-verify-connection').addEventListener('click', () => verifyConnection().catch(handleUiError));

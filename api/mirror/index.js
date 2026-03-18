@@ -312,6 +312,35 @@ function normalizeTableConfig(table) {
   };
 }
 
+async function withTableRefFallback(tableCfg, callback) {
+  const refs = [];
+  const nameRef = String(tableCfg?.tableName || "").trim();
+  const idRef = Number(tableCfg?.tableId) > 0 ? String(Number(tableCfg.tableId)) : "";
+  if (nameRef) refs.push(nameRef);
+  if (idRef && !refs.includes(idRef)) refs.push(idRef);
+  if (!refs.length) throw new Error("tableName or tableId is required");
+
+  let lastError;
+  for (const ref of refs) {
+    try {
+      return await callback(ref);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Unable to resolve table reference");
+}
+
+function resolveTableName(tableCfg, fields) {
+  const fromFields = Array.isArray(fields) && fields.length
+    ? String(fields[0].tableName || fields[0].table || "").trim()
+    : "";
+  if (fromFields) return fromFields;
+  const fallback = String(tableCfg?.tableName || "").trim();
+  if (fallback) return fallback;
+  return `Table${Number(tableCfg?.tableId || 0)}`;
+}
+
 function getMirrorInfo() {
   return {
     source: SOURCE,
@@ -671,9 +700,10 @@ async function uploadTextToMirror(connection, relativePath, content) {
 }
 
 async function uploadDdl(conn, token, companyId, connection, tableCfg) {
-  const fields = await getTableFields(conn, token, companyId, tableCfg.tableName || String(tableCfg.tableId));
-  const ddl = buildDdl(tableCfg, fields);
-  const ddlPath = pathJoin("Tables", tableCfg.tableName, "_metadata", "DDL.json");
+  const fields = await withTableRefFallback(tableCfg, (tableRef) => getTableFields(conn, token, companyId, tableRef));
+  const resolvedTableName = resolveTableName(tableCfg, fields);
+  const ddl = buildDdl({ ...tableCfg, tableName: resolvedTableName }, fields);
+  const ddlPath = pathJoin("Tables", resolvedTableName, "_metadata", "DDL.json");
   await uploadTextToMirror(connection, ddlPath, JSON.stringify(ddl, null, 2));
 }
 
@@ -707,15 +737,30 @@ async function runMirror(conn, token, companyId, tableId) {
   try {
     const runTableView = buildRunTableView(tableCfg, previousTs, endIso);
 
-    const countResult = await dataRecordsGet(conn, token, companyId, {
-      tableName: tableCfg.tableName,
-      tableView: runTableView || undefined,
-      skip: 0,
-      take: 1,
-      fieldNumbers: [1],
+    const runResult = await withTableRefFallback(tableCfg, async (tableRef) => {
+      const countResult = await dataRecordsGet(conn, token, companyId, {
+        tableName: tableRef,
+        tableView: runTableView || undefined,
+        skip: 0,
+        take: 1,
+        fieldNumbers: [1],
+      });
+
+      const noOfRecords = Number(countResult.noOfRecords || 0);
+      if (noOfRecords === 0) {
+        return { noOfRecords, csv: "" };
+      }
+
+      const csvResult = await bcTask(conn, token, companyId, "CSV.Records.Get", null, {
+        tableName: tableRef,
+        tableView: runTableView || undefined,
+        fieldNumbers: tableCfg.fieldNumbers && tableCfg.fieldNumbers.length ? tableCfg.fieldNumbers : undefined,
+      });
+
+      return { noOfRecords, csv: extractCsvPayload(csvResult) };
     });
 
-    const noOfRecords = Number(countResult.noOfRecords || 0);
+    const noOfRecords = Number(runResult.noOfRecords || 0);
     if (noOfRecords === 0) {
       return {
         tableId: tableCfg.tableId,
@@ -726,13 +771,7 @@ async function runMirror(conn, token, companyId, tableId) {
       };
     }
 
-    const csvResult = await bcTask(conn, token, companyId, "CSV.Records.Get", null, {
-      tableName: tableCfg.tableName,
-      tableView: runTableView || undefined,
-      fieldNumbers: tableCfg.fieldNumbers && tableCfg.fieldNumbers.length ? tableCfg.fieldNumbers : undefined,
-    });
-
-    const csv = extractCsvPayload(csvResult);
+    const csv = runResult.csv;
     if (!csv) throw new Error("CSV.Records.Get returned no CSV payload");
 
     const yyyy = format(endDt, "yyyy");
