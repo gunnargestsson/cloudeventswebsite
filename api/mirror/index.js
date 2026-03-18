@@ -654,7 +654,7 @@ function buildDdl(tableCfg, fields) {
   const columns = userFields.map((f) => {
     const no = Number(f.number || f.fieldNo || f.no || f.id);
     const name = String(f.name || f.caption || `Field${no}`);
-    const mapped = mapDdlType(String(f.type || ""), f.length);
+    const mapped = mapDdlType(String(f.type || ""), f.len || f.length);
     const base = {
       columnName: `${washName(name)}-${no}`,
       isNullable: true,
@@ -680,7 +680,7 @@ function buildDdl(tableCfg, fields) {
   return {
     type: "FullInitialLoad",
     schema: "dbo",
-    tableName: tableCfg.tableName,
+    tableName: washName(tableCfg.tableName),
     columns,
     primaryKey: ["SystemId-2000000000"],
     watermarkColumn: "SystemModifiedAt-2000000003",
@@ -711,8 +711,9 @@ async function uploadTextToMirror(connection, relativePath, content) {
 async function uploadDdl(conn, token, companyId, connection, tableCfg) {
   const fields = await withTableRefFallback(tableCfg, (tableRef) => getTableFields(conn, token, companyId, tableRef));
   const resolvedTableName = resolveTableName(tableCfg, fields);
+  const safeTableName = washName(resolvedTableName);
   const ddl = buildDdl({ ...tableCfg, tableName: resolvedTableName }, fields);
-  const ddlPath = pathJoin("Tables", resolvedTableName, "_metadata", "DDL.json");
+  const ddlPath = pathJoin("Tables", safeTableName, "_metadata", "DDL.json");
   await uploadTextToMirror(connection, ddlPath, JSON.stringify(ddl, null, 2));
 }
 
@@ -787,7 +788,7 @@ async function runMirror(conn, token, companyId, tableId) {
     const mm = format(endDt, "MM");
     const dd = format(endDt, "dd");
     const stamp = formatMirrorFileStamp(endDt);
-    const csvPath = pathJoin("Tables", tableCfg.tableName, yyyy, mm, dd, `${stamp}.csv`);
+    const csvPath = pathJoin("Tables", washName(tableCfg.tableName), yyyy, mm, dd, `${stamp}.csv`);
 
     await uploadTextToMirror(connection, csvPath, csv);
 
