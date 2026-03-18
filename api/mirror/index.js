@@ -387,9 +387,9 @@ function getMirrorInfo() {
 }
 
 async function getSettings(conn, token, companyId) {
-  const [connection, tables] = await Promise.all([
+  const [connection, tableConfigs] = await Promise.all([
     getMirrorConnection(conn, token, companyId),
-    getStoredTables(conn, token, companyId),
+    getTableConfigs(conn, token, companyId),
   ]);
 
   return {
@@ -400,7 +400,7 @@ async function getSettings(conn, token, companyId) {
       clientSecret: "",
       status: "unverified",
     },
-    tables,
+    tables: tableConfigs.mirrors,
   };
 }
 

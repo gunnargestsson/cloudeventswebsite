@@ -1440,6 +1440,11 @@ async function loadSettings() {
   const data = await api('getSettings');
   state.connection = data.connection;
   state.tables = data.tables || [];
+  state.lastRunAt = state.tables.reduce((max, table) => {
+    if (!table.lastRunAt) return max;
+    if (!max) return table.lastRunAt;
+    return new Date(table.lastRunAt) > new Date(max) ? table.lastRunAt : max;
+  }, null);
   if (state.tablePanelCollapsed === null) {
     setTablePanelCollapsed(state.tables.length > 0);
   }
