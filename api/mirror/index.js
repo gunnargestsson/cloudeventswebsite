@@ -694,24 +694,10 @@ async function uploadTextToMirror(connection, relativePath, content) {
   const fs = serviceClient.getFileSystemClient(fileSystemName);
 
   const fullPath = pathJoin(basePath, relativePath);
-  const parts = fullPath.split("/").filter(Boolean);
-  
-  // Create parent directories, skipping root-level or protected folders (Tables, Files)
-  if (parts.length > 1) {
-    const protectedRoots = new Set(["Tables", "Files"]);
-    let current = "";
-    for (let i = 0; i < parts.length - 1; i++) {
-      current = pathJoin(current, parts[i]);
-      // Skip if this is a root-level protected folder (no "/" in path yet, like "Tables")
-      // or if it would be the first part and is a protected name
-      const isRootProtected = !current.includes("/") && protectedRoots.has(current);
-      if (!isRootProtected) {
-        await fs.getDirectoryClient(current).createIfNotExists();
-      }
-    }
-  }
-
   const fileClient = fs.getFileClient(fullPath);
+  
+  // For files, ADLS Gen2/Fabric will automatically create parent directories
+  // No explicit createIfNotExists needed on directories
   await fileClient.deleteIfExists();
   await fileClient.create();
 
