@@ -163,9 +163,18 @@ async function callMcp(req, body, extraHeaders = {}) {
 }
 
 async function listMcpTools(req, bcConfig) {
+  const params = {};
+  if (bcConfig.companyId) params.companyId = bcConfig.companyId;
+  if (bcConfig.lcid) params.lcid = bcConfig.lcid;
+  if (bcConfig.mode === "custom") {
+    if (bcConfig.tenantId) params.tenantId = bcConfig.tenantId;
+    if (bcConfig.environment) params.environment = bcConfig.environment;
+    if (bcConfig.clientId) params.clientId = bcConfig.clientId;
+    if (bcConfig.clientSecret) params.clientSecret = bcConfig.clientSecret;
+  }
   const response = await callMcp(
     req,
-    makeJsonRpcBody("tools/list", {}, 1),
+    makeJsonRpcBody("tools/list", params, 1),
     bcConfig.companyId ? { "x-company-id": bcConfig.companyId } : {},
   );
   if (response.error) throw new Error(response.error.message || "Could not load Business Central tools.");
