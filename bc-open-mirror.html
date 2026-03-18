@@ -1277,6 +1277,13 @@ function collectTableConfig() {
   };
 }
 
+function mergeLastRunAt(newTables, prevTables) {
+  return newTables.map((t) => {
+    const prev = prevTables.find((p) => Number(p.tableId) === Number(t.tableId));
+    return prev?.lastRunAt ? { ...t, lastRunAt: prev.lastRunAt } : t;
+  });
+}
+
 async function saveTable() {
   const config = collectTableConfig();
   const tables = [...state.tables];
@@ -1290,7 +1297,7 @@ async function saveTable() {
     tables.push(config);
   }
   const result = await api('saveTableConfigs', { tables });
-  state.tables = result.mirrors || tables;
+  state.tables = mergeLastRunAt(result.mirrors || tables, state.tables);
   setBanner('table-banner', t('Table configuration saved'), 'ok');
   addLog(`${t('Table configuration saved')}: ${config.tableName}`, 'ok');
   resetForm();
@@ -1363,9 +1370,10 @@ window.editTable = async function editTable(tableId) {
       return;
     }
 
-    const tables = state.tables.filter((row) => Number(row.tableId) !== Number(tableId));
+    const prevTables = state.tables;
+    const tables = prevTables.filter((row) => Number(row.tableId) !== Number(tableId));
     const result = await api('saveTableConfigs', { tables });
-    state.tables = result.mirrors || tables;
+    state.tables = mergeLastRunAt(result.mirrors || tables, prevTables);
     stopSchedulerForTable(tableId);
     renderTables();
     refreshMetrics();
@@ -1391,9 +1399,10 @@ window.editTable = async function editTable(tableId) {
 window.removeTable = async function removeTable(tableId) {
   try {
     if (!confirm(t('Delete table configuration?'))) return;
-    const tables = state.tables.filter((row) => Number(row.tableId) !== Number(tableId));
+    const prevTables = state.tables;
+    const tables = prevTables.filter((row) => Number(row.tableId) !== Number(tableId));
     const result = await api('saveTableConfigs', { tables });
-    state.tables = result.mirrors || tables;
+    state.tables = mergeLastRunAt(result.mirrors || tables, prevTables);
     stopSchedulerForTable(tableId);
     renderTables();
     refreshMetrics();
