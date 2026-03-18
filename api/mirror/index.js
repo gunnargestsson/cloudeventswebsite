@@ -591,6 +591,19 @@ function pathJoin(...segments) {
   return segments.filter(Boolean).map((s) => String(s).replace(/^\/+|\/+$/g, "")).filter(Boolean).join("/");
 }
 
+function parseTableRef(tableRef) {
+  const raw = String(tableRef || "").trim();
+  if (!raw) throw new Error("tableRef is required");
+  if (/^\d+$/.test(raw)) {
+    const tableNumber = Number(raw);
+    if (!Number.isFinite(tableNumber) || tableNumber < 1) {
+      throw new Error(`Invalid table number: ${raw}`);
+    }
+    return { tableNumber };
+  }
+  return { tableName: raw };
+}
+
 function formatMirrorFileStamp(dateObj) {
   return format(dateObj, "yyyyMMdd_HHmmss_SSS");
 }
@@ -748,8 +761,9 @@ async function runMirror(conn, token, companyId, tableId) {
     const runTableView = buildRunTableView(tableCfg, previousTs, endIso);
 
     const runResult = await withTableRefFallback(tableCfg, async (tableRef) => {
+      const tableSelector = parseTableRef(tableRef);
       const countResult = await dataRecordsGet(conn, token, companyId, {
-        tableName: tableRef,
+        ...tableSelector,
         tableView: runTableView || undefined,
         skip: 0,
         take: 1,
@@ -762,7 +776,7 @@ async function runMirror(conn, token, companyId, tableId) {
       }
 
       const csvResult = await bcTask(conn, token, companyId, "CSV.Records.Get", null, {
-        tableName: tableRef,
+        ...tableSelector,
         tableView: runTableView || undefined,
         fieldNumbers: tableCfg.fieldNumbers && tableCfg.fieldNumbers.length ? tableCfg.fieldNumbers : undefined,
       });

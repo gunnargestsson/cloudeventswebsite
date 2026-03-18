@@ -1333,7 +1333,7 @@ function renderTables() {
         <div class="mirror-actions">
           <button class="btn ${table.active ? 'secondary' : ''}" onclick="toggleActivation(${table.tableId}, ${table.active})">${table.active ? t('Deactivate') : t('Activate')}</button>
           <button class="btn secondary" onclick="runTableNow(${table.tableId})">${t('Run Now')}</button>
-          <button class="btn ghost" onclick="editTable(${table.tableId})">${t('Refresh')}</button>
+          ${table.active ? '' : `<button class="btn ghost" onclick="editTable(${table.tableId})">${t('Edit Table')}</button>`}
           <button class="btn danger" onclick="removeTable(${table.tableId})">${t('Delete')}</button>
         </div>
       </div>
@@ -1347,21 +1347,38 @@ function refreshMetrics() {
   document.getElementById('metric-last-run').textContent = state.lastRunAt || t('Never');
 }
 
-window.editTable = function editTable(tableId) {
-  const table = state.tables.find((row) => Number(row.tableId) === Number(tableId));
-  if (!table) return;
-  setTablePanelCollapsed(false);
-  document.getElementById('input-table-id').value = table.tableId;
-  setTableFieldsEditable(false);
-  document.getElementById('input-table-name').value = table.tableName;
-  document.getElementById('input-interval').value = table.intervalMin;
-  document.getElementById('input-data-per-company').value = getDisplayBooleanValue(table.dataPerCompany);
-  document.getElementById('input-table-view').value = table.tableView || '';
-  state.allFields = !(table.fieldNumbers && table.fieldNumbers.length);
-  document.getElementById('input-all-fields').checked = state.allFields;
-  state.selectedFields = [...(table.fieldNumbers || [])];
-  lookupTableMetadata(String(table.tableId), { preserveFields: true }).catch(handleUiError);
-  addLog(`${t('Edit Table')}: ${table.tableName}`, 'info');
+window.editTable = async function editTable(tableId) {
+  try {
+    const table = state.tables.find((row) => Number(row.tableId) === Number(tableId));
+    if (!table) return;
+    if (table.active) {
+      setBanner('table-banner', t('Config Locked While Active'), 'error');
+      return;
+    }
+
+    const tables = state.tables.filter((row) => Number(row.tableId) !== Number(tableId));
+    const result = await api('saveTableConfigs', { tables });
+    state.tables = result.mirrors || tables;
+    stopSchedulerForTable(tableId);
+    renderTables();
+    refreshMetrics();
+
+    setTablePanelCollapsed(false);
+    document.getElementById('input-table-id').value = table.tableId;
+    setTableFieldsEditable(false);
+    document.getElementById('input-table-name').value = table.tableName;
+    document.getElementById('input-interval').value = table.intervalMin;
+    document.getElementById('input-data-per-company').value = getDisplayBooleanValue(table.dataPerCompany);
+    document.getElementById('input-table-view').value = table.tableView || '';
+    state.allFields = !(table.fieldNumbers && table.fieldNumbers.length);
+    document.getElementById('input-all-fields').checked = state.allFields;
+    state.selectedFields = [...(table.fieldNumbers || [])];
+    await lookupTableMetadata(String(table.tableId), { preserveFields: true });
+    setBanner('table-banner', `${t('Edit Table')}: ${table.tableName}`, 'ok');
+    addLog(`${t('Edit Table')}: ${table.tableName}`, 'info');
+  } catch (error) {
+    handleUiError(error);
+  }
 };
 
 window.removeTable = async function removeTable(tableId) {
