@@ -149,6 +149,34 @@
   .metric-value { font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 700; }
   .stack { display: grid; gap: 18px; }
   .section-title { font-family: 'Syne', sans-serif; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 16px; }
+  .section-title.collapsible {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+  }
+  .section-title.collapsible::after {
+    content: '▾';
+    font-family: 'DM Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    transition: transform 0.2s ease, color 0.2s ease;
+  }
+  .section-title.collapsible:hover::after { color: var(--text-mid); }
+  .panel.collapsed {
+    padding-top: 18px;
+    padding-bottom: 18px;
+  }
+  .panel.collapsed > :not(.section-title) {
+    display: none;
+  }
+  .panel.collapsed .section-title {
+    margin-bottom: 0;
+  }
+  .panel.collapsed .section-title.collapsible::after {
+    transform: rotate(-90deg);
+  }
   .section-subtitle { font-size: 0.74rem; color: var(--text-dim); line-height: 1.6; margin-top: -6px; margin-bottom: 16px; }
   .field-grid {
     display: grid;
@@ -184,6 +212,65 @@
   .field-row select:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  .table-picker {
+    position: relative;
+  }
+  .table-options {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 30;
+    max-height: 280px;
+    overflow: auto;
+    background: var(--surface);
+    border: 1px solid var(--border-bright);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 12px 28px rgba(0,0,0,0.35);
+  }
+  .table-options.hidden {
+    display: none;
+  }
+  .table-option,
+  .table-option-empty {
+    width: 100%;
+    padding: 10px 12px;
+    border: none;
+    border-bottom: 1px solid rgba(45,58,94,0.35);
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.76rem;
+  }
+  .table-option {
+    display: grid;
+    grid-template-columns: 90px minmax(0, 1fr);
+    gap: 12px;
+    cursor: pointer;
+  }
+  .table-option:last-child,
+  .table-option-empty:last-child {
+    border-bottom: none;
+  }
+  .table-option:hover,
+  .table-option:focus-visible {
+    background: var(--surface2);
+    outline: none;
+  }
+  .table-option-id {
+    color: var(--accent);
+  }
+  .table-option-name {
+    min-width: 0;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .table-option-empty {
+    color: var(--text-dim);
   }
   .hint { font-size: 0.68rem; color: var(--text-dim); line-height: 1.5; }
   .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
@@ -272,8 +359,7 @@
   .meta-value { font-size: 0.76rem; color: var(--text); word-break: break-word; }
   .mirror-actions { display: flex; flex-wrap: wrap; gap: 10px; }
   .field-picker {
-    display: flex;
-    flex-direction: column;
+    display: grid;
     gap: 0;
     max-height: 400px;
     overflow: auto;
@@ -281,13 +367,25 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
   }
+  .field-picker-header,
   .field-item {
-    display: flex;
+    display: grid;
+    grid-template-columns: 34px 76px minmax(0, 1fr) 120px 70px;
     gap: 12px;
     align-items: center;
     padding: 12px 14px;
     border-bottom: 1px solid var(--border);
     background: var(--surface2);
+  }
+  .field-picker-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface3);
+    color: var(--text-dim);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
   .field-item:last-child {
     border-bottom: none;
@@ -296,10 +394,31 @@
     background: var(--surface3);
   }
   .field-item.disabled { opacity: 0.45; }
-  .field-copy { min-width: 0; }
-  .field-name { font-size: 0.74rem; color: var(--text); margin-bottom: 4px; }
-  .field-meta { font-size: 0.64rem; color: var(--text-dim); line-height: 1.5; }
-  .key-badge { color: var(--amber); margin-right: 4px; }
+  .field-check {
+    display: flex;
+    justify-content: center;
+  }
+  .field-number,
+  .field-type,
+  .field-length {
+    font-size: 0.72rem;
+    color: var(--text-mid);
+  }
+  .field-name {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.74rem;
+    color: var(--text);
+  }
+  .field-name-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .key-badge { color: var(--amber); }
   .field-inline-actions { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
   .checkbox-inline {
     display: inline-flex;
@@ -449,8 +568,8 @@
       </div>
     </section>
 
-    <section class="panel" style="margin-bottom: 18px;">
-      <div class="section-title" id="conn-title">Mirror Destination</div>
+    <section class="panel" id="connection-panel" style="margin-bottom: 18px;">
+      <div class="section-title collapsible" id="conn-title">Mirror Destination</div>
       <div class="section-subtitle" id="conn-copy">Store one encrypted ADLS Gen2 connection used for all mirrored tables. Verification is required before any table can be activated.</div>
       <div id="connection-banner" class="inline-banner hidden"></div>
       <div class="field-grid">
@@ -484,7 +603,10 @@
       <div class="field-grid">
         <div class="field-row">
           <label id="label-table-id" for="input-table-id">Table ID</label>
-          <input id="input-table-id" type="number" min="1" />
+          <div class="table-picker" id="table-picker">
+            <input id="input-table-id" type="text" inputmode="search" autocomplete="off" placeholder="Search by table ID or name" />
+            <div id="table-id-options" class="table-options hidden"></div>
+          </div>
         </div>
         <div class="field-row">
           <label id="label-table-name" for="input-table-name">Table Name</label>
@@ -574,6 +696,9 @@ const UI_STRINGS = [
   'Table Configuration',
   'Add a table, choose supported fields, set interval, and activate after DDL upload succeeds.',
   'Table ID',
+  'Search by table ID or name',
+  'Loading tables...',
+  'No matching tables',
   'Table Name',
   'Interval Minutes',
   'Data Per Company',
@@ -634,8 +759,15 @@ const UI_STRINGS = [
   'Deleted table',
   'Edit Table',
   'Field',
+  'No.',
+  'Name',
+  'Type',
+  'Len',
   'Yes',
-  'No'
+  'No',
+  'Failed to load tables',
+  'Failed to lookup table',
+  'Table not found'
 ];
 
 const CONFIG = {
@@ -647,6 +779,10 @@ const state = {
   lcid: 1033,  // Will be loaded in init()
   uiTranslations: {},
   connection: null,
+  connectionPanelCollapsed: null,
+  tableCatalog: [],
+  tableCatalogPromise: null,
+  tableSearchResults: [],
   tables: [],
   fieldCache: new Map(),
   selectedFields: [],
@@ -688,6 +824,14 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function normalizeTableEntry(table) {
+  return {
+    tableId: Number(table.number || table.tableId || table.tableNo || table.no || 0),
+    tableName: String(table.name || table.tableName || table.caption || ''),
+    caption: String(table.caption || '')
+  };
+}
+
 async function api(action, payload = {}) {
   const headers = bcSettingsHeaders();
   if (!headers) throw new Error('Missing Business Central configuration. Reconnect on the start page.');
@@ -702,6 +846,25 @@ async function api(action, payload = {}) {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
   return data;
+}
+
+async function callMcpTool(name, args) {
+  const response = await fetch('/api/mcp', {
+    method: 'POST',
+    headers: {
+      ...(bcSettingsHeaders() || {}),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name, arguments: args }
+    })
+  });
+  const rpc = await response.json();
+  if (rpc.error) throw new Error(rpc.error.message || `${name} failed`);
+  return rpc.result?.content?.[0]?.text ? JSON.parse(rpc.result.content[0].text) : rpc.result?.content || rpc.result;
 }
 
 async function loadUiTranslations() {
@@ -741,6 +904,7 @@ function applyTranslations() {
   document.getElementById('tables-title').textContent = t('Table Configuration');
   document.getElementById('tables-copy').textContent = t('Add a table, choose supported fields, set interval, and activate after DDL upload succeeds.');
   document.getElementById('label-table-id').textContent = t('Table ID');
+  document.getElementById('input-table-id').placeholder = t('Search by table ID or name');
   document.getElementById('label-table-name').textContent = t('Table Name');
   document.getElementById('label-interval').textContent = t('Interval Minutes');
   document.getElementById('label-data-per-company').textContent = t('Data Per Company');
@@ -787,6 +951,11 @@ function populateConnectionForm() {
   refreshConnectionIndicators();
 }
 
+function setConnectionPanelCollapsed(collapsed) {
+  state.connectionPanelCollapsed = collapsed;
+  document.getElementById('connection-panel').classList.toggle('collapsed', collapsed);
+}
+
 function refreshConnectionIndicators() {
   const verified = state.connection && state.connection.status === 'verified';
   const dot = document.getElementById('mirror-dot');
@@ -794,6 +963,132 @@ function refreshConnectionIndicators() {
   dot.className = `status-dot ${verified ? 'connected' : 'error'}`;
   text.textContent = verified ? t('Mirror Verified') : t('Mirror Not Verified');
   document.getElementById('metric-verified').textContent = verified ? t('verified') : t('Unverified');
+  if (!verified) {
+    setConnectionPanelCollapsed(false);
+  } else if (state.connectionPanelCollapsed === null) {
+    setConnectionPanelCollapsed(true);
+  }
+}
+
+async function ensureTableCatalog() {
+  if (state.tableCatalog.length) return state.tableCatalog;
+  if (state.tableCatalogPromise) return state.tableCatalogPromise;
+  state.tableCatalogPromise = (async () => {
+    const tables = [];
+    let skip = 0;
+    let total = 0;
+    do {
+      const payload = await callMcpTool('list_tables', {
+        companyId: state.companyId,
+        lcid: state.lcid,
+        take: 500,
+        skip
+      });
+      const page = Array.isArray(payload.tables) ? payload.tables : Array.isArray(payload) ? payload : [];
+      total = Number(payload.total || page.length);
+      tables.push(...page.map(normalizeTableEntry).filter((table) => table.tableId > 0));
+      skip += page.length;
+      if (!page.length) break;
+    } while (skip < total);
+    state.tableCatalog = tables.sort((left, right) => left.tableId - right.tableId);
+    return state.tableCatalog;
+  })().finally(() => {
+    state.tableCatalogPromise = null;
+  });
+  return state.tableCatalogPromise;
+}
+
+function filterTableCatalog(query) {
+  const value = String(query || '').trim().toLowerCase();
+  const isNumeric = /^\d+$/.test(value);
+  const score = (table) => {
+    if (!value) return 3;
+    const id = String(table.tableId);
+    const name = table.tableName.toLowerCase();
+    const caption = table.caption.toLowerCase();
+    if (isNumeric) {
+      if (id === value) return 0;
+      if (id.startsWith(value)) return 1;
+      if (id.includes(value)) return 2;
+      return 99;
+    }
+    if (name === value || caption === value) return 0;
+    if (name.startsWith(value) || caption.startsWith(value)) return 1;
+    if (name.includes(value) || caption.includes(value)) return 2;
+    return 99;
+  };
+  return state.tableCatalog
+    .map((table) => ({ table, rank: score(table) }))
+    .filter((row) => row.rank < 99)
+    .sort((left, right) => left.rank - right.rank || left.table.tableId - right.table.tableId)
+    .slice(0, 30)
+    .map((row) => row.table);
+}
+
+function hideTableOptions() {
+  const options = document.getElementById('table-id-options');
+  options.classList.add('hidden');
+  options.innerHTML = '';
+  state.tableSearchResults = [];
+}
+
+function renderTableOptions(query) {
+  const options = document.getElementById('table-id-options');
+  const results = filterTableCatalog(query);
+  state.tableSearchResults = results;
+  if (!results.length) {
+    options.innerHTML = `<div class="table-option-empty">${escapeHtml(t('No matching tables'))}</div>`;
+    options.classList.remove('hidden');
+    return;
+  }
+  options.innerHTML = results.map((table) => `
+    <button type="button" class="table-option" data-table-id="${table.tableId}">
+      <span class="table-option-id">${table.tableId}</span>
+      <span class="table-option-name">${escapeHtml(table.tableName)}</span>
+    </button>
+  `).join('');
+  options.classList.remove('hidden');
+}
+
+async function openTableOptions(query = document.getElementById('input-table-id').value) {
+  const options = document.getElementById('table-id-options');
+  options.innerHTML = `<div class="table-option-empty">${escapeHtml(t('Loading tables...'))}</div>`;
+  options.classList.remove('hidden');
+  try {
+    await ensureTableCatalog();
+    renderTableOptions(query);
+  } catch (error) {
+    options.innerHTML = `<div class="table-option-empty">${escapeHtml(`${t('Failed to load tables')}: ${error.message}`)}</div>`;
+    options.classList.remove('hidden');
+  }
+}
+
+function clearTableSelection({ preserveInput = false } = {}) {
+  if (!preserveInput) document.getElementById('input-table-id').value = '';
+  document.getElementById('input-table-name').value = '';
+  document.getElementById('input-data-per-company').value = getDisplayBooleanValue(true);
+  state.selectedFields = [];
+  renderFieldPicker();
+}
+
+async function commitTableInput(preferFirstResult = false) {
+  const input = document.getElementById('input-table-id');
+  const query = input.value.trim();
+  if (!query) {
+    clearTableSelection();
+    hideTableOptions();
+    return;
+  }
+  await ensureTableCatalog();
+  const exact = state.tableCatalog.find((table) => {
+    const name = table.tableName.toLowerCase();
+    const caption = table.caption.toLowerCase();
+    const value = query.toLowerCase();
+    return String(table.tableId) === query || name === value || caption === value;
+  });
+  const target = exact || (preferFirstResult ? state.tableSearchResults[0] : null);
+  await lookupTableMetadata(target ? String(target.tableId) : query);
+  hideTableOptions();
 }
 
 function renderFieldPicker() {
@@ -810,20 +1105,30 @@ function renderFieldPicker() {
     const number = Number(field.number || field.fieldNo || field.no || field.id);
     const fieldType = String(field.type || '');
     const fieldClass = String(field.class || 'Normal');
+    const fieldLength = field.length || field.maxLength || '';
     const supported = fieldClass === 'Normal' && number >= 1 && number <= 1999999999 && isSupportedType(fieldType);
     const checked = state.selectedFields.includes(number) ? 'checked' : '';
     const disabled = state.allFields || !supported ? 'disabled' : '';
-    const keyBadge = field.isPartOfPrimaryKey ? `<span class="key-badge">🔑</span>` : '';
+    const keyBadge = field.isPartOfPrimaryKey ? `<span class="key-badge" title="${escapeHtml(t('Primary key'))}">🔑</span>` : '';
     return `
       <label class="field-item ${supported ? '' : 'disabled'}">
-        <input type="checkbox" value="${number}" ${checked} ${disabled} ${supported ? '' : 'disabled'} onchange="toggleField(${number})" />
-        <div class="field-copy">
-          <div class="field-name">${keyBadge}${escapeHtml(field.name || field.caption || `Field ${number}`)}</div>
-          <div class="field-meta">${escapeHtml(`${number} • ${fieldType} • ${fieldClass}${field.length ? ` • ${field.length}` : ''}`)}</div>
-        </div>
+        <span class="field-check"><input type="checkbox" value="${number}" ${checked} ${disabled} ${supported ? '' : 'disabled'} onchange="toggleField(${number})" /></span>
+        <span class="field-number">${number}</span>
+        <span class="field-name">${keyBadge}<span class="field-name-text">${escapeHtml(field.name || field.caption || `Field ${number}`)}</span></span>
+        <span class="field-type">${escapeHtml(fieldType || '—')}</span>
+        <span class="field-length">${escapeHtml(fieldLength ? String(fieldLength) : '—')}</span>
       </label>
     `;
   }).join('');
+  picker.innerHTML = `
+    <div class="field-picker-header">
+      <span class="field-check"></span>
+      <span>${escapeHtml(t('No.'))}</span>
+      <span>${escapeHtml(t('Name'))}</span>
+      <span>${escapeHtml(t('Type'))}</span>
+      <span>${escapeHtml(t('Len'))}</span>
+    </div>
+  ` + picker.innerHTML;
 }
 
 function isSupportedType(type) {
@@ -841,6 +1146,7 @@ window.toggleField = function toggleField(number) {
 
 function resetForm() {
   document.getElementById('input-table-id').value = '';
+  hideTableOptions();
   setTableFieldsEditable(true);
   document.getElementById('input-table-name').value = '';
   document.getElementById('input-interval').value = '60';
@@ -857,87 +1163,59 @@ function getDisplayBooleanValue(isBool) {
   return String(Boolean(isBool) === true ? 'true' : 'false');
 }
 
-async function lookupTableMetadata() {
-  const tableId = Number(document.getElementById('input-table-id').value || 0);
-  if (!tableId || tableId < 1) {
-    setTableFieldsEditable(true);
-    document.getElementById('input-table-name').value = '';
-    document.getElementById('input-data-per-company').value = 'true';
+async function lookupTableMetadata(tableRef = document.getElementById('input-table-id').value.trim(), { preserveFields = false } = {}) {
+  const query = String(tableRef || '').trim();
+  if (!query) {
+    clearTableSelection();
     return;
   }
   try {
     setBanner('table-banner', t('Loading fields...'), '');
-    const response = await fetch('/api/mcp', {
-      method: 'POST',
-      headers: {
-        ...(bcSettingsHeaders() || {}),
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'tools/call',
-        params: {
-          name: 'get_table_info',
-          arguments: { table: String(tableId), companyId: state.companyId, lcid: state.lcid, format: 'json' }
-        }
-      })
+    const payload = await callMcpTool('get_table_info', {
+      table: query,
+      companyId: state.companyId,
+      lcid: state.lcid,
+      format: 'json'
     });
-    const rpc = await response.json();
-    if (rpc.error) throw new Error(rpc.error.message || 'get_table_info failed');
-    const payload = rpc.result?.content?.[0]?.text ? JSON.parse(rpc.result.content[0].text) : rpc.result?.content || rpc.result;
-    const table = Array.isArray(payload) && payload.length ? payload[0] : payload;
-    if (!table) throw new Error('Table not found');
-    document.getElementById('input-table-name').value = String(table.name || table.tableName || '');
+    const table = payload.table || (Array.isArray(payload) && payload.length ? payload[0] : payload);
+    if (!table) throw new Error(t('Table not found'));
+    const normalized = normalizeTableEntry(table);
+    document.getElementById('input-table-id').value = String(normalized.tableId);
+    document.getElementById('input-table-name').value = normalized.tableName;
     document.getElementById('input-data-per-company').value = getDisplayBooleanValue(table.dataPerCompany);
     setTableFieldsEditable(false);
-    setBanner('table-banner', null, '');
+    if (!preserveFields) state.selectedFields = [];
+    await loadFields({ tableId: normalized.tableId, tableName: normalized.tableName });
   } catch (error) {
     setTableFieldsEditable(true);
-    setBanner('table-banner', `Failed to lookup table: ${error.message}`, 'error');
+    clearTableSelection({ preserveInput: true });
+    setBanner('table-banner', `${t('Failed to lookup table')}: ${error.message}`, 'error');
   }
 }
 
 function setTableFieldsEditable(editable) {
-  document.getElementById('input-table-name').readOnly = !editable;
-  document.getElementById('input-data-per-company').disabled = !editable;
+  document.getElementById('input-table-name').readOnly = true;
+  document.getElementById('input-data-per-company').disabled = true;
 }
 
-async function loadFields() {
-  const tableId = Number(document.getElementById('input-table-id').value || 0);
-  const tableName = document.getElementById('input-table-name').value.trim();
+async function loadFields({ tableId = Number(document.getElementById('input-table-id').value || 0), tableName = document.getElementById('input-table-name').value.trim() } = {}) {
   if (!tableId && !tableName) throw new Error(t('Please enter a valid table ID'));
   setBanner('table-banner', t('Loading fields...'), '');
   const ref = tableName || String(tableId);
-  const response = await fetch('/api/mcp', {
-    method: 'POST',
-    headers: {
-      ...(bcSettingsHeaders() || {}),
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: {
-        name: 'get_table_fields',
-        arguments: {
-          table: ref,
-          companyId: state.companyId,
-          lcid: state.lcid,
-          format: 'json'
-        }
-      }
-    })
+  const payload = await callMcpTool('get_table_fields', {
+    table: ref,
+    companyId: state.companyId,
+    lcid: state.lcid,
+    format: 'json'
   });
-  const rpc = await response.json();
-  if (rpc.error) throw new Error(rpc.error.message || 'get_table_fields failed');
-  const payload = rpc.result?.content?.[0]?.text ? JSON.parse(rpc.result.content[0].text) : rpc.result?.content || rpc.result;
   const fields = payload.fields || payload.result || payload;
   const array = Array.isArray(fields) ? fields : [];
   state.fieldCache.set(tableId || Number((array[0] && (array[0].tableNo || array[0].tableId)) || 0), array);
-  if (array.length && !document.getElementById('input-table-name').value) {
-    document.getElementById('input-table-name').value = String(array[0].tableName || tableName || '');
+  if (array.length) {
+    if (!document.getElementById('input-table-name').value) {
+      document.getElementById('input-table-name').value = String(array[0].tableName || tableName || '');
+    }
+    document.getElementById('input-table-id').value = String(tableId || Number(array[0].tableNo || array[0].tableId || 0));
   }
   renderFieldPicker();
   setBanner('table-banner', null, '');
@@ -1055,7 +1333,7 @@ window.editTable = function editTable(tableId) {
   state.allFields = !(table.fieldNumbers && table.fieldNumbers.length);
   document.getElementById('input-all-fields').checked = state.allFields;
   state.selectedFields = [...(table.fieldNumbers || [])];
-  renderFieldPicker();
+  lookupTableMetadata(String(table.tableId), { preserveFields: true }).catch(handleUiError);
   addLog(`${t('Edit Table')}: ${table.tableName}`, 'info');
 };
 
@@ -1129,11 +1407,13 @@ async function verifyConnection() {
     await api('verifyMirrorConnection', { connection });
     state.connection = { ...connection, status: 'verified' };
     await api('saveMirrorConnection', { connection: state.connection });
+    setConnectionPanelCollapsed(true);
     populateConnectionForm();
     setBanner('connection-banner', t('Connection verified'), 'ok');
     addLog(t('Connection verified'), 'ok');
   } catch (error) {
     state.connection = { ...connection, status: 'unverified' };
+    setConnectionPanelCollapsed(false);
     populateConnectionForm();
     setBanner('connection-banner', `${t('Verification failed')}: ${error.message}`, 'error');
     addLog(`${t('Verification failed')}: ${error.message}`, 'error');
@@ -1198,9 +1478,41 @@ function bindEvents() {
     event.preventDefault();
     window.location.href = '/';
   });
+  document.getElementById('conn-title').addEventListener('click', () => {
+    if (!state.connection || state.connection.status !== 'verified') return;
+    setConnectionPanelCollapsed(!state.connectionPanelCollapsed);
+  });
   document.getElementById('btn-save-connection').addEventListener('click', () => saveConnection().catch(handleUiError));
   document.getElementById('btn-verify-connection').addEventListener('click', () => verifyConnection().catch(handleUiError));
-  document.getElementById('input-table-id').addEventListener('change', () => lookupTableMetadata().catch(handleUiError));
+  document.getElementById('input-table-id').addEventListener('focus', () => openTableOptions().catch(handleUiError));
+  document.getElementById('input-table-id').addEventListener('input', (event) => {
+    const value = event.target.value.trim();
+    if (!value) {
+      clearTableSelection({ preserveInput: true });
+      hideTableOptions();
+      return;
+    }
+    openTableOptions(value).catch(handleUiError);
+  });
+  document.getElementById('input-table-id').addEventListener('change', () => commitTableInput().catch(handleUiError));
+  document.getElementById('input-table-id').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitTableInput(true).catch(handleUiError);
+    }
+    if (event.key === 'Escape') {
+      hideTableOptions();
+    }
+  });
+  document.getElementById('table-id-options').addEventListener('click', (event) => {
+    const option = event.target.closest('[data-table-id]');
+    if (!option) return;
+    lookupTableMetadata(String(option.getAttribute('data-table-id'))).catch(handleUiError);
+    hideTableOptions();
+  });
+  document.addEventListener('click', (event) => {
+    if (!document.getElementById('table-picker').contains(event.target)) hideTableOptions();
+  });
   document.getElementById('btn-load-fields').addEventListener('click', () => loadFields().catch(handleUiError));
   document.getElementById('btn-add-table').addEventListener('click', () => saveTable().catch(handleUiError));
   document.getElementById('btn-reset-form').addEventListener('click', resetForm);
