@@ -2046,7 +2046,64 @@ async function ensureTranslationPlaceholders(companyId, lcid, appSource = 'MyApp
 }
 ```
 
-### 20.4 Applying Translations to HTML
+### 20.4 Writing Translations with Correct UTF-8 Encoding
+
+> **CRITICAL — encoding rule for `set_translations`**
+>
+> The `mcp_bc-metadata_set_translations` MCP tool call passes parameters through VS Code
+> Copilot's JSON serialization pipeline. This pipeline **non-deterministically corrupts
+> multibyte UTF-8 characters** (Icelandic ð þ æ ö á é í ó ú ý and similar) — the
+> replacement character U+FFFD is stored in BC instead of the correct glyph.
+>
+> **Never use a direct `mcp_bc-metadata_set_translations` tool call to write strings that
+> contain non-ASCII characters.**
+>
+> **Always use `run_in_terminal` with a PowerShell script file instead:**
+> 1. Create a `.ps1` file with `create_file` — the file will be UTF-8 encoded correctly.
+> 2. Run it with `powershell -File <path>` via `run_in_terminal`.
+> 3. Delete the script afterwards.
+>
+> The script must explicitly convert the JSON body to UTF-8 bytes before sending:
+>
+> ```powershell
+> $translations = @(
+>     @{ sourceText = "Mirror run completed"; targetText = "Speglun lokið" },
+>     @{ sourceText = "Client ID";            targetText = "Klientauðkenni" }
+>     # ... more pairs ...
+> )
+>
+> $payload = @{
+>     jsonrpc = "2.0"; id = 1; method = "tools/call"
+>     params  = @{
+>         name      = "set_translations"
+>         arguments = @{
+>             source       = "BC Portal"
+>             lcid         = 1039
+>             translations = $translations
+>         }
+>     }
+> }
+>
+> $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes(
+>     ($payload | ConvertTo-Json -Depth 10 -Compress)
+> )
+>
+> Invoke-WebRequest `
+>     -Uri         "https://dynamics.is/api/mcp" `
+>     -Method      POST `
+>     -ContentType "application/json; charset=utf-8" `
+>     -Body        $bodyBytes `
+>     -UseBasicParsing | Select-Object -ExpandProperty Content
+> ```
+>
+> Key points:
+> - Icelandic characters are written as **literals** in the `.ps1` file (not as `\u00f0` escapes).
+> - `ConvertTo-Json` in .NET serializes them correctly as UTF-8 Unicode.
+> - `[System.Text.Encoding]::UTF8.GetBytes()` ensures the HTTP body bytes are UTF-8.
+> - The `charset=utf-8` Content-Type header tells the server the encoding explicitly.
+> - After verifying success (`"written": N` in the response), delete the script file.
+
+### 20.6 Applying Translations to HTML
 
 Use `data-t` and `data-tp` (placeholder) attributes on HTML elements:
 
@@ -2072,7 +2129,7 @@ function applyUiTranslations() {
 }
 ```
 
-### 20.5 Language Selector
+### 20.7 Language Selector
 
 Use the **`Allowed Language`** table (3563) — not the `Language` table — to get the
 languages that are enabled for use in this BC environment.
@@ -2104,7 +2161,7 @@ async function loadLanguages(companyId) {
 > the `Windows Language ID` field on the `Language` table (8).
 ```
 
-### 20.6 Full Language-Change Workflow
+### 20.8 Full Language-Change Workflow
 
 ```javascript
 let selectedLcid = 1033;
@@ -2128,7 +2185,7 @@ async function onLanguageChange(newLcid, companyId) {
 }
 ```
 
-### 20.7 Using Field Captions as Column Headers
+### 20.9 Using Field Captions as Column Headers
 
 After calling `Help.Fields.Get` with a `lcid`, the `caption` for each field is the
 localised column header. This means column headers in your UI automatically match the
