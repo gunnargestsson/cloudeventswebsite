@@ -1,7 +1,6 @@
 "use strict";
 
-const http = require("http");
-const https = require("https");
+const mcpHandler = require("../mcp");
 
 const { callAnthropic, parseJson } = require("../shared/bcClient");
 
@@ -117,49 +116,31 @@ function makeJsonRpcBody(method, params, id) {
   return JSON.stringify({ jsonrpc: "2.0", id, method, params });
 }
 
-function getSelfBaseUrl(req) {
-  const host = req.headers["x-forwarded-host"] || req.headers.host || process.env.WEBSITE_HOSTNAME || "localhost:7071";
-  const protoHeader = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
-  const protocol = protoHeader || (/localhost|127\.0\.0\.1/i.test(host) ? "http" : "https");
-  return `${protocol}://${host}`;
-}
-
 async function callMcp(req, body, extraHeaders = {}) {
-  const url = new URL("/api/mcp", getSelfBaseUrl(req));
-  const client = url.protocol === "http:" ? http : https;
+  const localReq = {
+    method: "POST",
+    headers: {
+      ...(req.headers || {}),
+      ...extraHeaders,
+      "content-type": "application/json",
+    },
+    body: parseJson(body, "MCP request body"),
+  };
 
-  return new Promise((resolve, reject) => {
-    const request = client.request({
-      protocol: url.protocol,
-      hostname: url.hostname,
-      port: url.port,
-      path: url.pathname + url.search,
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(body, "utf8"),
-        ...extraHeaders,
-      },
-    }, (response) => {
-      const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
-      response.on("end", () => {
-        const raw = Buffer.concat(chunks).toString("utf8");
-        if (response.statusCode >= 400) {
-          reject(new Error(`MCP HTTP ${response.statusCode}: ${raw.slice(0, 300)}`));
-          return;
-        }
-        try {
-          resolve(parseJson(raw, "MCP server"));
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
-    request.on("error", reject);
-    request.write(body);
-    request.end();
-  });
+  const localContext = {
+    log: req.log || console,
+    res: null,
+  };
+
+  await mcpHandler(localContext, localReq);
+  const localResponse = localContext.res || {};
+  const localStatus = Number(localResponse.status || 500);
+  const localBody = typeof localResponse.body === "string" ? localResponse.body : JSON.stringify(localResponse.body || {});
+  if (localStatus >= 400) {
+    throw new Error(`MCP HTTP ${localStatus}: ${localBody.slice(0, 300)}`);
+  }
+
+  return parseJson(localBody, "MCP server");
 }
 
 async function listMcpTools(req, bcConfig) {
