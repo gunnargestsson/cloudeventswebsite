@@ -463,7 +463,12 @@ async function saveMirrorConnection(connCtx, token, companyId, connection) {
 
 async function getTableConfigs(conn, token, companyId) {
   const tables = await getStoredTables(conn, token, companyId);
-  return { mirrors: tables, count: tables.length };
+  const normalized = tables.map(normalizeTableConfig);
+  const timestamps = await Promise.all(
+    normalized.map((t) => getIntegrationTimestamp(conn, token, companyId, t.tableId).catch(() => null))
+  );
+  const mirrors = normalized.map((t, i) => ({ ...t, lastRunAt: timestamps[i] || null }));
+  return { mirrors, count: mirrors.length };
 }
 
 async function saveTableConfigs(conn, token, companyId, tables) {

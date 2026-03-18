@@ -825,6 +825,13 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function formatRunAt(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
 function readFirstProperty(source, keys) {
   if (!source || typeof source !== 'object') return undefined;
   for (const key of keys) {
@@ -1327,7 +1334,7 @@ function renderTables() {
         <div class="mirror-meta-grid">
           <div class="meta-box"><div class="meta-label">${t('Table View')}</div><div class="meta-value">${escapeHtml(table.tableView || '—')}</div></div>
           <div class="meta-box"><div class="meta-label">${t('Data Per Company')}</div><div class="meta-value">${table.dataPerCompany}</div></div>
-          <div class="meta-box"><div class="meta-label">${t('Last Run At')}</div><div class="meta-value">${escapeHtml(table.lastRunAt || '—')}</div></div>
+          <div class="meta-box"><div class="meta-label">${t('Last Run At')}</div><div class="meta-value">${escapeHtml(formatRunAt(table.lastRunAt) || '—')}</div></div>
           <div class="meta-box"><div class="meta-label">${t('Fields')}</div><div class="meta-value">${table.fieldNumbers && table.fieldNumbers.length ? escapeHtml(table.fieldNumbers.join(', ')) : escapeHtml(t('Mirror all supported fields'))}</div></div>
         </div>
         <div class="mirror-actions">
@@ -1344,7 +1351,7 @@ function renderTables() {
 function refreshMetrics() {
   document.getElementById('metric-tables').textContent = String(state.tables.length);
   document.getElementById('metric-active').textContent = String(state.tables.filter((t) => t.active).length);
-  document.getElementById('metric-last-run').textContent = state.lastRunAt || t('Never');
+  document.getElementById('metric-last-run').textContent = formatRunAt(state.lastRunAt) || t('Never');
 }
 
 window.editTable = async function editTable(tableId) {
@@ -1482,6 +1489,7 @@ async function verifyConnection() {
 function stopSchedulerForTable(tableId) {
   const timer = state.schedulerTimers.get(tableId);
   if (timer) {
+    clearTimeout(timer);
     clearInterval(timer);
     state.schedulerTimers.delete(tableId);
   }
@@ -1489,14 +1497,33 @@ function stopSchedulerForTable(tableId) {
 
 function startSchedulerForTable(table) {
   stopSchedulerForTable(table.tableId);
-  const timer = setInterval(async () => {
+  const intervalMs = Math.max(1, Number(table.intervalMin || 60)) * 60 * 1000;
+
+  // Compute how long until the next run is due.
+  // If never run (lastRunAt is null/falsy), run immediately (delay = 0).
+  // Otherwise delay = remaining time until lastRunAt + interval, clamped to 0.
+  const lastMs = table.lastRunAt ? new Date(table.lastRunAt).getTime() : 0;
+  const delayMs = lastMs ? Math.max(0, lastMs + intervalMs - Date.now()) : 0;
+
+  const runAndSchedule = async () => {
     try {
       await window.runTableNow(table.tableId);
     } catch (error) {
       addLog(`${t('Mirror run failed')}: ${table.tableName} — ${error.message}`, 'error');
     }
-  }, Math.max(1, Number(table.intervalMin || 60)) * 60 * 1000);
-  state.schedulerTimers.set(table.tableId, timer);
+    // After the first run, set up the recurring interval.
+    const recurringTimer = setInterval(async () => {
+      try {
+        await window.runTableNow(table.tableId);
+      } catch (error) {
+        addLog(`${t('Mirror run failed')}: ${table.tableName} — ${error.message}`, 'error');
+      }
+    }, intervalMs);
+    state.schedulerTimers.set(table.tableId, recurringTimer);
+  };
+
+  const initialTimer = setTimeout(runAndSchedule, delayMs);
+  state.schedulerTimers.set(table.tableId, initialTimer);
 }
 
 function startScheduler() {
@@ -1507,7 +1534,7 @@ function startScheduler() {
 }
 
 function stopScheduler() {
-  state.schedulerTimers.forEach((timer) => clearInterval(timer));
+  state.schedulerTimers.forEach((timer) => { clearTimeout(timer); clearInterval(timer); });
   state.schedulerTimers.clear();
   state.schedulerRunning = false;
   addLog(t('Scheduler stopped'), 'warn');
