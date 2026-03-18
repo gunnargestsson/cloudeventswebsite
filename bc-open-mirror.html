@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>BC Portal – Open Mirror</title>
+<title>Origo BC Portal – Open Mirror</title>
 <script src="settings.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
 <style>
@@ -501,9 +501,9 @@
 <body>
 <div id="app">
   <header>
-    <a href="/" class="logo">
-      <div class="logo-icon"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect fill='%234f7fff' width='64' height='64'/%3E%3C/svg%3E" alt="Logo"></div>
-      <span>BC Portal</span>
+    <a href="index.html" class="logo">
+      <div class="logo-icon"><img src="origo.jpeg" alt="Origo"></div>
+      Origo BC Portal <span>/ Open Mirror</span>
     </a>
     <div class="header-right">
       <a href="index.html" class="status-pill" style="text-decoration:none;">Home</a>
@@ -521,7 +521,7 @@
 
   <main>
     <div class="breadcrumb">
-      <a href="/" class="crumb" id="crumb-portal">Portal</a>
+      <a href="index.html" class="crumb" id="crumb-portal">My Pages</a>
       <span class="sep">/</span>
       <span class="crumb" id="crumb-mirrors">Open Mirror</span>
     </div>
@@ -668,7 +668,7 @@
 <script>
 const UI_STRINGS = [
   'Open Mirror',
-  'Portal',
+  'My Pages',
   'Connected',
   'Mirror Unverified',
   'Incrementally mirror Business Central tables to a Microsoft Fabric Open Mirroring landing zone without routing CSV files through the browser.',
@@ -906,7 +906,7 @@ async function loadUiTranslations() {
 
 function applyTranslations() {
   document.getElementById('status-text').textContent = t('Connected');
-  document.getElementById('crumb-portal').textContent = t('Portal');
+  document.getElementById('crumb-portal').textContent = t('My Pages');
   document.getElementById('crumb-mirrors').textContent = t('Open Mirror');
   document.getElementById('page-title').textContent = t('Open Mirror');
   document.getElementById('page-copy').textContent = t('Incrementally mirror Business Central tables to a Microsoft Fabric Open Mirroring landing zone without routing CSV files through the browser.');
