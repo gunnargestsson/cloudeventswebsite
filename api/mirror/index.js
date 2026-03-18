@@ -351,23 +351,37 @@ async function getSettings(conn, token, companyId) {
 
 async function verifyMirrorConnection(connection) {
   const conn = sanitizeConnection(connection);
-  parseMirrorUrl(conn.mirrorUrl);
+  const parsed = parseMirrorUrl(conn.mirrorUrl);
   const credential = new ClientSecretCredential(conn.tenant, conn.clientId, conn.clientSecret);
-  const serviceClient = createDataLakeServiceClient(conn.mirrorUrl, credential);
-  const { fileSystemName, basePath } = parseMirrorUrl(conn.mirrorUrl);
-  const fs = serviceClient.getFileSystemClient(fileSystemName);
-  
-  // Try to list files as a way to verify connection
-  // OneLake may not support getProperties(), so we use listFilesAndDirectories instead
-  try {
-    const iter = fs.listFilesAndDirectories(basePath || undefined);
-    // Try to get at least one item to confirm access
-    await iter.next();
-  } catch (listError) {
-    // If listing fails, try creating the base path (filesystem) if it doesn't exist
-    // This is less invasive than getProperties for OneLake
-    await fs.createIfNotExists();
+
+  // OneLake/Fabric can reject some filesystem probe operations even when auth/path are valid.
+  // For OneLake we verify by acquiring a storage token and validating URL shape only.
+  if (/\.dfs\.fabric\.microsoft\.com$/i.test(parsed.accountHost)) {
+    await credential.getToken("https://storage.azure.com/.default");
+    return { verified: true };
   }
+
+  const serviceClient = createDataLakeServiceClient(conn.mirrorUrl, credential);
+  const { fileSystemName, basePath } = parsed;
+  const fs = serviceClient.getFileSystemClient(fileSystemName);
+
+  try {
+    await fs.exists();
+    if (basePath) {
+      const dir = fs.getDirectoryClient(basePath);
+      await dir.exists();
+    }
+  } catch (error) {
+    const message = String(error?.message || "");
+    if (/operation not supported on the specified endpoint/i.test(message)) {
+      if (/\.blob\.core\.windows\.net$/i.test(parsed.accountHost)) {
+        throw new Error("Mirror URL must use the DFS endpoint. Replace '.blob.core.windows.net' with '.dfs.core.windows.net'.");
+      }
+      throw new Error("The mirror endpoint rejected the verification operation. Use an ADLS Gen2 DFS URL (or OneLake-compatible DFS path) and verify tenant/client permissions.");
+    }
+    throw error;
+  }
+
   return { verified: true };
 }
 
@@ -530,9 +544,18 @@ function parseMirrorUrl(urlString) {
   };
 }
 
+function normalizeAccountHost(host) {
+  const value = String(host || "").trim();
+  if (/\.blob\.core\.windows\.net$/i.test(value)) {
+    return value.replace(/\.blob\.core\.windows\.net$/i, ".dfs.core.windows.net");
+  }
+  return value;
+}
+
 function createDataLakeServiceClient(mirrorUrl, credential) {
   const { accountHost } = parseMirrorUrl(mirrorUrl);
-  return new DataLakeServiceClient(`https://${accountHost}`, credential);
+  const normalizedHost = normalizeAccountHost(accountHost);
+  return new DataLakeServiceClient(`https://${normalizedHost}`, credential);
 }
 
 function pathJoin(...segments) {
@@ -640,7 +663,6 @@ async function uploadTextToMirror(connection, relativePath, content) {
   const serviceClient = createDataLakeServiceClient(connection.mirrorUrl, credential);
   const { fileSystemName, basePath } = parseMirrorUrl(connection.mirrorUrl);
   const fs = serviceClient.getFileSystemClient(fileSystemName);
-  await fs.createIfNotExists();
 
   const fullPath = pathJoin(basePath, relativePath);
   const fileClient = fs.getFileClient(fullPath);
