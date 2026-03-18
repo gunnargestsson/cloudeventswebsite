@@ -514,9 +514,43 @@ async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid
   const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
+  let resolvedFieldNumbers = [];
+  if (Array.isArray(fields) && fields.length) {
+    // Check if any field is a name (non-numeric); if so, fetch table metadata to resolve
+    const needsResolution = fields.some(f => isNaN(Number(f)));
+    if (needsResolution) {
+      const fieldsResult = await bcTask(conn, company.id, {
+        specversion: "1.0",
+        type:        "Help.Fields.Get",
+        source:      "BC Metadata MCP v1.0",
+        subject:     String(table),
+        lcid,
+      });
+      const allFields = fieldsResult.result || fieldsResult.value || (Array.isArray(fieldsResult) ? fieldsResult : []);
+      const nameToNo = new Map();
+      for (const f of allFields) {
+        const no = Number(f.number || f.fieldNo || f.no);
+        const name = String(f.name || f.caption || "").trim();
+        if (no >= 1 && name) nameToNo.set(name.toLowerCase(), no);
+      }
+      for (const f of fields) {
+        const asNum = Number(f);
+        if (!isNaN(asNum)) {
+          resolvedFieldNumbers.push(asNum);
+        } else {
+          const no = nameToNo.get(String(f).toLowerCase());
+          if (!no) throw new Error(`Field '${f}' not found in table '${table}'`);
+          resolvedFieldNumbers.push(no);
+        }
+      }
+    } else {
+      resolvedFieldNumbers = fields.map(f => Number(f));
+    }
+  }
+
   const data = { tableName: String(table), skip, take };
   if (filter) data.tableView = String(filter);
-  if (Array.isArray(fields) && fields.length) data.fieldNumbers = fields;
+  if (resolvedFieldNumbers.length) data.fieldNumbers = resolvedFieldNumbers;
 
   const result = await bcTask(conn, company.id, {
     specversion: "1.0",

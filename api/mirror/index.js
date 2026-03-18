@@ -695,11 +695,19 @@ async function uploadTextToMirror(connection, relativePath, content) {
 
   const fullPath = pathJoin(basePath, relativePath);
   const parts = fullPath.split("/").filter(Boolean);
+  
+  // Create parent directories, skipping root-level or protected folders (Tables, Files)
   if (parts.length > 1) {
+    const protectedRoots = new Set(["Tables", "Files"]);
     let current = "";
     for (let i = 0; i < parts.length - 1; i++) {
       current = pathJoin(current, parts[i]);
-      await fs.getDirectoryClient(current).createIfNotExists();
+      // Skip if this is a root-level protected folder (no "/" in path yet, like "Tables")
+      // or if it would be the first part and is a protected name
+      const isRootProtected = !current.includes("/") && protectedRoots.has(current);
+      if (!isRootProtected) {
+        await fs.getDirectoryClient(current).createIfNotExists();
+      }
     }
   }
 
