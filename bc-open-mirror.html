@@ -614,9 +614,9 @@ const CONFIG = {
 };
 
 const state = {
-  token: localStorage.getItem('bc_token') || '',
-  companyId: localStorage.getItem('bc_company') || '',
-  lcid: parseInt(localStorage.getItem('lcid') || '1033', 10),
+  token: '',  // Will be loaded in init()
+  companyId: '',  // Will be loaded in init()
+  lcid: 1033,  // Will be loaded in init()
   uiTranslations: {},
   connection: null,
   tables: [],
@@ -1135,6 +1135,10 @@ function handleUiError(error) {
 }
 
 async function init() {
+  const settings = bcSettingsLoad();
+  state.token = settings.token || '';
+  state.companyId = settings.companyId || '';
+  state.lcid = Number(settings.lcid) || 1033;
   if (!state.token || !state.companyId) {
     window.location.href = '/';
     return;
