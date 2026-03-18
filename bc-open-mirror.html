@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BC Portal – Open Mirror</title>
+<script src="settings.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0d14;
+    --surface: #111520;
+    --surface2: #171d2e;
+    --surface3: #0f1320;
+    --border: #1e2640;
+    --border-bright: #2d3a5e;
+    --accent: #4f7fff;
+    --accent2: #7c5cfc;
+    --accent-glow: rgba(79,127,255,0.18);
+    --text: #e8ecf5;
+    --text-dim: #6b7799;
+    --text-mid: #9ba8c8;
+    --green: #27c08a;
+    --red: #f25f5c;
+    --amber: #f5a623;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(79,127,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79,127,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+  #app { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 100vh; }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,13,20,0.85);
+    backdrop-filter: blur(12px);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-decoration: none;
+    color: inherit;
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 1.15rem;
+    letter-spacing: -0.02em;
+  }
+  .logo-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .logo-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .logo span { color: var(--text-dim); font-weight: 400; font-size: 0.78rem; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 99px;
+    padding: 6px 14px;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); }
+  .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .status-dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  main { flex: 1; padding: 32px; max-width: 1380px; margin: 0 auto; width: 100%; }
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    margin-bottom: 28px;
+  }
+  .breadcrumb .crumb { color: var(--text-mid); cursor: pointer; text-decoration: none; }
+  .breadcrumb .sep { color: var(--border-bright); }
+  .hero {
+    display: grid;
+    grid-template-columns: 1.3fr 0.7fr;
+    gap: 18px;
+    margin-bottom: 24px;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .panel::after {
+    content: '';
+    position: absolute;
+    inset: auto -60px -60px auto;
+    width: 180px;
+    height: 180px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(79,127,255,0.16), transparent 70%);
+    pointer-events: none;
+  }
+  .hero-title { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.8rem; letter-spacing: -0.04em; margin-bottom: 8px; }
+  .hero-copy { color: var(--text-mid); line-height: 1.7; font-size: 0.82rem; max-width: 72ch; }
+  .hero-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .metric {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+  }
+  .metric-label { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 8px; }
+  .metric-value { font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 700; }
+  .stack { display: grid; gap: 18px; }
+  .section-title { font-family: 'Syne', sans-serif; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 16px; }
+  .section-subtitle { font-size: 0.74rem; color: var(--text-dim); line-height: 1.6; margin-top: -6px; margin-bottom: 16px; }
+  .field-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .field-row { display: grid; gap: 6px; }
+  .field-row.full { grid-column: 1 / -1; }
+  .field-row label {
+    display: block;
+    font-size: 0.66rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .field-row input,
+  .field-row textarea,
+  .field-row select {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.78rem;
+    padding: 10px 12px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .field-row textarea { min-height: 88px; resize: vertical; }
+  .field-row input:focus,
+  .field-row textarea:focus,
+  .field-row select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  .hint { font-size: 0.68rem; color: var(--text-dim); line-height: 1.5; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+  .btn {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border: none;
+    border-radius: var(--radius-sm);
+    color: #fff;
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 0.86rem;
+    padding: 11px 18px;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
+    box-shadow: 0 4px 16px rgba(79,127,255,0.3);
+  }
+  .btn:hover { opacity: 0.92; transform: translateY(-1px); }
+  .btn.secondary { background: var(--surface2); border: 1px solid var(--border); color: var(--text); box-shadow: none; }
+  .btn.secondary:hover { background: var(--surface3); }
+  .btn.danger { background: linear-gradient(135deg, #b83f5f, #f25f5c); }
+  .btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--text-mid); box-shadow: none; }
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .search-wrap { position: relative; flex: 1; }
+  .search-wrap input {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.82rem;
+    padding: 10px 14px 10px 40px;
+    outline: none;
+  }
+  .search-wrap input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .search-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--text-dim); }
+  .table-grid { display: grid; gap: 14px; }
+  .mirror-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    display: grid;
+    gap: 16px;
+  }
+  .mirror-card-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .mirror-title { font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+  .mirror-id { font-size: 0.72rem; color: var(--text-dim); }
+  .pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.67rem;
+    padding: 4px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text-mid);
+  }
+  .pill.active { color: var(--green); border-color: rgba(39,192,138,0.3); background: rgba(39,192,138,0.08); }
+  .pill.inactive { color: var(--amber); border-color: rgba(245,166,35,0.3); background: rgba(245,166,35,0.08); }
+  .mirror-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .meta-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+  }
+  .meta-label { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 7px; }
+  .meta-value { font-size: 0.76rem; color: var(--text); word-break: break-word; }
+  .mirror-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+  .field-picker {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    max-height: 280px;
+    overflow: auto;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+  }
+  .field-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface3);
+  }
+  .field-item.disabled { opacity: 0.45; }
+  .field-copy { min-width: 0; }
+  .field-name { font-size: 0.74rem; color: var(--text); margin-bottom: 4px; }
+  .field-meta { font-size: 0.64rem; color: var(--text-dim); line-height: 1.5; }
+  .key-badge { color: var(--amber); margin-right: 4px; }
+  .field-inline-actions { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+  .checkbox-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.74rem;
+    color: var(--text-mid);
+  }
+  .log-panel {
+    background: #0b101b;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    min-height: 320px;
+    padding: 16px;
+    overflow: auto;
+  }
+  .log-entry {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    gap: 14px;
+    padding: 9px 0;
+    border-bottom: 1px solid rgba(45,58,94,0.35);
+    font-size: 0.74rem;
+  }
+  .log-entry:last-child { border-bottom: none; }
+  .log-time { color: var(--text-dim); }
+  .log-message.ok { color: var(--green); }
+  .log-message.error { color: var(--red); }
+  .log-message.warn { color: var(--amber); }
+  .inline-banner {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    font-size: 0.74rem;
+    color: var(--text-mid);
+    margin-bottom: 14px;
+  }
+  .inline-banner.error { border-color: rgba(242,95,92,0.35); color: #ffb2b0; }
+  .inline-banner.ok { border-color: rgba(39,192,138,0.35); color: #9fe7c8; }
+  .hidden { display: none !important; }
+  @media (max-width: 1024px) {
+    .hero { grid-template-columns: 1fr; }
+    .mirror-meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .field-grid { grid-template-columns: 1fr; }
+    .field-picker { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 720px) {
+    main { padding: 20px; }
+    header { padding: 16px 20px; }
+    .toolbar { flex-direction: column; align-items: stretch; }
+    .mirror-meta-grid { grid-template-columns: 1fr; }
+    .log-entry { grid-template-columns: 1fr; gap: 4px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <a href="/" class="logo">
+      <div class="logo-icon"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect fill='%234f7fff' width='64' height='64'/%3E%3C/svg%3E" alt="Logo"></div>
+      <span>BC Portal</span>
+    </a>
+    <div class="header-right">
+      <div class="status-pill">
+        <div class="status-dot connected" id="conn-dot"></div>
+        <span id="status-text">Connected</span>
+      </div>
+      <div class="status-pill">
+        <div class="status-dot" id="mirror-dot"></div>
+        <span id="mirror-status-text">Mirror Unverified</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="breadcrumb">
+      <a href="/" class="crumb" id="crumb-portal">Portal</a>
+      <span class="sep">/</span>
+      <span class="crumb" id="crumb-mirrors">Open Mirror</span>
+    </div>
+
+    <section class="hero">
+      <div class="panel">
+        <div class="hero-title" id="page-title">Open Mirror</div>
+        <div class="hero-copy" id="page-copy">Incrementally mirror Business Central tables to a Microsoft Fabric Open Mirroring landing zone without routing CSV files through the browser.</div>
+        <div class="hero-metrics">
+          <div class="metric">
+            <div class="metric-label" id="metric-tables-label">Configured Tables</div>
+            <div class="metric-value" id="metric-tables">0</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label" id="metric-active-label">Active Mirrors</div>
+            <div class="metric-value" id="metric-active">0</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label" id="metric-verified-label">Connection</div>
+            <div class="metric-value" id="metric-verified">Unverified</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label" id="metric-last-run-label">Last Run</div>
+            <div class="metric-value" id="metric-last-run">Never</div>
+          </div>
+        </div>
+      </div>
+      <div class="panel stack">
+        <div>
+          <div class="section-title" id="quick-actions-title">Quick Actions</div>
+          <div class="actions">
+            <button class="btn" id="btn-run-active">Run Active Tables</button>
+            <button class="btn secondary" id="btn-refresh">Refresh</button>
+          </div>
+        </div>
+        <div>
+          <div class="section-title" id="scheduler-title">Browser Scheduler</div>
+          <div class="section-subtitle" id="scheduler-copy">Intervals run only while this page is open. Each active table keeps its own timer based on the configured interval.</div>
+          <div class="actions">
+            <button class="btn secondary" id="btn-start-scheduler">Start Scheduler</button>
+            <button class="btn ghost" id="btn-stop-scheduler">Stop Scheduler</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-bottom: 18px;">
+      <div class="section-title" id="conn-title">Mirror Destination</div>
+      <div class="section-subtitle" id="conn-copy">Store one encrypted ADLS Gen2 connection used for all mirrored tables. Verification is required before any table can be activated.</div>
+      <div id="connection-banner" class="inline-banner hidden"></div>
+      <div class="field-grid">
+        <div class="field-row full">
+          <label id="label-mirror-url" for="mirror-url">Mirror URL</label>
+          <input id="mirror-url" type="text" placeholder="https://account.dfs.core.windows.net/container/path" />
+        </div>
+        <div class="field-row">
+          <label id="label-tenant" for="mirror-tenant">Tenant</label>
+          <input id="mirror-tenant" type="text" placeholder="tenant-id-or-domain" />
+        </div>
+        <div class="field-row">
+          <label id="label-client-id" for="mirror-client-id">Client ID</label>
+          <input id="mirror-client-id" type="text" placeholder="service-principal-client-id" />
+        </div>
+        <div class="field-row full">
+          <label id="label-client-secret" for="mirror-client-secret">Client Secret</label>
+          <input id="mirror-client-secret" type="password" placeholder="service-principal-secret" />
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btn-save-connection">Save Connection</button>
+        <button class="btn secondary" id="btn-verify-connection">Verify Connection</button>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-bottom: 18px;">
+      <div class="section-title" id="tables-title">Table Configuration</div>
+      <div class="section-subtitle" id="tables-copy">Add a table, choose supported fields, set interval, and activate after DDL upload succeeds.</div>
+      <div id="table-banner" class="inline-banner hidden"></div>
+      <div class="field-grid">
+        <div class="field-row">
+          <label id="label-table-id" for="input-table-id">Table ID</label>
+          <input id="input-table-id" type="number" min="1" />
+        </div>
+        <div class="field-row">
+          <label id="label-table-name" for="input-table-name">Table Name</label>
+          <input id="input-table-name" type="text" />
+        </div>
+        <div class="field-row">
+          <label id="label-interval" for="input-interval">Interval Minutes</label>
+          <input id="input-interval" type="number" min="1" value="60" />
+        </div>
+        <div class="field-row">
+          <label id="label-data-per-company" for="input-data-per-company">Data Per Company</label>
+          <select id="input-data-per-company">
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+        <div class="field-row full">
+          <label id="label-table-view" for="input-table-view">Table View</label>
+          <input id="input-table-view" type="text" placeholder="WHERE(Blocked=CONST( ))" />
+          <div class="hint" id="table-view-hint">Leave blank to mirror all records. Incremental filtering on SystemModifiedAt is appended automatically after the last successful run.</div>
+        </div>
+      </div>
+      <div class="field-inline-actions">
+        <button class="btn secondary" id="btn-load-fields">Load Fields</button>
+        <label class="checkbox-inline"><input id="input-all-fields" type="checkbox" checked /> <span id="all-fields-label">Mirror all supported fields</span></label>
+      </div>
+      <div class="field-row full" style="margin-top: 14px;">
+        <label id="label-field-picker">Field Picker</label>
+        <div id="field-picker" class="field-picker"></div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btn-add-table">Add Table</button>
+        <button class="btn secondary" id="btn-reset-form">Reset Form</button>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-bottom: 18px;">
+      <div class="toolbar">
+        <div>
+          <div class="section-title" id="configured-title">Configured Mirrors</div>
+          <div class="section-subtitle" id="configured-copy">Activation uploads DDL and locks the configuration until the table is deactivated.</div>
+        </div>
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input id="search-input" type="text" placeholder="Search table mirrors..." />
+        </div>
+      </div>
+      <div id="mirrors-container" class="table-grid"></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-title" id="log-title">Run Log</div>
+      <div class="section-subtitle" id="log-copy">Session-scoped events appear here while the page is open.</div>
+      <div id="log-panel" class="log-panel"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+const UI_STRINGS = [
+  'Open Mirror',
+  'Portal',
+  'Connected',
+  'Mirror Unverified',
+  'Incrementally mirror Business Central tables to a Microsoft Fabric Open Mirroring landing zone without routing CSV files through the browser.',
+  'Configured Tables',
+  'Active Mirrors',
+  'Connection',
+  'Last Run',
+  'Unverified',
+  'Never',
+  'Quick Actions',
+  'Run Active Tables',
+  'Refresh',
+  'Browser Scheduler',
+  'Intervals run only while this page is open. Each active table keeps its own timer based on the configured interval.',
+  'Start Scheduler',
+  'Stop Scheduler',
+  'Mirror Destination',
+  'Store one encrypted ADLS Gen2 connection used for all mirrored tables. Verification is required before any table can be activated.',
+  'Mirror URL',
+  'Tenant',
+  'Client ID',
+  'Client Secret',
+  'Save Connection',
+  'Verify Connection',
+  'Table Configuration',
+  'Add a table, choose supported fields, set interval, and activate after DDL upload succeeds.',
+  'Table ID',
+  'Table Name',
+  'Interval Minutes',
+  'Data Per Company',
+  'Table View',
+  'Leave blank to mirror all records. Incremental filtering on SystemModifiedAt is appended automatically after the last successful run.',
+  'Load Fields',
+  'Mirror all supported fields',
+  'Field Picker',
+  'Add Table',
+  'Reset Form',
+  'Configured Mirrors',
+  'Activation uploads DDL and locks the configuration until the table is deactivated.',
+  'Search table mirrors...',
+  'Run Log',
+  'Session-scoped events appear here while the page is open.',
+  'No configured mirrors yet',
+  'Add a table configuration to start mirroring.',
+  'Active',
+  'Inactive',
+  'Field Count',
+  'Actions',
+  'Activate',
+  'Deactivate',
+  'Run Now',
+  'Delete',
+  'Last Run At',
+  'Table',
+  'min',
+  'verified',
+  'Connection verified',
+  'Connection saved',
+  'Verification failed',
+  'Please enter a valid table ID',
+  'Please enter a table name',
+  'Load fields before adding a table or keep all fields enabled.',
+  'Table configuration saved',
+  'Table activated',
+  'Table deactivated',
+  'Mirror run completed',
+  'Mirror run skipped',
+  'Mirror run failed',
+  'Scheduler started',
+  'Scheduler stopped',
+  'Unsupported field type',
+  'Primary key',
+  'Loading fields...',
+  'Ready',
+  'Run Active Tables finished',
+  'Delete table configuration?',
+  'Open mirror connection for Business Central tables',
+  'Connection is required before activation.',
+  'Mirror Verified',
+  'Mirror Not Verified',
+  'Updated just now',
+  'Fields',
+  'Table View Locked While Active',
+  'Config Locked While Active'
+  ,'Deleted table'
+  ,'Edit Table'
+  ,'Field'
+  ,'true'
+  ,'false'
+];
+
+const CONFIG = {
+  source: 'BC Open Mirror'
+};
+
+const state = {
+  token: localStorage.getItem('bc_token') || '',
+  companyId: localStorage.getItem('bc_company') || '',
+  lcid: parseInt(localStorage.getItem('lcid') || '1033', 10),
+  uiTranslations: {},
+  connection: null,
+  tables: [],
+  fieldCache: new Map(),
+  selectedFields: [],
+  allFields: true,
+  logEntries: [],
+  schedulerTimers: new Map(),
+  schedulerRunning: false,
+  lastRunAt: null,
+};
+
+function t(key) {
+  return state.uiTranslations[key] || key;
+}
+
+function addLog(message, type = 'info') {
+  const stamp = new Date();
+  state.logEntries.unshift({ message, type, stamp });
+  renderLog();
+}
+
+function renderLog() {
+  const panel = document.getElementById('log-panel');
+  if (!state.logEntries.length) {
+    panel.innerHTML = `<div class="log-entry"><div class="log-time">--</div><div class="log-message">${t('Ready')}</div></div>`;
+    return;
+  }
+  panel.innerHTML = state.logEntries.map((entry) => {
+    const cls = entry.type === 'error' ? 'error' : entry.type === 'warn' ? 'warn' : entry.type === 'ok' ? 'ok' : '';
+    return `<div class="log-entry"><div class="log-time">${entry.stamp.toLocaleTimeString()}</div><div class="log-message ${cls}">${escapeHtml(entry.message)}</div></div>`;
+  }).join('');
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function api(action, payload = {}) {
+  const response = await fetch('/api/mirror', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${state.token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ action, companyId: state.companyId, ...payload })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  return data;
+}
+
+async function loadUiTranslations() {
+  if (state.lcid === 1033) return;
+  try {
+    const response = await fetch(`/api/config?action=getTranslations&source=BC Portal&lcid=${state.lcid}`, {
+      headers: { 'Authorization': `Bearer ${state.token}` }
+    });
+    const data = await response.json();
+    (data.translations || []).forEach((row) => {
+      state.uiTranslations[row.sourceText] = row.targetText;
+    });
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function applyTranslations() {
+  document.getElementById('status-text').textContent = t('Connected');
+  document.getElementById('crumb-portal').textContent = t('Portal');
+  document.getElementById('crumb-mirrors').textContent = t('Open Mirror');
+  document.getElementById('page-title').textContent = t('Open Mirror');
+  document.getElementById('page-copy').textContent = t('Incrementally mirror Business Central tables to a Microsoft Fabric Open Mirroring landing zone without routing CSV files through the browser.');
+  document.getElementById('metric-tables-label').textContent = t('Configured Tables');
+  document.getElementById('metric-active-label').textContent = t('Active Mirrors');
+  document.getElementById('metric-verified-label').textContent = t('Connection');
+  document.getElementById('metric-last-run-label').textContent = t('Last Run');
+  document.getElementById('quick-actions-title').textContent = t('Quick Actions');
+  document.getElementById('btn-run-active').textContent = t('Run Active Tables');
+  document.getElementById('btn-refresh').textContent = t('Refresh');
+  document.getElementById('scheduler-title').textContent = t('Browser Scheduler');
+  document.getElementById('scheduler-copy').textContent = t('Intervals run only while this page is open. Each active table keeps its own timer based on the configured interval.');
+  document.getElementById('btn-start-scheduler').textContent = t('Start Scheduler');
+  document.getElementById('btn-stop-scheduler').textContent = t('Stop Scheduler');
+  document.getElementById('conn-title').textContent = t('Mirror Destination');
+  document.getElementById('conn-copy').textContent = t('Store one encrypted ADLS Gen2 connection used for all mirrored tables. Verification is required before any table can be activated.');
+  document.getElementById('label-mirror-url').textContent = t('Mirror URL');
+  document.getElementById('label-tenant').textContent = t('Tenant');
+  document.getElementById('label-client-id').textContent = t('Client ID');
+  document.getElementById('label-client-secret').textContent = t('Client Secret');
+  document.getElementById('btn-save-connection').textContent = t('Save Connection');
+  document.getElementById('btn-verify-connection').textContent = t('Verify Connection');
+  document.getElementById('tables-title').textContent = t('Table Configuration');
+  document.getElementById('tables-copy').textContent = t('Add a table, choose supported fields, set interval, and activate after DDL upload succeeds.');
+  document.getElementById('label-table-id').textContent = t('Table ID');
+  document.getElementById('label-table-name').textContent = t('Table Name');
+  document.getElementById('label-interval').textContent = t('Interval Minutes');
+  document.getElementById('label-data-per-company').textContent = t('Data Per Company');
+  document.getElementById('label-table-view').textContent = t('Table View');
+  document.getElementById('table-view-hint').textContent = t('Leave blank to mirror all records. Incremental filtering on SystemModifiedAt is appended automatically after the last successful run.');
+  document.getElementById('btn-load-fields').textContent = t('Load Fields');
+  document.getElementById('all-fields-label').textContent = t('Mirror all supported fields');
+  document.getElementById('label-field-picker').textContent = t('Field Picker');
+  document.getElementById('btn-add-table').textContent = t('Add Table');
+  document.getElementById('btn-reset-form').textContent = t('Reset Form');
+  document.getElementById('configured-title').textContent = t('Configured Mirrors');
+  document.getElementById('configured-copy').textContent = t('Activation uploads DDL and locks the configuration until the table is deactivated.');
+  document.getElementById('search-input').placeholder = t('Search table mirrors...');
+  document.getElementById('log-title').textContent = t('Run Log');
+  document.getElementById('log-copy').textContent = t('Session-scoped events appear here while the page is open.');
+}
+
+function setBanner(id, message, type) {
+  const el = document.getElementById(id);
+  if (!message) {
+    el.className = 'inline-banner hidden';
+    el.textContent = '';
+    return;
+  }
+  el.className = `inline-banner ${type || ''}`.trim();
+  el.textContent = message;
+}
+
+function populateConnectionForm() {
+  const conn = state.connection || { mirrorUrl: '', tenant: '', clientId: '', clientSecret: '', status: 'unverified' };
+  document.getElementById('mirror-url').value = conn.mirrorUrl || '';
+  document.getElementById('mirror-tenant').value = conn.tenant || '';
+  document.getElementById('mirror-client-id').value = conn.clientId || '';
+  document.getElementById('mirror-client-secret').value = conn.clientSecret || '';
+  refreshConnectionIndicators();
+}
+
+function refreshConnectionIndicators() {
+  const verified = state.connection && state.connection.status === 'verified';
+  const dot = document.getElementById('mirror-dot');
+  const text = document.getElementById('mirror-status-text');
+  dot.className = `status-dot ${verified ? 'connected' : 'error'}`;
+  text.textContent = verified ? t('Mirror Verified') : t('Mirror Not Verified');
+  document.getElementById('metric-verified').textContent = verified ? t('verified') : t('Unverified');
+}
+
+function renderFieldPicker() {
+  const picker = document.getElementById('field-picker');
+  const tableId = Number(document.getElementById('input-table-id').value || 0);
+  const fields = state.fieldCache.get(tableId) || [];
+
+  if (!fields.length) {
+    picker.innerHTML = `<div class="hint">${escapeHtml(t('Load Fields'))}</div>`;
+    return;
+  }
+
+  picker.innerHTML = fields.map((field) => {
+    const number = Number(field.number || field.fieldNo || field.no || field.id);
+    const fieldType = String(field.type || '');
+    const fieldClass = String(field.class || 'Normal');
+    const supported = fieldClass === 'Normal' && number >= 1 && number <= 1999999999 && isSupportedType(fieldType);
+    const checked = state.selectedFields.includes(number) ? 'checked' : '';
+    const disabled = state.allFields || !supported ? 'disabled' : '';
+    const keyBadge = field.isPartOfPrimaryKey ? `<span class="key-badge">🔑</span>` : '';
+    return `
+      <label class="field-item ${supported ? '' : 'disabled'}">
+        <input type="checkbox" value="${number}" ${checked} ${disabled} ${supported ? '' : 'disabled'} onchange="toggleField(${number})" />
+        <div class="field-copy">
+          <div class="field-name">${keyBadge}${escapeHtml(field.name || field.caption || `Field ${number}`)}</div>
+          <div class="field-meta">${escapeHtml(`${number} • ${fieldType} • ${fieldClass}${field.length ? ` • ${field.length}` : ''}`)}</div>
+        </div>
+      </label>
+    `;
+  }).join('');
+}
+
+function isSupportedType(type) {
+  return ['BigInteger','Boolean','Code','Date','DateFormula','DateTime','Decimal','Duration','Guid','Integer','Option','Text','Time'].includes(type);
+}
+
+window.toggleField = function toggleField(number) {
+  if (state.allFields) return;
+  if (state.selectedFields.includes(number)) {
+    state.selectedFields = state.selectedFields.filter((item) => item !== number);
+  } else {
+    state.selectedFields = [...state.selectedFields, number].sort((a, b) => a - b);
+  }
+};
+
+function resetForm() {
+  document.getElementById('input-table-id').value = '';
+  document.getElementById('input-table-name').value = '';
+  document.getElementById('input-interval').value = '60';
+  document.getElementById('input-data-per-company').value = 'true';
+  document.getElementById('input-table-view').value = '';
+  document.getElementById('input-all-fields').checked = true;
+  state.selectedFields = [];
+  state.allFields = true;
+  renderFieldPicker();
+}
+
+async function loadFields() {
+  const tableId = Number(document.getElementById('input-table-id').value || 0);
+  const tableName = document.getElementById('input-table-name').value.trim();
+  if (!tableId && !tableName) throw new Error(t('Please enter a valid table ID'));
+  setBanner('table-banner', t('Loading fields...'), '');
+  const ref = tableName || String(tableId);
+  const response = await fetch('/api/mcp', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${state.token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'get_table_fields',
+        arguments: {
+          table: ref,
+          companyId: state.companyId,
+          lcid: state.lcid,
+          format: 'json'
+        }
+      }
+    })
+  });
+  const rpc = await response.json();
+  if (rpc.error) throw new Error(rpc.error.message || 'get_table_fields failed');
+  const payload = rpc.result?.content?.[0]?.text ? JSON.parse(rpc.result.content[0].text) : rpc.result?.content || rpc.result;
+  const fields = payload.fields || payload.result || payload;
+  const array = Array.isArray(fields) ? fields : [];
+  state.fieldCache.set(tableId || Number((array[0] && (array[0].tableNo || array[0].tableId)) || 0), array);
+  if (array.length && !document.getElementById('input-table-name').value) {
+    document.getElementById('input-table-name').value = String(array[0].tableName || tableName || '');
+  }
+  renderFieldPicker();
+  setBanner('table-banner', null, '');
+}
+
+function collectTableConfig() {
+  const tableId = Number(document.getElementById('input-table-id').value || 0);
+  const tableName = document.getElementById('input-table-name').value.trim();
+  const intervalMin = Number(document.getElementById('input-interval').value || 0);
+  const dataPerCompany = document.getElementById('input-data-per-company').value === 'true';
+  const tableView = document.getElementById('input-table-view').value.trim();
+  const fieldNumbers = state.allFields ? [] : [...state.selectedFields];
+
+  if (!tableId || tableId < 1) throw new Error(t('Please enter a valid table ID'));
+  if (!tableName) throw new Error(t('Please enter a table name'));
+  if (!state.allFields && !fieldNumbers.length) throw new Error(t('Load fields before adding a table or keep all fields enabled.'));
+
+  return {
+    tableId,
+    tableName,
+    dataPerCompany,
+    fieldNumbers,
+    tableView,
+    intervalMin: Math.max(1, intervalMin || 60),
+    active: false
+  };
+}
+
+async function saveTable() {
+  const config = collectTableConfig();
+  const tables = [...state.tables];
+  const existingIndex = tables.findIndex((row) => Number(row.tableId) === config.tableId);
+  if (existingIndex >= 0 && tables[existingIndex].active) {
+    throw new Error(t('Config Locked While Active'));
+  }
+  if (existingIndex >= 0) {
+    tables.splice(existingIndex, 1, { ...tables[existingIndex], ...config, active: tables[existingIndex].active });
+  } else {
+    tables.push(config);
+  }
+  const result = await api('saveTableConfigs', { tables });
+  state.tables = result.mirrors || tables;
+  setBanner('table-banner', t('Table configuration saved'), 'ok');
+  addLog(`${t('Table configuration saved')}: ${config.tableName}`, 'ok');
+  resetForm();
+  renderTables();
+  refreshMetrics();
+}
+
+function renderTables() {
+  const searchText = document.getElementById('search-input').value.toLowerCase();
+  const container = document.getElementById('mirrors-container');
+  const filtered = state.tables.filter((table) => {
+    const hay = `${table.tableName} ${table.tableId}`.toLowerCase();
+    return hay.includes(searchText);
+  });
+
+  if (!filtered.length) {
+    container.innerHTML = `
+      <div class="panel" style="padding:32px;">
+        <div class="section-title">${t('No configured mirrors yet')}</div>
+        <div class="section-subtitle">${t('Add a table configuration to start mirroring.')}</div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = filtered.map((table) => {
+    const statusClass = table.active ? 'active' : 'inactive';
+    return `
+      <div class="mirror-card">
+        <div class="mirror-card-top">
+          <div>
+            <div class="mirror-title">${escapeHtml(table.tableName)}</div>
+            <div class="mirror-id">${t('Table ID')}: ${table.tableId}</div>
+          </div>
+          <div class="pill-row">
+            <span class="pill ${statusClass}">${table.active ? t('Active') : t('Inactive')}</span>
+            <span class="pill">${table.intervalMin} ${t('min')}</span>
+            <span class="pill">${t('Field Count')}: ${table.fieldNumbers && table.fieldNumbers.length ? table.fieldNumbers.length : t('Fields')}</span>
+          </div>
+        </div>
+        <div class="mirror-meta-grid">
+          <div class="meta-box"><div class="meta-label">${t('Table View')}</div><div class="meta-value">${escapeHtml(table.tableView || '—')}</div></div>
+          <div class="meta-box"><div class="meta-label">${t('Data Per Company')}</div><div class="meta-value">${table.dataPerCompany}</div></div>
+          <div class="meta-box"><div class="meta-label">${t('Last Run At')}</div><div class="meta-value">${escapeHtml(table.lastRunAt || '—')}</div></div>
+          <div class="meta-box"><div class="meta-label">${t('Fields')}</div><div class="meta-value">${table.fieldNumbers && table.fieldNumbers.length ? escapeHtml(table.fieldNumbers.join(', ')) : escapeHtml(t('Mirror all supported fields'))}</div></div>
+        </div>
+        <div class="mirror-actions">
+          <button class="btn ${table.active ? 'secondary' : ''}" onclick="toggleActivation(${table.tableId}, ${table.active})">${table.active ? t('Deactivate') : t('Activate')}</button>
+          <button class="btn secondary" onclick="runTableNow(${table.tableId})">${t('Run Now')}</button>
+          <button class="btn ghost" onclick="editTable(${table.tableId})">${t('Refresh')}</button>
+          <button class="btn danger" onclick="removeTable(${table.tableId})">${t('Delete')}</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function refreshMetrics() {
+  document.getElementById('metric-tables').textContent = String(state.tables.length);
+  document.getElementById('metric-active').textContent = String(state.tables.filter((t) => t.active).length);
+  document.getElementById('metric-last-run').textContent = state.lastRunAt || t('Never');
+}
+
+window.editTable = function editTable(tableId) {
+  const table = state.tables.find((row) => Number(row.tableId) === Number(tableId));
+  if (!table) return;
+  document.getElementById('input-table-id').value = table.tableId;
+  document.getElementById('input-table-name').value = table.tableName;
+  document.getElementById('input-interval').value = table.intervalMin;
+  document.getElementById('input-data-per-company').value = String(table.dataPerCompany);
+  document.getElementById('input-table-view').value = table.tableView || '';
+  state.allFields = !(table.fieldNumbers && table.fieldNumbers.length);
+  document.getElementById('input-all-fields').checked = state.allFields;
+  state.selectedFields = [...(table.fieldNumbers || [])];
+  renderFieldPicker();
+  addLog(`${t('Edit Table')}: ${table.tableName}`, 'info');
+};
+
+window.removeTable = async function removeTable(tableId) {
+  if (!confirm(t('Delete table configuration?'))) return;
+  const tables = state.tables.filter((row) => Number(row.tableId) !== Number(tableId));
+  const result = await api('saveTableConfigs', { tables });
+  state.tables = result.mirrors || tables;
+  stopSchedulerForTable(tableId);
+  renderTables();
+  refreshMetrics();
+  addLog(`${t('Deleted table')} ${tableId}`, 'warn');
+};
+
+window.toggleActivation = async function toggleActivation(tableId, currentlyActive) {
+  if (!currentlyActive && (!state.connection || state.connection.status !== 'verified')) {
+    setBanner('table-banner', t('Connection is required before activation.'), 'error');
+    return;
+  }
+  const action = currentlyActive ? 'deactivateTable' : 'activateTable';
+  const result = await api(action, { tableId });
+  state.tables = state.tables.map((row) => Number(row.tableId) === Number(tableId) ? { ...row, active: !currentlyActive } : row);
+  renderTables();
+  refreshMetrics();
+  addLog(currentlyActive ? `${t('Table deactivated')}: ${tableId}` : `${t('Table activated')}: ${result.tableName || tableId}`, 'ok');
+  if (currentlyActive) stopSchedulerForTable(tableId);
+  else if (state.schedulerRunning) startSchedulerForTable(state.tables.find((row) => Number(row.tableId) === Number(tableId)));
+};
+
+window.runTableNow = async function runTableNow(tableId) {
+  const result = await api('runNow', { tableId });
+  const idx = state.tables.findIndex((row) => Number(row.tableId) === Number(tableId));
+  if (idx >= 0) state.tables[idx].lastRunAt = result.endDateTime || new Date().toISOString();
+  state.lastRunAt = result.endDateTime || t('Updated just now');
+  renderTables();
+  refreshMetrics();
+  addLog(result.skipped ? `${t('Mirror run skipped')}: ${result.tableName}` : `${t('Mirror run completed')}: ${result.tableName}`, result.skipped ? 'warn' : 'ok');
+};
+
+async function loadSettings() {
+  const data = await api('getSettings');
+  state.connection = data.connection;
+  state.tables = data.tables || [];
+  populateConnectionForm();
+  renderTables();
+  refreshMetrics();
+}
+
+function getConnectionForm() {
+  return {
+    mirrorUrl: document.getElementById('mirror-url').value.trim(),
+    tenant: document.getElementById('mirror-tenant').value.trim(),
+    clientId: document.getElementById('mirror-client-id').value.trim(),
+    clientSecret: document.getElementById('mirror-client-secret').value.trim(),
+    status: state.connection?.status || 'unverified'
+  };
+}
+
+async function saveConnection() {
+  const connection = getConnectionForm();
+  const result = await api('saveMirrorConnection', { connection });
+  state.connection = { ...connection, status: result.status || connection.status };
+  populateConnectionForm();
+  setBanner('connection-banner', t('Connection saved'), 'ok');
+  addLog(t('Connection saved'), 'ok');
+}
+
+async function verifyConnection() {
+  const connection = getConnectionForm();
+  try {
+    await api('verifyMirrorConnection', { connection });
+    state.connection = { ...connection, status: 'verified' };
+    await api('saveMirrorConnection', { connection: state.connection });
+    populateConnectionForm();
+    setBanner('connection-banner', t('Connection verified'), 'ok');
+    addLog(t('Connection verified'), 'ok');
+  } catch (error) {
+    state.connection = { ...connection, status: 'unverified' };
+    populateConnectionForm();
+    setBanner('connection-banner', `${t('Verification failed')}: ${error.message}`, 'error');
+    addLog(`${t('Verification failed')}: ${error.message}`, 'error');
+  }
+}
+
+function stopSchedulerForTable(tableId) {
+  const timer = state.schedulerTimers.get(tableId);
+  if (timer) {
+    clearInterval(timer);
+    state.schedulerTimers.delete(tableId);
+  }
+}
+
+function startSchedulerForTable(table) {
+  stopSchedulerForTable(table.tableId);
+  const timer = setInterval(async () => {
+    try {
+      await window.runTableNow(table.tableId);
+    } catch (error) {
+      addLog(`${t('Mirror run failed')}: ${table.tableName} — ${error.message}`, 'error');
+    }
+  }, Math.max(1, Number(table.intervalMin || 60)) * 60 * 1000);
+  state.schedulerTimers.set(table.tableId, timer);
+}
+
+function startScheduler() {
+  stopScheduler();
+  state.schedulerRunning = true;
+  state.tables.filter((table) => table.active).forEach(startSchedulerForTable);
+  addLog(t('Scheduler started'), 'ok');
+}
+
+function stopScheduler() {
+  state.schedulerTimers.forEach((timer) => clearInterval(timer));
+  state.schedulerTimers.clear();
+  state.schedulerRunning = false;
+  addLog(t('Scheduler stopped'), 'warn');
+}
+
+async function runActiveTables() {
+  const result = await api('runAllActive');
+  let newest = state.lastRunAt;
+  (result.results || []).forEach((row) => {
+    if (row.ok) {
+      addLog(row.skipped ? `${t('Mirror run skipped')}: ${row.tableName}` : `${t('Mirror run completed')}: ${row.tableName}`, row.skipped ? 'warn' : 'ok');
+      if (row.endDateTime) newest = row.endDateTime;
+      const idx = state.tables.findIndex((item) => Number(item.tableId) === Number(row.tableId));
+      if (idx >= 0 && row.endDateTime) state.tables[idx].lastRunAt = row.endDateTime;
+    } else {
+      addLog(`${t('Mirror run failed')}: ${row.tableId} — ${row.error}`, 'error');
+    }
+  });
+  state.lastRunAt = newest;
+  renderTables();
+  refreshMetrics();
+  addLog(t('Run Active Tables finished'), 'ok');
+}
+
+function bindEvents() {
+  document.getElementById('crumb-portal').addEventListener('click', (event) => {
+    event.preventDefault();
+    window.location.href = '/';
+  });
+  document.getElementById('btn-save-connection').addEventListener('click', () => saveConnection().catch(handleUiError));
+  document.getElementById('btn-verify-connection').addEventListener('click', () => verifyConnection().catch(handleUiError));
+  document.getElementById('btn-load-fields').addEventListener('click', () => loadFields().catch(handleUiError));
+  document.getElementById('btn-add-table').addEventListener('click', () => saveTable().catch(handleUiError));
+  document.getElementById('btn-reset-form').addEventListener('click', resetForm);
+  document.getElementById('btn-run-active').addEventListener('click', () => runActiveTables().catch(handleUiError));
+  document.getElementById('btn-refresh').addEventListener('click', () => loadSettings().catch(handleUiError));
+  document.getElementById('btn-start-scheduler').addEventListener('click', startScheduler);
+  document.getElementById('btn-stop-scheduler').addEventListener('click', stopScheduler);
+  document.getElementById('search-input').addEventListener('input', renderTables);
+  document.getElementById('input-all-fields').addEventListener('change', (event) => {
+    state.allFields = event.target.checked;
+    renderFieldPicker();
+  });
+}
+
+function handleUiError(error) {
+  console.error(error);
+  addLog(error.message || String(error), 'error');
+  setBanner('table-banner', error.message || String(error), 'error');
+}
+
+async function init() {
+  if (!state.token || !state.companyId) {
+    window.location.href = '/';
+    return;
+  }
+  await loadUiTranslations();
+  applyTranslations();
+  bindEvents();
+  renderLog();
+  resetForm();
+  await loadSettings();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  init().catch(handleUiError);
+});
+</script>
+</body>
+</html>

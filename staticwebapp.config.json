@@ -15,6 +15,10 @@
     {
       "route": "/sales-assistant",
       "rewrite": "/sales-assistant.html"
+    },
+    {
+      "route": "/mirrors",
+      "rewrite": "/bc-open-mirror.html"
     }
   ],
   "navigationFallback": {
