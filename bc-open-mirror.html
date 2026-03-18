@@ -614,7 +614,6 @@ const CONFIG = {
 };
 
 const state = {
-  token: '',  // Will be loaded in init()
   companyId: '',  // Will be loaded in init()
   lcid: 1033,  // Will be loaded in init()
   uiTranslations: {},
@@ -661,10 +660,12 @@ function escapeHtml(value) {
 }
 
 async function api(action, payload = {}) {
+  const headers = bcSettingsHeaders();
+  if (!headers) throw new Error('Missing Business Central configuration. Reconnect on the start page.');
   const response = await fetch('/api/mirror', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${state.token}`,
+      ...headers,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({ action, companyId: state.companyId, ...payload })
@@ -675,17 +676,11 @@ async function api(action, payload = {}) {
 }
 
 async function loadUiTranslations() {
-  if (state.lcid === 1033) return;
-  try {
-    const response = await fetch(`/api/config?action=getTranslations&source=BC Portal&lcid=${state.lcid}`, {
-      headers: { 'Authorization': `Bearer ${state.token}` }
-    });
-    const data = await response.json();
-    (data.translations || []).forEach((row) => {
-      state.uiTranslations[row.sourceText] = row.targetText;
-    });
-  } catch (error) {
-    console.error(error);
+  const headers = bcSettingsHeaders();
+  if (!headers || !state.companyId || state.lcid === 1033) return;
+  await bcLoadTranslations(state.companyId, state.lcid, UI_STRINGS, headers);
+  if (typeof _uiTranslations === 'object' && _uiTranslations) {
+    state.uiTranslations = _uiTranslations;
   }
 }
 
@@ -827,7 +822,7 @@ async function loadFields() {
   const response = await fetch('/api/mcp', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${state.token}`,
+      ...(bcSettingsHeaders() || {}),
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -1136,10 +1131,9 @@ function handleUiError(error) {
 
 async function init() {
   const settings = bcSettingsLoad();
-  state.token = settings.token || '';
   state.companyId = settings.companyId || '';
   state.lcid = Number(settings.lcid) || 1033;
-  if (!state.token || !state.companyId) {
+  if (!state.companyId || !bcSettingsHeaders()) {
     window.location.href = '/';
     return;
   }

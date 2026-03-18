@@ -7,6 +7,7 @@ const { ClientSecretCredential } = require("@azure/identity");
 const { DataLakeServiceClient } = require("@azure/storage-file-datalake");
 
 const BC_HOST = "api.businesscentral.dynamics.com";
+const MSFT_HOST = "login.microsoftonline.com";
 const SOURCE = "BC Open Mirror";
 const CS_TABLE = "Cloud Events Storage";
 const CI_TABLE = "Cloud Events Integration";
@@ -29,15 +30,18 @@ const SUPPORTED_TYPES = new Set([
   "Time",
 ]);
 
+const _tokenCache = new Map();
+
 module.exports = async function (context, req) {
   try {
     const action = req.body?.action;
-    const companyId = req.body?.companyId;
-    const token = (req.headers?.authorization || "").replace("Bearer ", "");
+    const companyId = req.body?.companyId || req.headers?.["x-bc-company"] || req.headers?.["x-company-id"];
 
-    if (!token) return json(401, { error: "Missing authorization token" });
     if (!companyId) return json(400, { error: "companyId is required" });
     if (!action) return json(400, { error: "action is required" });
+
+    const conn = resolveConn(req.headers || {});
+    const token = await getToken(conn);
 
     let result;
     switch (action) {
@@ -45,36 +49,36 @@ module.exports = async function (context, req) {
         result = getMirrorInfo();
         break;
       case "getSettings":
-        result = await getSettings(token, companyId);
+        result = await getSettings(conn, token, companyId);
         break;
       case "saveMirrorConnection":
-        result = await saveMirrorConnection(token, companyId, req.body?.connection);
+        result = await saveMirrorConnection(conn, token, companyId, req.body?.connection);
         break;
       case "verifyMirrorConnection":
         result = await verifyMirrorConnection(req.body?.connection);
         break;
       case "getTableConfigs":
       case "getCompanyMirrors":
-        result = await getTableConfigs(token, companyId);
+        result = await getTableConfigs(conn, token, companyId);
         break;
       case "saveTableConfigs":
-        result = await saveTableConfigs(token, companyId, req.body?.tables);
+        result = await saveTableConfigs(conn, token, companyId, req.body?.tables);
         break;
       case "activateTable":
-        result = await activateTable(token, companyId, Number(req.body?.tableId));
+        result = await activateTable(conn, token, companyId, Number(req.body?.tableId));
         break;
       case "deactivateTable":
-        result = await deactivateTable(token, companyId, Number(req.body?.tableId));
+        result = await deactivateTable(conn, token, companyId, Number(req.body?.tableId));
         break;
       case "runMirror":
       case "runNow":
-        result = await runMirror(token, companyId, Number(req.body?.tableId));
+        result = await runMirror(conn, token, companyId, Number(req.body?.tableId));
         break;
       case "runAllActive":
-        result = await runAllActive(token, companyId);
+        result = await runAllActive(conn, token, companyId);
         break;
       case "upload-ddl":
-        result = await uploadDdlOnly(token, companyId, Number(req.body?.tableId));
+        result = await uploadDdlOnly(conn, token, companyId, Number(req.body?.tableId));
         break;
       default:
         return json(400, { error: `Unknown action: ${action}` });
@@ -91,11 +95,52 @@ function json(status, body) {
   return { status, headers: { "Content-Type": "application/json" }, body };
 }
 
-function bcEnv() {
-  const tenantId = process.env.BC_TENANT_ID;
-  const environment = process.env.BC_ENVIRONMENT || "production";
-  if (!tenantId) throw new Error("BC_TENANT_ID is missing");
-  return { tenantId, environment };
+function resolveConn(headers = {}) {
+  const tenantId = headers["x-bc-tenant"] || process.env.BC_TENANT_ID;
+  const clientId = headers["x-bc-client-id"] || process.env.BC_CLIENT_ID;
+  const clientSecret = headers["x-bc-client-secret"] || process.env.BC_CLIENT_SECRET;
+  const environment = headers["x-bc-environment"] || process.env.BC_ENVIRONMENT || "production";
+  if (!tenantId || !clientId || !clientSecret) {
+    throw new Error("Missing credentials: provide x-bc-* headers or configure server BC_* environment variables");
+  }
+  return { tenantId, clientId, clientSecret, environment };
+}
+
+async function getToken(conn) {
+  const key = `${conn.tenantId}|${conn.clientId}`;
+  const cached = _tokenCache.get(key);
+  if (cached && Date.now() < cached.expiry - 60_000) return cached.token;
+
+  const form = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: conn.clientId,
+    client_secret: conn.clientSecret,
+    scope: "https://api.businesscentral.dynamics.com/.default",
+  }).toString();
+  const raw = await new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: MSFT_HOST,
+      path: `/${conn.tenantId}/oauth2/v2.0/token`,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": Buffer.byteLength(form, "utf8"),
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    });
+    req.on("error", reject);
+    req.write(form);
+    req.end();
+  });
+
+  const parsed = JSON.parse(raw);
+  if (parsed.error) throw new Error(`Token error (${parsed.error}): ${parsed.error_description || ""}`);
+  if (!parsed.access_token) throw new Error("No access_token returned");
+  _tokenCache.set(key, { token: parsed.access_token, expiry: Date.now() + Number(parsed.expires_in || 3600) * 1000 });
+  return parsed.access_token;
 }
 
 function httpsJson(hostname, path, method, headers, bodyObj) {
@@ -144,8 +189,8 @@ function httpsJson(hostname, path, method, headers, bodyObj) {
   });
 }
 
-async function bcTask(token, companyId, type, subject, data) {
-  const { tenantId, environment } = bcEnv();
+async function bcTask(conn, token, companyId, type, subject, data) {
+  const { tenantId, environment } = conn;
   const envelope = { specversion: "1.0", type, source: SOURCE };
   if (subject !== undefined && subject !== null) envelope.subject = String(subject);
   if (data !== undefined && data !== null) envelope.data = JSON.stringify(data);
@@ -162,12 +207,12 @@ async function bcTask(token, companyId, type, subject, data) {
   return result;
 }
 
-async function dataRecordsGet(token, companyId, payload) {
-  return bcTask(token, companyId, "Data.Records.Get", null, payload);
+async function dataRecordsGet(conn, token, companyId, payload) {
+  return bcTask(conn, token, companyId, "Data.Records.Get", null, payload);
 }
 
-async function dataRecordsSet(token, companyId, tableName, payload) {
-  return bcTask(token, companyId, "Data.Records.Set", tableName, payload);
+async function dataRecordsSet(conn, token, companyId, tableName, payload) {
+  return bcTask(conn, token, companyId, "Data.Records.Set", tableName, payload);
 }
 
 function getEncryptionKey() {
@@ -205,8 +250,8 @@ function decodeStorageData(record) {
   return Buffer.from(blob, "base64").toString("utf8");
 }
 
-async function getConfig(token, companyId, id) {
-  const result = await dataRecordsGet(token, companyId, {
+async function getConfig(conn, token, companyId, id) {
+  const result = await dataRecordsGet(conn, token, companyId, {
     tableName: CS_TABLE,
     tableView: `WHERE(Source=CONST(${SOURCE}),Id=CONST(${id}))`,
     skip: 0,
@@ -217,9 +262,9 @@ async function getConfig(token, companyId, id) {
   return decodeStorageData(rows[0]);
 }
 
-async function setConfig(token, companyId, id, plainText) {
+async function setConfig(conn, token, companyId, id, plainText) {
   const blobValue = Buffer.from(String(plainText), "utf8").toString("base64");
-  await dataRecordsSet(token, companyId, CS_TABLE, {
+  await dataRecordsSet(conn, token, companyId, CS_TABLE, {
     mode: "upsert",
     data: [{
       primaryKey: { Source: SOURCE, Id: id },
@@ -228,27 +273,27 @@ async function setConfig(token, companyId, id, plainText) {
   });
 }
 
-async function getMirrorConnection(token, companyId) {
-  const encrypted = await getConfig(token, companyId, CONFIG_CONN_ID);
+async function getMirrorConnection(conn, token, companyId) {
+  const encrypted = await getConfig(conn, token, companyId, CONFIG_CONN_ID);
   if (!encrypted) return null;
   const parsed = JSON.parse(decryptText(encrypted));
   return parsed;
 }
 
-async function setMirrorConnection(token, companyId, conn) {
+async function setMirrorConnection(connCtx, token, companyId, conn) {
   const ciphertext = encryptText(JSON.stringify(conn));
-  await setConfig(token, companyId, CONFIG_CONN_ID, ciphertext);
+  await setConfig(connCtx, token, companyId, CONFIG_CONN_ID, ciphertext);
 }
 
-async function getStoredTables(token, companyId) {
-  const raw = await getConfig(token, companyId, CONFIG_TABLES_ID);
+async function getStoredTables(conn, token, companyId) {
+  const raw = await getConfig(conn, token, companyId, CONFIG_TABLES_ID);
   if (!raw) return [];
   const parsed = JSON.parse(raw);
   return Array.isArray(parsed) ? parsed : [];
 }
 
-async function setStoredTables(token, companyId, tables) {
-  await setConfig(token, companyId, CONFIG_TABLES_ID, JSON.stringify(tables));
+async function setStoredTables(conn, token, companyId, tables) {
+  await setConfig(conn, token, companyId, CONFIG_TABLES_ID, JSON.stringify(tables));
 }
 
 function normalizeTableConfig(table) {
@@ -282,10 +327,10 @@ function getMirrorInfo() {
   };
 }
 
-async function getSettings(token, companyId) {
+async function getSettings(conn, token, companyId) {
   const [connection, tables] = await Promise.all([
-    getMirrorConnection(token, companyId),
-    getStoredTables(token, companyId),
+    getMirrorConnection(conn, token, companyId),
+    getStoredTables(conn, token, companyId),
   ]);
 
   return {
@@ -326,63 +371,63 @@ function sanitizeConnection(connection) {
   return { mirrorUrl, tenant, clientId, clientSecret, status };
 }
 
-async function saveMirrorConnection(token, companyId, connection) {
+async function saveMirrorConnection(connCtx, token, companyId, connection) {
   const conn = sanitizeConnection(connection);
-  await setMirrorConnection(token, companyId, conn);
+  await setMirrorConnection(connCtx, token, companyId, conn);
   return { saved: true, status: conn.status };
 }
 
-async function getTableConfigs(token, companyId) {
-  const tables = await getStoredTables(token, companyId);
+async function getTableConfigs(conn, token, companyId) {
+  const tables = await getStoredTables(conn, token, companyId);
   return { mirrors: tables, count: tables.length };
 }
 
-async function saveTableConfigs(token, companyId, tables) {
+async function saveTableConfigs(conn, token, companyId, tables) {
   if (!Array.isArray(tables)) throw new Error("tables must be an array");
   const normalized = tables.map(normalizeTableConfig);
-  await setStoredTables(token, companyId, normalized);
+  await setStoredTables(conn, token, companyId, normalized);
   return { saved: true, count: normalized.length, mirrors: normalized };
 }
 
-async function activateTable(token, companyId, tableId) {
+async function activateTable(conn, token, companyId, tableId) {
   if (!tableId) throw new Error("tableId is required");
-  const connection = await getMirrorConnection(token, companyId);
+  const connection = await getMirrorConnection(conn, token, companyId);
   if (!connection || connection.status !== "verified") {
     throw new Error("Mirror connection must be verified before activation");
   }
 
-  const tables = await getStoredTables(token, companyId);
+  const tables = await getStoredTables(conn, token, companyId);
   const idx = tables.findIndex((t) => Number(t.tableId) === Number(tableId));
   if (idx < 0) throw new Error(`Table ${tableId} is not configured`);
 
   const tableCfg = normalizeTableConfig(tables[idx]);
-  await uploadDdl(token, companyId, connection, tableCfg);
+  await uploadDdl(conn, token, companyId, connection, tableCfg);
 
   tableCfg.active = true;
   tables[idx] = tableCfg;
-  await setStoredTables(token, companyId, tables);
+  await setStoredTables(conn, token, companyId, tables);
 
   return { activated: true, tableId, tableName: tableCfg.tableName };
 }
 
-async function deactivateTable(token, companyId, tableId) {
+async function deactivateTable(conn, token, companyId, tableId) {
   if (!tableId) throw new Error("tableId is required");
-  const tables = await getStoredTables(token, companyId);
+  const tables = await getStoredTables(conn, token, companyId);
   const idx = tables.findIndex((t) => Number(t.tableId) === Number(tableId));
   if (idx < 0) throw new Error(`Table ${tableId} is not configured`);
   tables[idx] = { ...normalizeTableConfig(tables[idx]), active: false };
-  await setStoredTables(token, companyId, tables);
+  await setStoredTables(conn, token, companyId, tables);
   return { deactivated: true, tableId };
 }
 
-async function uploadDdlOnly(token, companyId, tableId) {
+async function uploadDdlOnly(conn, token, companyId, tableId) {
   if (!tableId) throw new Error("tableId is required");
-  const connection = await getMirrorConnection(token, companyId);
+  const connection = await getMirrorConnection(conn, token, companyId);
   if (!connection || connection.status !== "verified") throw new Error("Verified mirror connection is required");
-  const tables = await getStoredTables(token, companyId);
+  const tables = await getStoredTables(conn, token, companyId);
   const cfg = tables.find((t) => Number(t.tableId) === Number(tableId));
   if (!cfg) throw new Error(`Table ${tableId} is not configured`);
-  await uploadDdl(token, companyId, connection, normalizeTableConfig(cfg));
+  await uploadDdl(conn, token, companyId, connection, normalizeTableConfig(cfg));
   return { uploaded: true, tableId };
 }
 
@@ -390,8 +435,8 @@ function ciTableView(tableId) {
   return `SORTING(Source,Table Id,Date & Time) ORDER(Descending) WHERE(Source=CONST(${SOURCE}),Table Id=CONST(${tableId}),Reversed=CONST(false))`;
 }
 
-async function getIntegrationTimestamp(token, companyId, tableId) {
-  const result = await dataRecordsGet(token, companyId, {
+async function getIntegrationTimestamp(conn, token, companyId, tableId) {
+  const result = await dataRecordsGet(conn, token, companyId, {
     tableName: CI_TABLE,
     tableView: ciTableView(tableId),
     skip: 0,
@@ -402,8 +447,8 @@ async function getIntegrationTimestamp(token, companyId, tableId) {
   return records[0]?.primaryKey?.DateTime || null;
 }
 
-async function setIntegrationTimestamp(token, companyId, tableId, dateTime) {
-  await dataRecordsSet(token, companyId, CI_TABLE, {
+async function setIntegrationTimestamp(conn, token, companyId, tableId, dateTime) {
+  await dataRecordsSet(conn, token, companyId, CI_TABLE, {
     data: [{
       primaryKey: {
         Source: SOURCE,
@@ -415,8 +460,8 @@ async function setIntegrationTimestamp(token, companyId, tableId, dateTime) {
   });
 }
 
-async function reverseIntegrationTimestamp(token, companyId, tableId) {
-  const result = await dataRecordsGet(token, companyId, {
+async function reverseIntegrationTimestamp(conn, token, companyId, tableId) {
+  const result = await dataRecordsGet(conn, token, companyId, {
     tableName: CI_TABLE,
     tableView: ciTableView(tableId),
     skip: 0,
@@ -427,7 +472,7 @@ async function reverseIntegrationTimestamp(token, companyId, tableId) {
   const dateTime = records[0]?.primaryKey?.DateTime;
   if (!dateTime) return;
 
-  await dataRecordsSet(token, companyId, CI_TABLE, {
+  await dataRecordsSet(conn, token, companyId, CI_TABLE, {
     mode: "modify",
     data: [{
       primaryKey: {
@@ -519,8 +564,8 @@ function mapDdlType(fieldType, fieldLength) {
   }
 }
 
-async function getTableFields(token, companyId, tableRef) {
-  const result = await bcTask(token, companyId, "Help.Fields.Get", String(tableRef), null);
+async function getTableFields(conn, token, companyId, tableRef) {
+  const result = await bcTask(conn, token, companyId, "Help.Fields.Get", String(tableRef), null);
   return result.result || result.value || (Array.isArray(result) ? result : []);
 }
 
@@ -588,8 +633,8 @@ async function uploadTextToMirror(connection, relativePath, content) {
   await fileClient.uploadData(payload, { overwrite: true });
 }
 
-async function uploadDdl(token, companyId, connection, tableCfg) {
-  const fields = await getTableFields(token, companyId, tableCfg.tableName || String(tableCfg.tableId));
+async function uploadDdl(conn, token, companyId, connection, tableCfg) {
+  const fields = await getTableFields(conn, token, companyId, tableCfg.tableName || String(tableCfg.tableId));
   const ddl = buildDdl(tableCfg, fields);
   const ddlPath = pathJoin("Tables", tableCfg.tableName, "_metadata", "DDL.json");
   await uploadTextToMirror(connection, ddlPath, JSON.stringify(ddl, null, 2));
@@ -605,27 +650,27 @@ function extractCsvPayload(result) {
   return "";
 }
 
-async function runMirror(token, companyId, tableId) {
+async function runMirror(conn, token, companyId, tableId) {
   if (!tableId) throw new Error("tableId is required");
 
-  const connection = await getMirrorConnection(token, companyId);
+  const connection = await getMirrorConnection(conn, token, companyId);
   if (!connection || connection.status !== "verified") throw new Error("Verified mirror connection is required");
 
-  const tables = await getStoredTables(token, companyId);
+  const tables = await getStoredTables(conn, token, companyId);
   const tableCfg = tables.map(normalizeTableConfig).find((t) => Number(t.tableId) === Number(tableId));
   if (!tableCfg) throw new Error(`Table ${tableId} is not configured`);
   if (!tableCfg.active) throw new Error(`Table ${tableCfg.tableName} is inactive`);
 
-  const previousTs = await getIntegrationTimestamp(token, companyId, tableCfg.tableId);
+  const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
 
-  await setIntegrationTimestamp(token, companyId, tableCfg.tableId, endIso);
+  await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableId, endIso);
 
   try {
     const runTableView = buildRunTableView(tableCfg, previousTs, endIso);
 
-    const countResult = await dataRecordsGet(token, companyId, {
+    const countResult = await dataRecordsGet(conn, token, companyId, {
       tableName: tableCfg.tableName,
       tableView: runTableView || undefined,
       skip: 0,
@@ -644,7 +689,7 @@ async function runMirror(token, companyId, tableId) {
       };
     }
 
-    const csvResult = await bcTask(token, companyId, "CSV.Records.Get", null, {
+    const csvResult = await bcTask(conn, token, companyId, "CSV.Records.Get", null, {
       tableName: tableCfg.tableName,
       tableView: runTableView || undefined,
       fieldNumbers: tableCfg.fieldNumbers && tableCfg.fieldNumbers.length ? tableCfg.fieldNumbers : undefined,
@@ -670,17 +715,17 @@ async function runMirror(token, companyId, tableId) {
       filePath: csvPath,
     };
   } catch (error) {
-    await reverseIntegrationTimestamp(token, companyId, tableCfg.tableId);
+    await reverseIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
     throw error;
   }
 }
 
-async function runAllActive(token, companyId) {
-  const tables = (await getStoredTables(token, companyId)).map(normalizeTableConfig).filter((t) => t.active);
+async function runAllActive(conn, token, companyId) {
+  const tables = (await getStoredTables(conn, token, companyId)).map(normalizeTableConfig).filter((t) => t.active);
   const results = [];
   for (const table of tables) {
     try {
-      const run = await runMirror(token, companyId, table.tableId);
+      const run = await runMirror(conn, token, companyId, table.tableId);
       results.push({ tableId: table.tableId, ok: true, ...run });
     } catch (error) {
       results.push({ tableId: table.tableId, ok: false, error: error.message });
