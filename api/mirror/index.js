@@ -193,7 +193,29 @@ function httpsJson(hostname, path, method, headers, bodyObj) {
   });
 }
 
-async function bcTask(conn, token, companyId, type, subject, data) {
+function httpsText(hostname, path, headers) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      { hostname, path, method: "GET", headers: { ...headers } },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8");
+          if (res.statusCode >= 400) {
+            reject(new Error(`HTTP ${res.statusCode}: ${raw.slice(0, 400)}`));
+            return;
+          }
+          resolve(raw);
+        });
+      }
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+async function bcTask(conn, token, companyId, type, subject, data, asText = false) {
   const { tenantId, environment } = conn;
   const envelope = { specversion: "1.0", type, source: SOURCE };
   if (subject !== undefined && subject !== null) envelope.subject = String(subject);
@@ -206,6 +228,10 @@ async function bcTask(conn, token, companyId, type, subject, data) {
   if (!task.data || !String(task.data).startsWith("https://")) return task;
 
   const taskUrl = new URL(task.data);
+  if (asText) {
+    const raw = await httpsText(taskUrl.hostname, taskUrl.pathname + taskUrl.search, { Authorization: `Bearer ${token}` });
+    return { data: raw };
+  }
   const result = await httpsJson(taskUrl.hostname, taskUrl.pathname + taskUrl.search, "GET", { Authorization: `Bearer ${token}` }, null);
   if (result.status === "Error") throw new Error(result.error || "BC result failed");
   return result;
@@ -779,7 +805,7 @@ async function runMirror(conn, token, companyId, tableId) {
         ...tableSelector,
         tableView: runTableView || undefined,
         fieldNumbers: tableCfg.fieldNumbers && tableCfg.fieldNumbers.length ? tableCfg.fieldNumbers : undefined,
-      });
+      }, true);
 
       return { noOfRecords, csv: extractCsvPayload(csvResult) };
     });
