@@ -319,6 +319,24 @@ Copy the GUID of the company you want and paste it into `x-company-id` in `.vsco
 **Files**:
 - `SPECIFICATION.md` - Complete implementation guide for Claude chat over MCP
 
+---
+
+### Requirement 13: Global Top Bar + API Key Center
+**Folder**: `requirement-13-global-topbar-and-api-key-center/`
+**Status**: ✅ Implemented
+**Description**: Introduce a consistent top bar across all pages with `Home`, `Connected`, and `API Key` controls, and centralize API key management in a dedicated page. Remove page-local API key entry from AI Sales Assistant and Claude MCP Chat.
+
+**Key Features**:
+- Shared top-bar UX contract across all feature pages
+- Dedicated API key settings page (`api-key-settings.html`)
+- Removal of inline API key editors from `sales-assistant.html` and `claude-mcp-chat.html`
+- Unified Claude API key (localStorage) consumed by both assistants
+- Cross-page connection status visibility using existing `settings.js`
+- Same top-bar controls also on `index.html`
+
+**Files**:
+- `SPECIFICATION.md` - Complete implementation guide with UX contract, scope, implementation plan, and test checklist
+
 
 
 

@@ -23,6 +23,10 @@
     {
       "route": "/claude-mcp-chat",
       "rewrite": "/claude-mcp-chat.html"
+    },
+    {
+      "route": "/api-key-settings",
+      "rewrite": "/api-key-settings.html"
     }
   ],
   "navigationFallback": {

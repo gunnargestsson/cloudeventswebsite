@@ -35,7 +35,7 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
 .hbtn.ghost:hover{border-color:var(--accent2);color:var(--accent)}
 
 /* ── LAYOUT ── */
-.workspace{display:grid;grid-template-columns:340px 1fr;flex:1;overflow:hidden}
+.workspace{display:flex;flex:1;overflow:hidden}
 
 /* ── SETTINGS PANEL ── */
 .settings-panel{border-right:1px solid var(--border);background:var(--bg2);display:flex;flex-direction:column;overflow-y:auto}
@@ -149,30 +149,12 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
     <div class="hsub">Origo · Business Central · Claude</div>
   </div>
   <div class="hsp"></div>
-  <button class="hpill" onclick="toggleSettings()" id="settingsToggle" data-t="⚙ API Key">⚙ API Key</button>
-  <a href="index.html" class="hpill" data-t="← Home">← Home</a>
+  <a href="index.html" class="hpill" data-t="Home">Home</a>
+  <a href="index.html" class="hpill" id="connPill"><div class="sd" id="connDot"></div><span id="connText" data-t="Not connected">Not connected</span></a>
+  <a href="api-key-settings.html" class="hpill" data-t="API Key">API Key</a>
 </header>
 
 <div class="workspace">
-
-  <!-- ── SETTINGS PANEL ─────────────────────────────────────────────── -->
-  <aside class="settings-panel" id="settingsPanel">
-    <div class="sp-head">
-      <div class="sp-title" data-t="Claude API Key">Claude API Key</div>
-      <div class="sp-sub" data-t="Stored in localStorage — never sent to our server">Stored in localStorage — never sent to our server</div>
-    </div>
-    <div class="sp-body">
-      <div class="sp-section">
-        <div>
-          <div class="lbl" data-t="API Key">API Key</div>
-          <input class="ci" type="password" id="cfgClaudeKey" placeholder="sk-ant-…" autocomplete="off">
-          <div class="key-note" data-t="Stored in localStorage — persists across sessions">Stored in localStorage — persists across sessions</div>
-        </div>
-        <button class="save-btn" onclick="saveClaudeKey()" data-t="Save Key">Save Key</button>
-        <div class="save-ok hidden" id="saveOk" data-t="✓ Key saved">✓ Key saved</div>
-      </div>
-    </div>
-  </aside>
 
   <!-- ── MAIN AREA ─────────────────────────────────────────────────── -->
   <div class="main-area" id="mainArea">
@@ -221,11 +203,7 @@ const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',
 
 const UI_STRINGS = [
   // Header
-  'AI Sales Assistant', '⚙ API Key', '← Home',
-  // Settings panel
-  'Claude API Key', 'Stored in localStorage — never sent to our server',
-  'API Key', 'Stored in localStorage — persists across sessions',
-  'Save Key', '✓ Key saved',
+  'AI Sales Assistant', 'Home', 'API Key', 'Connected', 'Not connected',
   // Upload zone
   '📎 Drop PDF, Excel, email or image — or click to browse',
   'Processing file',
@@ -256,7 +234,7 @@ const UI_STRINGS = [
   // New order message
   'Ready for a new order. What would you like to order?',
   // Error messages (used in t() calls)
-  'Please enter your Claude API key first.',
+  'Please set your Claude API key on the API Key page first.',
   'Order cancelled. How would you like to adjust it?',
   'Error creating order: {0}',
   'Network error: {0}',
@@ -288,81 +266,7 @@ function getActiveLcid() {
 }
 
 function loadSettings() {
-  const saved = bcClaudeApiKeyLoad();
-  if (saved) document.getElementById('cfgClaudeKey').value = saved;
-}
-
-function saveClaudeKey() {
-  const key = document.getElementById('cfgClaudeKey').value.trim();
-  bcClaudeApiKeySave(key);
-  const ok = document.getElementById('saveOk');
-  ok.classList.remove('hidden');
-  setTimeout(() => ok.classList.add('hidden'), 2500);
-}
-
-function saveSettings() {
-  bcSettingsSave({
-    tenant:       document.getElementById('cfgTenant').value.trim(),
-    env:          document.getElementById('cfgEnv').value.trim(),
-    clientId:     document.getElementById('cfgClientId').value.trim(),
-    clientSecret: document.getElementById('cfgClientSecret').value.trim(),
-  });
-  const claudeVal = document.getElementById('cfgClaudeKey').value.trim();
-  bcClaudeApiKeySave(claudeVal);
-  const ok = document.getElementById('saveOk');
-  ok.classList.remove('hidden');
-  setTimeout(() => ok.classList.add('hidden'), 2500);
-}
-
-function onSettingInput() {
-  bcSettingsSave({
-    tenant:       document.getElementById('cfgTenant').value.trim(),
-    env:          document.getElementById('cfgEnv').value.trim(),
-    clientId:     document.getElementById('cfgClientId').value.trim(),
-    clientSecret: document.getElementById('cfgClientSecret').value.trim(),
-  });
-}
-
-async function loadSettingsCompanies() {
-  const s = bcSettingsLoad();
-  if (!s.tenant || !s.env || !s.clientId || !s.clientSecret) {
-    document.getElementById('settingsStatus').textContent = 'Fill in tenant, env, client ID, and secret first.';
-    return;
-  }
-  document.getElementById('settingsStatus').textContent = 'Loading companies…';
-  try {
-    const res = await fetch('/api/companies', {
-      headers: {
-        'x-bc-tenant':        s.tenant,
-        'x-bc-client-id':     s.clientId,
-        'x-bc-client-secret': s.clientSecret,
-        'x-bc-environment':   s.env,
-      },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const companies = data.companies || [];
-    const sel = document.getElementById('cfgCompany');
-    const prevId = bcSettingsLoad().companyId;
-    sel.innerHTML = `<option value="">— select a company —</option>` +
-      companies.map(c => `<option value="${c.id}"${c.id === prevId ? ' selected' : ''}>${c.name}</option>`).join('');
-    if (!prevId && companies.length === 1) { sel.value = companies[0].id; onCompanySelect(); }
-    document.getElementById('settingsStatus').textContent = `${companies.length} companies loaded`;
-  } catch (e) {
-    document.getElementById('settingsStatus').textContent = `Error: ${e.message}`;
-  }
-}
-
-function onCompanySelect() {
-  const sel = document.getElementById('cfgCompany');
-  const companyId   = sel.value;
-  const companyName = sel.options[sel.selectedIndex]?.text || '';
-  bcSettingsSave({ companyId, companyName });
-  document.getElementById('settingsStatus').textContent = companyId ? `Company: ${companyName}` : '';
-}
-
-function toggleSettings() {
-  document.getElementById('settingsPanel').classList.toggle('hidden');
+  // No inline key editor on this page. Key is managed on api-key-settings.html.
 }
 
 function getConfig() {
@@ -380,6 +284,14 @@ function getConfig() {
       } : {}),
     },
   };
+}
+
+function updateConnectionPill() {
+  const ready = bcSettingsReady();
+  const dot = document.getElementById('connDot');
+  const text = document.getElementById('connText');
+  if (dot) dot.className = 'sd ' + (ready ? 'ok' : 'err');
+  if (text) text.textContent = ready ? t('Connected') : t('Not connected');
 }
 
 function configOk() {
@@ -424,8 +336,8 @@ function showThinking(show) {
 async function sendMessage(overrideText) {
   if (isBusy) return;
   if (!configOk()) {
-    document.getElementById('settingsPanel').classList.remove('hidden');
-    alert(t('Please enter your Claude API key first.'));
+    alert(t('Please set your Claude API key on the API Key page first.'));
+    window.location.href = 'api-key-settings.html';
     return;
   }
   const input = document.getElementById('chatInput');
@@ -458,8 +370,8 @@ function handleFileChange(e) {
 
 async function uploadFile(file) {
   if (!configOk()) {
-    document.getElementById('settingsPanel').classList.remove('hidden');
-    alert(t('Please enter your Claude API key first.'));
+    alert(t('Please set your Claude API key on the API Key page first.'));
+    window.location.href = 'api-key-settings.html';
     return;
   }
   if (isBusy) return;
@@ -580,8 +492,8 @@ async function _callChatApi() {
 async function sendMessage(overrideText) {
   if (isBusy) return;
   if (!configOk()) {
-    document.getElementById('settingsPanel').classList.remove('hidden');
-    alert(t('Please enter your Claude API key first.'));
+    alert(t('Please set your Claude API key on the API Key page first.'));
+    window.location.href = 'api-key-settings.html';
     return;
   }
 
@@ -742,11 +654,8 @@ function startNew() {
   if(!bcSettingsReady()){ location.href='index.html'; return; }
   loadSettings();
   // Load translations then apply them
-  loadUiTranslations().then(applyUiTranslations);
-  // Auto-collapse key panel if key is already saved
-  if (bcClaudeApiKeyLoad()) {
-    document.getElementById('settingsPanel').classList.add('hidden');
-  }
+  loadUiTranslations().then(() => { applyUiTranslations(); updateConnectionPill(); });
+  updateConnectionPill();
 })();
 </script>
 </body>

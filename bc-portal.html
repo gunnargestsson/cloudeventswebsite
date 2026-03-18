@@ -407,6 +407,7 @@
         <div class="status-dot" id="status-dot"></div>
         <span id="status-label">Initialising...</span>
       </div>
+      <a href="api-key-settings.html" style="display:flex;align-items:center;gap:6px;padding:5px 14px;background:var(--surface);border:1px solid var(--border);border-radius:99px;font-size:0.72rem;color:var(--text-mid);text-decoration:none;transition:border-color 0.2s,color 0.2s" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-mid)'">API Key</a>
     </div>
   </header>
 
@@ -981,6 +982,18 @@ function pageSize() { return 20; }
 function fmt(n) { return (parseFloat(n)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function fmtDate(d) { if (!d || d === '0001-01-01') return '—'; return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
 function initials(s) { if (!s) return '?'; return s.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase(); }
+const AIR_ATLANTA_LOGO_URL = 'https://airatlanta.com/wp-content/uploads/2025/01/Air-Atlanta-Logo.svg';
+
+function getCustomerImageSrc(customer) {
+  if (!customer) return null;
+  if (customer.image) {
+    if (typeof customer.image === 'string' && /^https?:\/\//i.test(customer.image)) return customer.image;
+    return `data:image/jpeg;base64,${customer.image}`;
+  }
+  const name = (customer.displayName || '').toLowerCase();
+  if (name.includes('air atlanta')) return AIR_ATLANTA_LOGO_URL;
+  return null;
+}
 
 // ---- LANGUAGE ----
 // Load ALL languages from Language table for customer dropdown
@@ -1166,7 +1179,7 @@ function renderCustomers(list) {
   }
   document.getElementById('customer-grid').innerHTML = list.map(c => `
     <div class="customer-card" onclick="selectCustomer('${c.id}')">
-      <div class="cust-avatar">${c.image ? `<img src="data:image/jpeg;base64,${c.image}" alt="">` : initials(c.displayName)}</div>
+      <div class="cust-avatar">${getCustomerImageSrc(c) ? `<img src="${getCustomerImageSrc(c)}" alt="">` : initials(c.displayName)}</div>
       <div class="cust-name">${c.displayName||'—'}</div>
       <div class="cust-no"># ${c.number||'—'}</div>
       <div class="cust-meta">
@@ -1191,8 +1204,9 @@ async function selectCustomer(id) {
   if (!selectedCustomer) return;
   document.getElementById('crumb-customer').textContent = selectedCustomer.displayName;
   const bannerAv = document.getElementById('banner-avatar');
-  if (selectedCustomer.image) {
-    bannerAv.innerHTML = `<img src="data:image/jpeg;base64,${selectedCustomer.image}" alt="">`;
+  const imageSrc = getCustomerImageSrc(selectedCustomer);
+  if (imageSrc) {
+    bannerAv.innerHTML = `<img src="${imageSrc}" alt="">`;
   } else {
     bannerAv.textContent = initials(selectedCustomer.displayName);
   }

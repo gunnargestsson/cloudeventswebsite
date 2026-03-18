@@ -64,6 +64,18 @@
   }
   .logo-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .logo span { color: var(--text-dim); font-weight: 400; font-size: 0.78rem; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .pill {
+    display: flex; align-items: center; gap: 7px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 99px; padding: 5px 14px;
+    font-size: 0.72rem; color: var(--text-mid); text-decoration: none;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .pill:hover { border-color: var(--accent); color: var(--text); }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); }
+  .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .status-dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); }
 
   main { flex: 1; padding: 32px; max-width: 680px; margin: 0 auto; width: 100%; }
 
@@ -171,6 +183,11 @@
       <div class="logo-icon"><img src="origo.jpeg" alt="Origo"></div>
       BC Portal <span>/ Business Central</span>
     </a>
+    <div class="header-right">
+      <a href="index.html" class="pill" data-t="Home">Home</a>
+      <a href="index.html" class="pill"><span class="status-dot" id="top-conn-dot"></span><span id="top-conn-label" data-t="Not connected">Not connected</span></a>
+      <a href="api-key-settings.html" class="pill" data-t="API Key">API Key</a>
+    </div>
   </header>
 
   <main>
@@ -261,7 +278,7 @@
 
 <script>
 const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',1036:'French',1034:'Spanish',1043:'Dutch',1053:'Swedish',1044:'Norwegian'};
-const UI_STRINGS = ['Open Mirror', 'Mirror Business Central tables', 'Claude Chat', 'Chat with Claude using Business Central MCP tools'];
+const UI_STRINGS = ['Home', 'API Key', 'Connected', 'Not connected', 'Open Mirror', 'Mirror Business Central tables', 'Claude Chat', 'Chat with Claude using Business Central MCP tools'];
 
 async function loadUiTranslations() {
   const settings = bcSettingsLoad();
@@ -272,6 +289,7 @@ async function loadUiTranslations() {
 }
 
 function applyUiTranslations() {
+  document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
   const title = document.getElementById('nav-open-mirror-title');
   const desc = document.getElementById('nav-open-mirror-desc');
   const claudeTitle = document.getElementById('nav-claude-chat-title');
@@ -280,6 +298,14 @@ function applyUiTranslations() {
   if (desc) desc.textContent = t('Mirror Business Central tables');
   if (claudeTitle) claudeTitle.textContent = t('Claude Chat');
   if (claudeDesc) claudeDesc.textContent = t('Chat with Claude using Business Central MCP tools');
+}
+
+function updateTopBarConnection() {
+  const ready = bcSettingsReady();
+  const dot = document.getElementById('top-conn-dot');
+  const label = document.getElementById('top-conn-label');
+  if (dot) dot.className = 'status-dot ' + (ready ? 'connected' : 'error');
+  if (label) label.textContent = ready ? t('Connected') : t('Not connected');
 }
 
 // ── MODE ───────────────────────────────────────────────────────────────────────
@@ -354,6 +380,7 @@ async function onCompanyChange(saveNow = true) {
     showStatus('Connected as ' + (name || id), 'ok');
     document.getElementById('nav-section').style.display = '';
   }
+  updateTopBarConnection();
 }
 
 // ── LANGUAGE ──────────────────────────────────────────────────────────────────
@@ -391,11 +418,13 @@ function connect() {
       clientSecret: document.getElementById('s-client-secret').value.trim(),
     });
     loadCompanies();
+    updateTopBarConnection();
     return;
   }
   // server mode — just trigger selection save if company is already chosen
   const sel = document.getElementById('s-company');
   if (sel.value) onCompanyChange();
+  updateTopBarConnection();
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -437,6 +466,7 @@ window.onload = async () => {
     showStatus('Connected as ' + (bcSettingsLoad().companyName || '…'), 'ok');
     document.getElementById('nav-section').style.display = '';
   }
+  updateTopBarConnection();
 };
 </script>
 </body>

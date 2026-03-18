@@ -6,6 +6,10 @@ const { format } = require("date-fns");
 const { ClientSecretCredential } = require("@azure/identity");
 const { DataLakeServiceClient } = require("@azure/storage-file-datalake");
 
+if (!globalThis.crypto || !globalThis.crypto.subtle) {
+  globalThis.crypto = crypto.webcrypto;
+}
+
 const BC_HOST = "api.businesscentral.dynamics.com";
 const MSFT_HOST = "login.microsoftonline.com";
 const SOURCE = "BC Open Mirror";

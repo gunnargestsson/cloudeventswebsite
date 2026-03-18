@@ -73,6 +73,7 @@
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); transition: background 0.2s, box-shadow 0.2s; }
   .status-dot.busy { background: var(--amber); box-shadow: 0 0 10px rgba(245,166,35,0.55); }
   .status-dot.ready { background: var(--green); box-shadow: 0 0 10px rgba(39,192,138,0.55); }
+  .status-dot.error { background: var(--red); box-shadow: 0 0 10px rgba(242,95,92,0.55); }
   main {
     flex: 1; min-height: 0; padding: 28px;
     display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(300px, 0.9fr); gap: 18px;
@@ -116,7 +117,7 @@
     border-radius: 50%; animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .composer { border-top: 1px solid var(--border); padding: 16px; display: grid; grid-template-columns: 1fr auto auto; gap: 10px; }
+  .composer { border-top: 1px solid var(--border); padding: 16px; display: grid; grid-template-columns: 1fr auto; gap: 10px; }
   textarea {
     width: 100%; min-height: 48px; max-height: 160px; resize: vertical;
     background: var(--surface2); border: 1px solid var(--border);
@@ -167,7 +168,9 @@
     </a>
     <div class="header-actions">
       <div class="pill"><span class="status-dot ready" id="statusDot"></span><span id="statusText" data-t="Ready">Ready</span></div>
-      <a href="index.html" class="pill" data-t="← Home">← Home</a>
+      <a href="index.html" class="pill"><span class="status-dot" id="connDot"></span><span id="connText" data-t="Not connected">Not connected</span></a>
+      <a href="index.html" class="pill" data-t="Home">Home</a>
+      <a href="api-key-settings.html" class="pill" data-t="API Key">API Key</a>
     </div>
   </header>
 
@@ -187,7 +190,6 @@
 
       <div class="composer">
         <textarea id="messageInput" data-tp="Type your message" placeholder="Type your message" onkeydown="handleComposerKeydown(event)"></textarea>
-        <button class="btn secondary" id="saveKeyBtn" onclick="saveApiKey()" data-t="Save key">Save key</button>
         <button class="btn" id="sendBtn" onclick="sendMessage()" data-t="Send">Send</button>
       </div>
     </section>
@@ -205,16 +207,6 @@
         </div>
       </div>
 
-      <div class="stack">
-        <div class="stack-title" data-t="Claude API Key">Claude API Key</div>
-        <div class="field">
-          <label for="apiKeyInput" data-t="API Key">API Key</label>
-          <input id="apiKeyInput" type="password" placeholder="sk-ant-..." autocomplete="off" />
-        </div>
-        <div class="small-note" data-t="Stored in localStorage — persists across sessions">Stored in localStorage — persists across sessions</div>
-        <div class="save-indicator" id="saveIndicator"></div>
-      </div>
-
       <div class="stack" style="flex:1; min-height: 0; display:flex; flex-direction:column;">
         <div class="stack-title" data-t="Tool activity">Tool activity</div>
         <div class="tool-list" id="toolList"></div>
@@ -227,29 +219,26 @@
 const UI_STRINGS = [
   'Claude Chat',
   'Ready',
-  '← Home',
+  'Home',
+  'API Key',
+  'Connected',
+  'Not connected',
   'Claude can use live Business Central MCP tools from this page.',
   'Clear chat',
   'Ask about Business Central data, metadata, message types, or translations. Claude will use MCP tools when needed.',
-  'Connected',
   'Type your message',
-  'Save key',
   'Send',
   'Connection',
   'Mode',
   'Company',
   'Language',
-  'Claude API Key',
-  'API Key',
-  'Stored in localStorage — persists across sessions',
   'Tool activity',
   'No tool calls yet',
   'Server mode',
   'Custom mode',
   'Thinking',
-  'Key saved',
   'Select a Business Central connection on the home page first.',
-  'Please enter your Claude API key first.',
+  'Please set your Claude API key on the API Key page first.',
   'Could not load Business Central tools.',
   'Claude could not complete one of the Business Central tool calls.',
   'Claude did not respond successfully.',
@@ -339,9 +328,14 @@ function renderToolHistory() {
 function renderConnectionSummary() {
   const settings = bcSettingsLoad();
   const mode = localStorage.getItem('bc_portal_mode') || 'server';
+  const ready = bcSettingsReady();
   document.getElementById('connMode').textContent = getModeLabel(mode);
   document.getElementById('connCompany').textContent = settings.companyName || settings.companyId || '';
   document.getElementById('connLanguage').textContent = LANGUAGE_NAMES[Number(settings.lcid) || 1033] || `LCID ${settings.lcid || 1033}`;
+  const dot = document.getElementById('connDot');
+  const text = document.getElementById('connText');
+  dot.className = 'status-dot ' + (ready ? 'ready' : 'error');
+  text.textContent = ready ? t('Connected') : t('Not connected');
 }
 
 function setBusy(nextBusy) {
@@ -382,12 +376,6 @@ async function loadTranslations() {
   applyUiTranslations();
 }
 
-function saveApiKey() {
-  bcClaudeApiKeySave(document.getElementById('apiKeyInput').value.trim());
-  document.getElementById('saveIndicator').textContent = t('Key saved');
-  setTimeout(() => { document.getElementById('saveIndicator').textContent = ''; }, 2000);
-}
-
 function appendMessage(role, text) {
   messages.push({ role, text, timestamp: new Date().toISOString() });
   saveState();
@@ -413,11 +401,11 @@ function clearChat() {
 async function sendMessage() {
   if (isBusy) return;
   const input = document.getElementById('messageInput');
-  const apiKey = (document.getElementById('apiKeyInput').value || '').trim();
+  const apiKey = bcClaudeApiKeyLoad();
   const text = input.value.trim();
   if (!text) return;
   if (!apiKey) {
-    appendMessage('assistant', t('Please enter your Claude API key first.'));
+    appendMessage('assistant', t('Please set your Claude API key on the API Key page first.'));
     return;
   }
 
@@ -456,7 +444,6 @@ window.onload = async () => {
     return;
   }
 
-  document.getElementById('apiKeyInput').value = bcClaudeApiKeyLoad();
   loadState();
   await loadTranslations();
   renderConnectionSummary();
