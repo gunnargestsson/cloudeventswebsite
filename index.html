@@ -249,6 +249,11 @@
           <div class="nav-card-title" id="nav-open-mirror-title">Open Mirror</div>
           <div class="nav-card-desc" id="nav-open-mirror-desc">Mirror Business Central tables</div>
         </a>
+        <a href="claude-mcp-chat.html" class="nav-card">
+          <div class="nav-card-icon">💬</div>
+          <div class="nav-card-title" id="nav-claude-chat-title">Claude Chat</div>
+          <div class="nav-card-desc" id="nav-claude-chat-desc">Chat with Claude using Business Central MCP tools</div>
+        </a>
       </div>
     </div>
   </main>
@@ -256,33 +261,25 @@
 
 <script>
 const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',1036:'French',1034:'Spanish',1043:'Dutch',1053:'Swedish',1044:'Norwegian'};
-const UI_STRINGS = ['Open Mirror', 'Mirror Business Central tables'];
-let uiTranslations = {};
+const UI_STRINGS = ['Open Mirror', 'Mirror Business Central tables', 'Claude Chat', 'Chat with Claude using Business Central MCP tools'];
 
 async function loadUiTranslations() {
-  const lcid = parseInt(localStorage.getItem('bc_portal_lcid') || '1033', 10);
-  if (lcid === 1033) return;
-  try {
-    const response = await fetch(`/api/config?action=getTranslations&source=BC Portal&lcid=${lcid}`);
-    if (!response.ok) return;
-    const data = await response.json();
-    (data.translations || []).forEach((row) => {
-      uiTranslations[row.sourceText] = row.targetText;
-    });
-  } catch (e) {
-    console.error('Translation load error:', e);
+  const settings = bcSettingsLoad();
+  const headers = bcSettingsHeaders();
+  if (settings.companyId && headers) {
+    await bcLoadTranslations(settings.companyId, parseInt(settings.lcid || '1033', 10), UI_STRINGS, headers);
   }
-}
-
-function t(key) {
-  return uiTranslations[key] || key;
 }
 
 function applyUiTranslations() {
   const title = document.getElementById('nav-open-mirror-title');
   const desc = document.getElementById('nav-open-mirror-desc');
+  const claudeTitle = document.getElementById('nav-claude-chat-title');
+  const claudeDesc = document.getElementById('nav-claude-chat-desc');
   if (title) title.textContent = t('Open Mirror');
   if (desc) desc.textContent = t('Mirror Business Central tables');
+  if (claudeTitle) claudeTitle.textContent = t('Claude Chat');
+  if (claudeDesc) claudeDesc.textContent = t('Chat with Claude using Business Central MCP tools');
 }
 
 // ── MODE ───────────────────────────────────────────────────────────────────────

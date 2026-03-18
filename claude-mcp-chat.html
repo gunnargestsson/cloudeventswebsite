@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BC Portal – Claude Chat</title>
+<script src="settings.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0d14;
+    --surface: #111520;
+    --surface2: #171d2e;
+    --surface3: #0d1220;
+    --border: #1e2640;
+    --border-bright: #2d3a5e;
+    --accent: #4f7fff;
+    --accent2: #7c5cfc;
+    --accent-glow: rgba(79,127,255,0.18);
+    --text: #e8ecf5;
+    --text-dim: #6b7799;
+    --text-mid: #9ba8c8;
+    --green: #27c08a;
+    --red: #f25f5c;
+    --amber: #f5a623;
+    --radius: 12px;
+    --radius-sm: 7px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    overflow: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(79,127,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79,127,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+  #app { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 100vh; }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 28px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,13,20,0.85);
+    backdrop-filter: blur(12px);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.15rem; letter-spacing: -0.02em;
+    text-decoration: none; color: inherit;
+  }
+  .logo-icon {
+    width: 34px; height: 34px; border-radius: 9px; overflow: hidden; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .logo span { color: var(--text-dim); font-weight: 400; font-size: 0.78rem; }
+  .header-actions { display: flex; align-items: center; gap: 12px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text-mid); font-size: 0.72rem; text-decoration: none;
+  }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); transition: background 0.2s, box-shadow 0.2s; }
+  .status-dot.busy { background: var(--amber); box-shadow: 0 0 10px rgba(245,166,35,0.55); }
+  .status-dot.ready { background: var(--green); box-shadow: 0 0 10px rgba(39,192,138,0.55); }
+  main {
+    flex: 1; min-height: 0; padding: 28px;
+    display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(300px, 0.9fr); gap: 18px;
+  }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); min-height: 0; }
+  .chat-panel { display: flex; flex-direction: column; overflow: hidden; }
+  .panel-head {
+    padding: 18px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .panel-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.1rem; }
+  .panel-subtitle { color: var(--text-dim); font-size: 0.74rem; margin-top: 4px; }
+  .panel-actions { display: flex; gap: 10px; }
+  .btn {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border: none; border-radius: var(--radius-sm);
+    color: #fff; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.82rem;
+    padding: 10px 18px; cursor: pointer; transition: opacity 0.2s, transform 0.15s;
+  }
+  .btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+  .btn.secondary { background: var(--surface2); border: 1px solid var(--border); color: var(--text); }
+  .messages { flex: 1; min-height: 0; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .message { max-width: 86%; display: flex; flex-direction: column; gap: 6px; }
+  .message.user { align-self: flex-end; }
+  .message.assistant { align-self: flex-start; }
+  .bubble {
+    padding: 12px 14px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+    font-size: 0.82rem; border-radius: 16px;
+  }
+  .message.user .bubble { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; border-top-right-radius: 4px; }
+  .message.assistant .bubble { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-top-left-radius: 4px; }
+  .meta { color: var(--text-dim); font-size: 0.68rem; }
+  .thinking {
+    align-self: flex-start; display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 12px; border: 1px solid var(--border); background: var(--surface3);
+    border-radius: 14px; color: var(--text-mid); font-size: 0.75rem;
+  }
+  .spinner {
+    width: 12px; height: 12px; border: 2px solid var(--border-bright); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .composer { border-top: 1px solid var(--border); padding: 16px; display: grid; grid-template-columns: 1fr auto auto; gap: 10px; }
+  textarea {
+    width: 100%; min-height: 48px; max-height: 160px; resize: vertical;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text);
+    font-family: inherit; font-size: 0.82rem; padding: 12px 14px; outline: none;
+  }
+  textarea:focus, input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  textarea::placeholder, input::placeholder { color: var(--text-dim); }
+  .sidebar { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+  .stack { padding: 18px; }
+  .stack + .stack { border-top: 1px solid var(--border); }
+  .stack-title { font-family: 'Syne', sans-serif; font-size: 0.96rem; font-weight: 700; margin-bottom: 10px; }
+  .kv { display: grid; grid-template-columns: 112px 1fr; gap: 8px 12px; font-size: 0.74rem; }
+  .kv-label { color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
+  .kv-value { color: var(--text-mid); word-break: break-word; }
+  .field { margin-top: 12px; }
+  .field label { display: block; color: var(--text-dim); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+  input {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text); font-family: inherit;
+    font-size: 0.8rem; padding: 10px 12px; outline: none;
+  }
+  .small-note { color: var(--text-dim); font-size: 0.7rem; line-height: 1.5; margin-top: 8px; }
+  .save-indicator { color: var(--green); font-size: 0.74rem; margin-top: 8px; min-height: 18px; }
+  .tool-list { display: flex; flex-direction: column; gap: 10px; max-height: 100%; overflow-y: auto; padding-right: 4px; }
+  .tool-empty { color: var(--text-dim); font-size: 0.76rem; line-height: 1.5; }
+  .tool-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 0.76rem; }
+  .tool-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .tool-name { color: var(--text); font-weight: 500; }
+  .tool-status { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.66rem; }
+  .tool-status.success { color: var(--green); }
+  .tool-status.error { color: var(--red); }
+  .tool-meta { color: var(--text-dim); margin-top: 8px; }
+  .tool-error { color: var(--red); margin-top: 8px; line-height: 1.45; }
+  @media (max-width: 980px) {
+    body { overflow: auto; }
+    main { grid-template-columns: 1fr; }
+    .composer { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <a href="index.html" class="logo">
+      <div class="logo-icon"><img src="origo.jpeg" alt="Origo"></div>
+      BC Portal <span data-t="Claude Chat">Claude Chat</span>
+    </a>
+    <div class="header-actions">
+      <div class="pill"><span class="status-dot ready" id="statusDot"></span><span id="statusText" data-t="Ready">Ready</span></div>
+      <a href="index.html" class="pill" data-t="← Home">← Home</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel chat-panel">
+      <div class="panel-head">
+        <div>
+          <div class="panel-title" data-t="Claude Chat">Claude Chat</div>
+          <div class="panel-subtitle" data-t="Claude can use live Business Central MCP tools from this page.">Claude can use live Business Central MCP tools from this page.</div>
+        </div>
+        <div class="panel-actions">
+          <button class="btn secondary" id="clearBtn" onclick="clearChat()" data-t="Clear chat">Clear chat</button>
+        </div>
+      </div>
+
+      <div class="messages" id="messages"></div>
+
+      <div class="composer">
+        <textarea id="messageInput" data-tp="Type your message" placeholder="Type your message" onkeydown="handleComposerKeydown(event)"></textarea>
+        <button class="btn secondary" id="saveKeyBtn" onclick="saveApiKey()" data-t="Save key">Save key</button>
+        <button class="btn" id="sendBtn" onclick="sendMessage()" data-t="Send">Send</button>
+      </div>
+    </section>
+
+    <aside class="panel sidebar">
+      <div class="stack">
+        <div class="stack-title" data-t="Connection">Connection</div>
+        <div class="kv">
+          <div class="kv-label" data-t="Mode">Mode</div>
+          <div class="kv-value" id="connMode"></div>
+          <div class="kv-label" data-t="Company">Company</div>
+          <div class="kv-value" id="connCompany"></div>
+          <div class="kv-label" data-t="Language">Language</div>
+          <div class="kv-value" id="connLanguage"></div>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="stack-title" data-t="Claude API Key">Claude API Key</div>
+        <div class="field">
+          <label for="apiKeyInput" data-t="API Key">API Key</label>
+          <input id="apiKeyInput" type="password" placeholder="sk-ant-..." autocomplete="off" />
+        </div>
+        <div class="small-note" data-t="Stored in localStorage — persists across sessions">Stored in localStorage — persists across sessions</div>
+        <div class="save-indicator" id="saveIndicator"></div>
+      </div>
+
+      <div class="stack" style="flex:1; min-height: 0; display:flex; flex-direction:column;">
+        <div class="stack-title" data-t="Tool activity">Tool activity</div>
+        <div class="tool-list" id="toolList"></div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script>
+const UI_STRINGS = [
+  'Claude Chat',
+  'Ready',
+  '← Home',
+  'Claude can use live Business Central MCP tools from this page.',
+  'Clear chat',
+  'Ask about Business Central data, metadata, message types, or translations. Claude will use MCP tools when needed.',
+  'Connected',
+  'Type your message',
+  'Save key',
+  'Send',
+  'Connection',
+  'Mode',
+  'Company',
+  'Language',
+  'Claude API Key',
+  'API Key',
+  'Stored in localStorage — persists across sessions',
+  'Tool activity',
+  'No tool calls yet',
+  'Server mode',
+  'Custom mode',
+  'Thinking',
+  'Key saved',
+  'Select a Business Central connection on the home page first.',
+  'Please enter your Claude API key first.',
+  'Could not load Business Central tools.',
+  'Claude could not complete one of the Business Central tool calls.',
+  'Claude did not respond successfully.',
+  'The conversation hit the tool-call limit before finishing.',
+  'success',
+  'error'
+];
+
+const LANGUAGE_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1044:'Norwegian'};
+const STORAGE_MESSAGES = 'claude_mcp_chat_messages';
+const STORAGE_TOOLS = 'claude_mcp_chat_tools';
+const STORAGE_KEY = 'claude_mcp_api_key';
+
+let messages = [];
+let toolHistory = [];
+let isBusy = false;
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function getModeLabel(mode) {
+  return mode === 'custom' ? t('Custom mode') : t('Server mode');
+}
+
+function saveState() {
+  sessionStorage.setItem(STORAGE_MESSAGES, JSON.stringify(messages));
+  sessionStorage.setItem(STORAGE_TOOLS, JSON.stringify(toolHistory));
+}
+
+function loadState() {
+  try {
+    messages = JSON.parse(sessionStorage.getItem(STORAGE_MESSAGES) || '[]');
+    toolHistory = JSON.parse(sessionStorage.getItem(STORAGE_TOOLS) || '[]');
+    if (!Array.isArray(messages)) messages = [];
+    if (!Array.isArray(toolHistory)) toolHistory = [];
+  } catch (_) {
+    messages = [];
+    toolHistory = [];
+  }
+}
+
+function renderMessages() {
+  const container = document.getElementById('messages');
+  const base = `
+    <div class="message assistant">
+      <div class="bubble">${escapeHtml(t('Ask about Business Central data, metadata, message types, or translations. Claude will use MCP tools when needed.'))}</div>
+      <div class="meta">${escapeHtml(t('Connected'))}</div>
+    </div>`;
+  const rendered = messages.map((message) => `
+    <div class="message ${message.role}">
+      <div class="bubble">${escapeHtml(message.text)}</div>
+      <div class="meta">${new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+    </div>`).join('');
+  container.innerHTML = base + rendered;
+  if (isBusy) {
+    const thinking = document.createElement('div');
+    thinking.className = 'thinking';
+    thinking.innerHTML = `<span class="spinner"></span><span>${escapeHtml(t('Thinking'))}</span>`;
+    container.appendChild(thinking);
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+function renderToolHistory() {
+  const list = document.getElementById('toolList');
+  if (!toolHistory.length) {
+    list.innerHTML = `<div class="tool-empty">${escapeHtml(t('No tool calls yet'))}</div>`;
+    return;
+  }
+  list.innerHTML = toolHistory.map((item) => `
+    <div class="tool-item">
+      <div class="tool-top">
+        <div class="tool-name">${escapeHtml(item.tool)}</div>
+        <div class="tool-status ${item.status}">${escapeHtml(t(item.status))}</div>
+      </div>
+      <div class="tool-meta">${escapeHtml(String(item.durationMs || 0))} ms</div>
+      ${item.error ? `<div class="tool-error">${escapeHtml(item.error)}</div>` : ''}
+    </div>`).join('');
+  list.scrollTop = list.scrollHeight;
+}
+
+function renderConnectionSummary() {
+  const settings = bcSettingsLoad();
+  const mode = localStorage.getItem('bc_portal_mode') || 'server';
+  document.getElementById('connMode').textContent = getModeLabel(mode);
+  document.getElementById('connCompany').textContent = settings.companyName || settings.companyId || '';
+  document.getElementById('connLanguage').textContent = LANGUAGE_NAMES[Number(settings.lcid) || 1033] || `LCID ${settings.lcid || 1033}`;
+}
+
+function setBusy(nextBusy) {
+  isBusy = nextBusy;
+  document.getElementById('sendBtn').disabled = nextBusy;
+  document.getElementById('clearBtn').disabled = nextBusy;
+  const dot = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  dot.className = 'status-dot ' + (nextBusy ? 'busy' : 'ready');
+  text.textContent = nextBusy ? t('Thinking') : t('Ready');
+  renderMessages();
+}
+
+function buildBcConfig() {
+  const settings = bcSettingsLoad();
+  const mode = localStorage.getItem('bc_portal_mode') || 'server';
+  const config = {
+    mode,
+    companyId: settings.companyId,
+    companyName: settings.companyName,
+    lcid: Number(settings.lcid) || 1033,
+  };
+  if (mode === 'custom') {
+    config.tenantId = settings.tenant;
+    config.environment = settings.env;
+    config.clientId = settings.clientId;
+    config.clientSecret = settings.clientSecret;
+  }
+  return config;
+}
+
+async function loadTranslations() {
+  const settings = bcSettingsLoad();
+  const headers = bcSettingsHeaders();
+  if (settings.companyId && headers) {
+    await bcLoadTranslations(settings.companyId, Number(settings.lcid) || 1033, UI_STRINGS, headers);
+  }
+  applyUiTranslations();
+}
+
+function saveApiKey() {
+  localStorage.setItem(STORAGE_KEY, document.getElementById('apiKeyInput').value.trim());
+  document.getElementById('saveIndicator').textContent = t('Key saved');
+  setTimeout(() => { document.getElementById('saveIndicator').textContent = ''; }, 2000);
+}
+
+function appendMessage(role, text) {
+  messages.push({ role, text, timestamp: new Date().toISOString() });
+  saveState();
+  renderMessages();
+}
+
+function handleComposerKeydown(event) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendMessage();
+  }
+}
+
+function clearChat() {
+  messages = [];
+  toolHistory = [];
+  sessionStorage.removeItem(STORAGE_MESSAGES);
+  sessionStorage.removeItem(STORAGE_TOOLS);
+  renderMessages();
+  renderToolHistory();
+}
+
+async function sendMessage() {
+  if (isBusy) return;
+  const input = document.getElementById('messageInput');
+  const apiKey = (document.getElementById('apiKeyInput').value || '').trim();
+  const text = input.value.trim();
+  if (!text) return;
+  if (!apiKey) {
+    appendMessage('assistant', t('Please enter your Claude API key first.'));
+    return;
+  }
+
+  appendMessage('user', text);
+  input.value = '';
+  setBusy(true);
+
+  try {
+    const response = await fetch('/api/claude-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: messages.map((message) => ({ role: message.role, content: message.text })),
+        claudeApiKey: apiKey,
+        bcConfig: buildBcConfig(),
+      }),
+    });
+
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || t('Claude did not respond successfully.'));
+
+    appendMessage('assistant', payload.reply || '');
+    toolHistory = toolHistory.concat(Array.isArray(payload.toolTrace) ? payload.toolTrace : []);
+    saveState();
+    renderToolHistory();
+  } catch (error) {
+    appendMessage('assistant', error.message || t('Claude did not respond successfully.'));
+  } finally {
+    setBusy(false);
+  }
+}
+
+window.onload = async () => {
+  if (!bcSettingsReady()) {
+    window.location.href = 'index.html';
+    return;
+  }
+
+  document.getElementById('apiKeyInput').value = localStorage.getItem(STORAGE_KEY) || '';
+  loadState();
+  await loadTranslations();
+  renderConnectionSummary();
+  renderMessages();
+  renderToolHistory();
+};
+</script>
+</body>
+</html>

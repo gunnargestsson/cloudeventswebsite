@@ -300,6 +300,25 @@ Copy the GUID of the company you want and paste it into `x-company-id` in `.vsco
 **Files**:
 - `SPECIFICATION.md` - Full specification with proposed architecture, layout wireframe, timestamp workflow, and all open questions
 
+---
+
+### Requirement 12: Claude Website Chat via MCP
+**Folder**: `requirement-12-claude-mcp-chat/`
+**Status**: ✅ Implemented
+**Description**: Add a dedicated website chat page that uses Anthropic Claude with the existing Business Central MCP server as its tool backend. The chat bridge forwards the active BC access configuration from the website to the MCP server so Claude operates against the same BC environment and company selected by the user.
+
+**Key Features**:
+- Dedicated `claude-mcp-chat.html` page with chat transcript and MCP tool activity panel
+- New `/api/claude-chat` Azure Function that runs the Claude tool loop server-side
+- Dynamic tool discovery from `/api/mcp` via `tools/list`
+- BC config forwarding from website settings to MCP for both server mode and custom mode
+- Company-aware Claude conversations using the selected BC company from the landing page
+- API key required from webpage input (aligned with the AI Sales Assistant pattern)
+- Model selection handled automatically server-side (no user model picker)
+
+**Files**:
+- `SPECIFICATION.md` - Complete implementation guide for Claude chat over MCP
+
 
 
 

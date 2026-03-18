@@ -19,6 +19,10 @@
     {
       "route": "/mirrors",
       "rewrite": "/bc-open-mirror.html"
+    },
+    {
+      "route": "/claude-mcp-chat",
+      "rewrite": "/claude-mcp-chat.html"
     }
   ],
   "navigationFallback": {
