@@ -1365,39 +1365,51 @@ window.editTable = function editTable(tableId) {
 };
 
 window.removeTable = async function removeTable(tableId) {
-  if (!confirm(t('Delete table configuration?'))) return;
-  const tables = state.tables.filter((row) => Number(row.tableId) !== Number(tableId));
-  const result = await api('saveTableConfigs', { tables });
-  state.tables = result.mirrors || tables;
-  stopSchedulerForTable(tableId);
-  renderTables();
-  refreshMetrics();
-  addLog(`${t('Deleted table')} ${tableId}`, 'warn');
+  try {
+    if (!confirm(t('Delete table configuration?'))) return;
+    const tables = state.tables.filter((row) => Number(row.tableId) !== Number(tableId));
+    const result = await api('saveTableConfigs', { tables });
+    state.tables = result.mirrors || tables;
+    stopSchedulerForTable(tableId);
+    renderTables();
+    refreshMetrics();
+    addLog(`${t('Deleted table')} ${tableId}`, 'warn');
+  } catch (error) {
+    handleUiError(error);
+  }
 };
 
 window.toggleActivation = async function toggleActivation(tableId, currentlyActive) {
-  if (!currentlyActive && (!state.connection || state.connection.status !== 'verified')) {
-    setBanner('table-banner', t('Connection is required before activation.'), 'error');
-    return;
+  try {
+    if (!currentlyActive && (!state.connection || state.connection.status !== 'verified')) {
+      setBanner('table-banner', t('Connection is required before activation.'), 'error');
+      return;
+    }
+    const action = currentlyActive ? 'deactivateTable' : 'activateTable';
+    const result = await api(action, { tableId });
+    state.tables = state.tables.map((row) => Number(row.tableId) === Number(tableId) ? { ...row, active: !currentlyActive } : row);
+    renderTables();
+    refreshMetrics();
+    addLog(currentlyActive ? `${t('Table deactivated')}: ${tableId}` : `${t('Table activated')}: ${result.tableName || tableId}`, 'ok');
+    if (currentlyActive) stopSchedulerForTable(tableId);
+    else if (state.schedulerRunning) startSchedulerForTable(state.tables.find((row) => Number(row.tableId) === Number(tableId)));
+  } catch (error) {
+    handleUiError(error);
   }
-  const action = currentlyActive ? 'deactivateTable' : 'activateTable';
-  const result = await api(action, { tableId });
-  state.tables = state.tables.map((row) => Number(row.tableId) === Number(tableId) ? { ...row, active: !currentlyActive } : row);
-  renderTables();
-  refreshMetrics();
-  addLog(currentlyActive ? `${t('Table deactivated')}: ${tableId}` : `${t('Table activated')}: ${result.tableName || tableId}`, 'ok');
-  if (currentlyActive) stopSchedulerForTable(tableId);
-  else if (state.schedulerRunning) startSchedulerForTable(state.tables.find((row) => Number(row.tableId) === Number(tableId)));
 };
 
 window.runTableNow = async function runTableNow(tableId) {
-  const result = await api('runNow', { tableId });
-  const idx = state.tables.findIndex((row) => Number(row.tableId) === Number(tableId));
-  if (idx >= 0) state.tables[idx].lastRunAt = result.endDateTime || new Date().toISOString();
-  state.lastRunAt = result.endDateTime || t('Updated just now');
-  renderTables();
-  refreshMetrics();
-  addLog(result.skipped ? `${t('Mirror run skipped')}: ${result.tableName}` : `${t('Mirror run completed')}: ${result.tableName}`, result.skipped ? 'warn' : 'ok');
+  try {
+    const result = await api('runNow', { tableId });
+    const idx = state.tables.findIndex((row) => Number(row.tableId) === Number(tableId));
+    if (idx >= 0) state.tables[idx].lastRunAt = result.endDateTime || new Date().toISOString();
+    state.lastRunAt = result.endDateTime || t('Updated just now');
+    renderTables();
+    refreshMetrics();
+    addLog(result.skipped ? `${t('Mirror run skipped')}: ${result.tableName}` : `${t('Mirror run completed')}: ${result.tableName}`, result.skipped ? 'warn' : 'ok');
+  } catch (error) {
+    handleUiError(error);
+  }
 };
 
 async function loadSettings() {
