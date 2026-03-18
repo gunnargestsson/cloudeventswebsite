@@ -2050,43 +2050,36 @@ async function ensureTranslationPlaceholders(companyId, lcid, appSource = 'MyApp
 
 > **CRITICAL — encoding rule for `set_translations`**
 >
-> The `mcp_bc-metadata_set_translations` MCP tool call passes parameters through VS Code
-> Copilot's JSON serialization pipeline. This pipeline **non-deterministically corrupts
-> multibyte UTF-8 characters** (Icelandic ð þ æ ö á é í ó ú ý and similar) — the
-> replacement character U+FFFD is stored in BC instead of the correct glyph.
+> There are **two separate failure modes** when writing non-ASCII translations. Both must
+> be avoided:
 >
-> **Never use a direct `mcp_bc-metadata_set_translations` tool call to write strings that
-> contain non-ASCII characters.**
+> **Failure mode 1 — MCP tool call directly:**  
+> `mcp_bc-metadata_set_translations` passes parameters through VS Code Copilot's JSON
+> serialization pipeline which **non-deterministically corrupts** multibyte characters —
+> storing U+FFFD replacement characters in BC.  
+> → **Never use `mcp_bc-metadata_set_translations` for strings with non-ASCII characters.**
 >
-> **Always use `run_in_terminal` with a PowerShell script file instead:**
-> 1. Create a `.ps1` file with `create_file` — the file will be UTF-8 encoded correctly.
-> 2. Run it with `powershell -File <path>` via `run_in_terminal`.
-> 3. Delete the script afterwards.
+> **Failure mode 2 — PowerShell script with literal non-ASCII characters:**  
+> Writing Icelandic chars as literals (e.g. `"Speglun lokið"`) in a `.ps1` file and
+> using `ConvertTo-Json` causes **mojibake** (e.g. `"Speglun lokiÃ°"`). This is because
+> PowerShell 5.1 reads `.ps1` files without a BOM as Windows-1252. The UTF-8 bytes for
+> `ð` (0xC3 0xB0) are misread as two Windows-1252 characters `Ã` + `°`, which then get
+> stored verbatim in BC.  
+> → **Never write non-ASCII characters as string literals in a `.ps1` file.**
 >
-> The script must explicitly convert the JSON body to UTF-8 bytes before sending:
+> **The only correct approach — ASCII-only JSON with `\uXXXX` escape sequences:**
+>
+> Build the entire JSON body as a single-quoted PowerShell string containing only ASCII
+> characters. Use JSON Unicode escape sequences (`\u00f0`, `\u00e6`, etc.) for every
+> non-ASCII character. Single-quoted PS strings have zero escape processing, so `\u00f0`
+> stays as the 6 literal ASCII characters `\`, `u`, `0`, `0`, `f`, `0` — which is exactly
+> what the JSON parser on the server side expects, and will decode to `ð`.
 >
 > ```powershell
-> $translations = @(
->     @{ sourceText = "Mirror run completed"; targetText = "Speglun lokið" },
->     @{ sourceText = "Client ID";            targetText = "Klientauðkenni" }
->     # ... more pairs ...
-> )
+> # All non-ASCII chars as \uXXXX JSON escapes — pure ASCII, encoding-agnostic
+> $bodyJson = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_translations","arguments":{"source":"BC Portal","lcid":1039,"translations":[{"sourceText":"Mirror run completed","targetText":"Speglun loki\u00f0"},{"sourceText":"Client ID","targetText":"Klientau\u00f0kenni"},{"sourceText":"Configured Tables","targetText":"Stilltar t\u00f6flur"}]}}}'
 >
-> $payload = @{
->     jsonrpc = "2.0"; id = 1; method = "tools/call"
->     params  = @{
->         name      = "set_translations"
->         arguments = @{
->             source       = "BC Portal"
->             lcid         = 1039
->             translations = $translations
->         }
->     }
-> }
->
-> $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes(
->     ($payload | ConvertTo-Json -Depth 10 -Compress)
-> )
+> $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($bodyJson)
 >
 > Invoke-WebRequest `
 >     -Uri         "https://dynamics.is/api/mcp" `
@@ -2096,12 +2089,19 @@ async function ensureTranslationPlaceholders(companyId, lcid, appSource = 'MyApp
 >     -UseBasicParsing | Select-Object -ExpandProperty Content
 > ```
 >
-> Key points:
-> - Icelandic characters are written as **literals** in the `.ps1` file (not as `\u00f0` escapes).
-> - `ConvertTo-Json` in .NET serializes them correctly as UTF-8 Unicode.
-> - `[System.Text.Encoding]::UTF8.GetBytes()` ensures the HTTP body bytes are UTF-8.
-> - The `charset=utf-8` Content-Type header tells the server the encoding explicitly.
-> - After verifying success (`"written": N` in the response), delete the script file.
+> **Icelandic Unicode reference** (use these in `\uXXXX` form):
+>
+> | Char | Code | Char | Code | Char | Code |
+> |------|------|------|------|------|------|
+> | ð | `\u00f0` | Ð | `\u00d0` | þ | `\u00fe` |
+> | Þ | `\u00de` | æ | `\u00e6` | Æ | `\u00c6` |
+> | ö | `\u00f6` | Ö | `\u00d6` | á | `\u00e1` |
+> | Á | `\u00c1` | é | `\u00e9` | É | `\u00c9` |
+> | í | `\u00ed` | Í | `\u00cd` | ó | `\u00f3` |
+> | Ó | `\u00d3` | ú | `\u00fa` | Ú | `\u00da` |
+> | ý | `\u00fd` | Ý | `\u00dd` | | |
+>
+> After verifying `"written": N` in the response, delete the script file.
 
 ### 20.6 Applying Translations to HTML
 
