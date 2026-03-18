@@ -272,23 +272,27 @@
   .meta-value { font-size: 0.76rem; color: var(--text); word-break: break-word; }
   .mirror-actions { display: flex; flex-wrap: wrap; gap: 10px; }
   .field-picker {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-    max-height: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-height: 400px;
     overflow: auto;
     background: var(--surface2);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    padding: 12px;
   }
   .field-item {
     display: flex;
-    gap: 10px;
-    align-items: flex-start;
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    gap: 12px;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+  .field-item:last-child {
+    border-bottom: none;
+  }
+  .field-item:hover:not(.disabled) {
     background: var(--surface3);
   }
   .field-item.disabled { opacity: 0.45; }
@@ -341,7 +345,6 @@
     .hero { grid-template-columns: 1fr; }
     .mirror-meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .field-grid { grid-template-columns: 1fr; }
-    .field-picker { grid-template-columns: 1fr; }
   }
   @media (max-width: 720px) {
     main { padding: 20px; }
@@ -461,7 +464,7 @@
         </div>
         <div class="field-row">
           <label id="label-table-name" for="input-table-name">Table Name</label>
-          <input id="input-table-name" type="text" />
+          <input id="input-table-name" type="text" readonly />
         </div>
         <div class="field-row">
           <label id="label-interval" for="input-interval">Interval Minutes</label>
@@ -469,9 +472,9 @@
         </div>
         <div class="field-row">
           <label id="label-data-per-company" for="input-data-per-company">Data Per Company</label>
-          <select id="input-data-per-company">
-            <option value="true">true</option>
-            <option value="false">false</option>
+          <select id="input-data-per-company" disabled>
+            <option value="true" data-t="Yes">Yes</option>
+            <option value="false" data-t="No">No</option>
           </select>
         </div>
         <div class="field-row full">
@@ -603,12 +606,12 @@ const UI_STRINGS = [
   'Updated just now',
   'Fields',
   'Table View Locked While Active',
-  'Config Locked While Active'
-  ,'Deleted table'
-  ,'Edit Table'
-  ,'Field'
-  ,'true'
-  ,'false'
+  'Config Locked While Active',
+  'Deleted table',
+  'Edit Table',
+  'Field',
+  'Yes',
+  'No'
 ];
 
 const CONFIG = {
@@ -729,6 +732,10 @@ function applyTranslations() {
   document.getElementById('search-input').placeholder = t('Search table mirrors...');
   document.getElementById('log-title').textContent = t('Run Log');
   document.getElementById('log-copy').textContent = t('Session-scoped events appear here while the page is open.');
+  document.querySelectorAll('#input-data-per-company option').forEach(opt => {
+    const key = opt.getAttribute('data-t');
+    if (key) opt.textContent = t(key);
+  });
 }
 
 function setBanner(id, message, type) {
@@ -805,14 +812,66 @@ window.toggleField = function toggleField(number) {
 
 function resetForm() {
   document.getElementById('input-table-id').value = '';
+  setTableFieldsEditable(true);
   document.getElementById('input-table-name').value = '';
   document.getElementById('input-interval').value = '60';
-  document.getElementById('input-data-per-company').value = 'true';
+  document.getElementById('input-data-per-company').value = getDisplayBooleanValue(true);
   document.getElementById('input-table-view').value = '';
   document.getElementById('input-all-fields').checked = true;
   state.selectedFields = [];
   state.allFields = true;
   renderFieldPicker();
+  setBanner('table-banner', null, '');
+}
+
+function getDisplayBooleanValue(isBool) {
+  return String(Boolean(isBool) === true ? 'true' : 'false');
+}
+
+async function lookupTableMetadata() {
+  const tableId = Number(document.getElementById('input-table-id').value || 0);
+  if (!tableId || tableId < 1) {
+    setTableFieldsEditable(true);
+    document.getElementById('input-table-name').value = '';
+    document.getElementById('input-data-per-company').value = 'true';
+    return;
+  }
+  try {
+    setBanner('table-banner', t('Loading fields...'), '');
+    const response = await fetch('/api/mcp', {
+      method: 'POST',
+      headers: {
+        ...(bcSettingsHeaders() || {}),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'get_table_info',
+          arguments: { table: String(tableId), companyId: state.companyId, lcid: state.lcid, format: 'json' }
+        }
+      })
+    });
+    const rpc = await response.json();
+    if (rpc.error) throw new Error(rpc.error.message || 'get_table_info failed');
+    const payload = rpc.result?.content?.[0]?.text ? JSON.parse(rpc.result.content[0].text) : rpc.result?.content || rpc.result;
+    const table = Array.isArray(payload) && payload.length ? payload[0] : payload;
+    if (!table) throw new Error('Table not found');
+    document.getElementById('input-table-name').value = String(table.name || table.tableName || '');
+    document.getElementById('input-data-per-company').value = getDisplayBooleanValue(table.dataPerCompany);
+    setTableFieldsEditable(false);
+    setBanner('table-banner', null, '');
+  } catch (error) {
+    setTableFieldsEditable(true);
+    setBanner('table-banner', `Failed to lookup table: ${error.message}`, 'error');
+  }
+}
+
+function setTableFieldsEditable(editable) {
+  document.getElementById('input-table-name').readOnly = !editable;
+  document.getElementById('input-data-per-company').disabled = !editable;
 }
 
 async function loadFields() {
@@ -959,9 +1018,10 @@ window.editTable = function editTable(tableId) {
   const table = state.tables.find((row) => Number(row.tableId) === Number(tableId));
   if (!table) return;
   document.getElementById('input-table-id').value = table.tableId;
+  setTableFieldsEditable(false);
   document.getElementById('input-table-name').value = table.tableName;
   document.getElementById('input-interval').value = table.intervalMin;
-  document.getElementById('input-data-per-company').value = String(table.dataPerCompany);
+  document.getElementById('input-data-per-company').value = getDisplayBooleanValue(table.dataPerCompany);
   document.getElementById('input-table-view').value = table.tableView || '';
   state.allFields = !(table.fieldNumbers && table.fieldNumbers.length);
   document.getElementById('input-all-fields').checked = state.allFields;
@@ -1111,6 +1171,7 @@ function bindEvents() {
   });
   document.getElementById('btn-save-connection').addEventListener('click', () => saveConnection().catch(handleUiError));
   document.getElementById('btn-verify-connection').addEventListener('click', () => verifyConnection().catch(handleUiError));
+  document.getElementById('input-table-id').addEventListener('change', () => lookupTableMetadata().catch(handleUiError));
   document.getElementById('btn-load-fields').addEventListener('click', () => loadFields().catch(handleUiError));
   document.getElementById('btn-add-table').addEventListener('click', () => saveTable().catch(handleUiError));
   document.getElementById('btn-reset-form').addEventListener('click', resetForm);
