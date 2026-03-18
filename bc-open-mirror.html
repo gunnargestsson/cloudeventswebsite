@@ -337,6 +337,30 @@
     font-size: 0.74rem;
     color: var(--text-mid);
     margin-bottom: 14px;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  .inline-banner.hidden {
+    display: none !important;
+  }
+  .inline-banner.loading {
+    color: var(--text-mid);
+  }
+  .spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 10px;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
   .inline-banner.error { border-color: rgba(242,95,92,0.35); color: #ffb2b0; }
   .inline-banner.ok { border-color: rgba(39,192,138,0.35); color: #9fe7c8; }
@@ -742,11 +766,16 @@ function setBanner(id, message, type) {
   const el = document.getElementById(id);
   if (!message) {
     el.className = 'inline-banner hidden';
-    el.textContent = '';
+    el.innerHTML = '';
     return;
   }
-  el.className = `inline-banner ${type || ''}`.trim();
-  el.textContent = message;
+  const isLoading = message.toLowerCase().includes('loading');
+  el.className = `inline-banner ${type || ''} ${isLoading ? 'loading' : ''}`.trim();
+  if (isLoading) {
+    el.innerHTML = `<span class="spinner"></span><span>${message}</span>`;
+  } else {
+    el.textContent = message;
+  }
 }
 
 function populateConnectionForm() {
