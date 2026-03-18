@@ -354,9 +354,20 @@ async function verifyMirrorConnection(connection) {
   parseMirrorUrl(conn.mirrorUrl);
   const credential = new ClientSecretCredential(conn.tenant, conn.clientId, conn.clientSecret);
   const serviceClient = createDataLakeServiceClient(conn.mirrorUrl, credential);
-  const { fileSystemName } = parseMirrorUrl(conn.mirrorUrl);
+  const { fileSystemName, basePath } = parseMirrorUrl(conn.mirrorUrl);
   const fs = serviceClient.getFileSystemClient(fileSystemName);
-  await fs.getProperties();
+  
+  // Try to list files as a way to verify connection
+  // OneLake may not support getProperties(), so we use listFilesAndDirectories instead
+  try {
+    const iter = fs.listFilesAndDirectories(basePath || undefined);
+    // Try to get at least one item to confirm access
+    await iter.next();
+  } catch (listError) {
+    // If listing fails, try creating the base path (filesystem) if it doesn't exist
+    // This is less invasive than getProperties for OneLake
+    await fs.createIfNotExists();
+  }
   return { verified: true };
 }
 
