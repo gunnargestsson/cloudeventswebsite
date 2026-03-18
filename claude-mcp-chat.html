@@ -261,7 +261,6 @@ const UI_STRINGS = [
 const LANGUAGE_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1044:'Norwegian'};
 const STORAGE_MESSAGES = 'claude_mcp_chat_messages';
 const STORAGE_TOOLS = 'claude_mcp_chat_tools';
-const STORAGE_KEY = 'claude_mcp_api_key';
 
 let messages = [];
 let toolHistory = [];
@@ -384,7 +383,7 @@ async function loadTranslations() {
 }
 
 function saveApiKey() {
-  localStorage.setItem(STORAGE_KEY, document.getElementById('apiKeyInput').value.trim());
+  bcClaudeApiKeySave(document.getElementById('apiKeyInput').value.trim());
   document.getElementById('saveIndicator').textContent = t('Key saved');
   setTimeout(() => { document.getElementById('saveIndicator').textContent = ''; }, 2000);
 }
@@ -457,7 +456,7 @@ window.onload = async () => {
     return;
   }
 
-  document.getElementById('apiKeyInput').value = localStorage.getItem(STORAGE_KEY) || '';
+  document.getElementById('apiKeyInput').value = bcClaudeApiKeyLoad();
   loadState();
   await loadTranslations();
   renderConnectionSummary();

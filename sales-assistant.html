@@ -165,7 +165,7 @@ header{padding:12px 24px;display:flex;align-items:center;gap:14px;border-bottom:
       <div class="sp-section">
         <div>
           <div class="lbl" data-t="Language">Language</div>
-          <select class="ci" id="cfgLcid" onchange="onLcidSelect()">
+          <select class="ci" id="cfgLcid" disabled>
             <option value="1033">English</option>
             <option value="1039">Icelandic</option>
             <option value="1030">Danish</option>
@@ -298,7 +298,7 @@ function getActiveLcid() {
 }
 
 function loadSettings() {
-  const saved = localStorage.getItem('sa_claude_key');
+  const saved = bcClaudeApiKeyLoad();
   if (saved) document.getElementById('cfgClaudeKey').value = saved;
   const savedLcid = localStorage.getItem('bc_portal_lcid');
   if (savedLcid && document.getElementById('cfgLcid')) {
@@ -308,7 +308,7 @@ function loadSettings() {
 
 function saveClaudeKey() {
   const key = document.getElementById('cfgClaudeKey').value.trim();
-  if (key) localStorage.setItem('sa_claude_key', key);
+  bcClaudeApiKeySave(key);
   const ok = document.getElementById('saveOk');
   ok.classList.remove('hidden');
   setTimeout(() => ok.classList.add('hidden'), 2500);
@@ -322,7 +322,7 @@ function saveSettings() {
     clientSecret: document.getElementById('cfgClientSecret').value.trim(),
   });
   const claudeVal = document.getElementById('cfgClaudeKey').value.trim();
-  if (claudeVal) localStorage.setItem('sa_claude_key', claudeVal);
+  bcClaudeApiKeySave(claudeVal);
   const ok = document.getElementById('saveOk');
   ok.classList.remove('hidden');
   setTimeout(() => ok.classList.add('hidden'), 2500);
@@ -375,12 +375,6 @@ function onCompanySelect() {
   document.getElementById('settingsStatus').textContent = companyId ? `Company: ${companyName}` : '';
 }
 
-function onLcidSelect() {
-  const lcid = parseInt(document.getElementById('cfgLcid')?.value || '1033', 10);
-  bcSettingsSave({ lcid });
-  loadUiTranslations().then(applyUiTranslations);
-}
-
 function toggleSettings() {
   document.getElementById('settingsPanel').classList.toggle('hidden');
 }
@@ -389,7 +383,7 @@ function getConfig() {
   const s    = bcSettingsLoad();
   const mode = localStorage.getItem('bc_portal_mode') || 'server';
   return {
-    apiKey: localStorage.getItem('sa_claude_key') || '',
+    apiKey: bcClaudeApiKeyLoad(),
     bcConfig: {
       companyId: s.companyId,
       ...(mode === 'custom' ? {
@@ -403,7 +397,7 @@ function getConfig() {
 }
 
 function configOk() {
-  return bcSettingsReady() && !!localStorage.getItem('sa_claude_key');
+  return bcSettingsReady() && !!bcClaudeApiKeyLoad();
 }
 
 // ── CHAT RENDERING ────────────────────────────────────────────────────────────
@@ -769,7 +763,7 @@ function startNew() {
   // Load translations then apply them
   loadUiTranslations().then(applyUiTranslations);
   // Auto-collapse key panel if key is already saved
-  if (localStorage.getItem('sa_claude_key')) {
+  if (bcClaudeApiKeyLoad()) {
     document.getElementById('settingsPanel').classList.add('hidden');
   }
 })();

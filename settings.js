@@ -12,6 +12,7 @@ const _KEYS = {
   companyId:    'company_id',
   companyName:  'company_name',
   lcid:         'lcid',
+  claudeApiKey: 'claude_api_key',
 };
 
 function bcSettingsLoad() {
@@ -29,6 +30,30 @@ function bcSettingsSave(obj) {
 function bcSettingsClear() {
   for (const key of Object.values(_KEYS))
     localStorage.removeItem(_PFX + key);
+}
+
+function bcClaudeApiKeyLoad() {
+  // Backward compatibility for older page-specific keys.
+  return (
+    localStorage.getItem(_PFX + _KEYS.claudeApiKey) ||
+    localStorage.getItem('sa_claude_key') ||
+    localStorage.getItem('claude_mcp_api_key') ||
+    ''
+  );
+}
+
+function bcClaudeApiKeySave(value) {
+  const key = String(value || '').trim();
+  if (key) {
+    localStorage.setItem(_PFX + _KEYS.claudeApiKey, key);
+    // Keep legacy keys in sync during migration.
+    localStorage.setItem('sa_claude_key', key);
+    localStorage.setItem('claude_mcp_api_key', key);
+    return;
+  }
+  localStorage.removeItem(_PFX + _KEYS.claudeApiKey);
+  localStorage.removeItem('sa_claude_key');
+  localStorage.removeItem('claude_mcp_api_key');
 }
 
 function bcSettingsReady() {
