@@ -39,7 +39,7 @@
  *   check_standards_status  — full Origo BC environment check: GitHub sync + local repo, .claude, CLAUDE.md, skills junction, mcp.json, git, node
  *   update_bc_standards     — pull latest bc-dev-standards and copy CLAUDE.md to .claude
  *   setup_origo_bc_environment — one-time setup: clone repo, create .claude, copy CLAUDE.md, create skills junction
- *   save_app_range          — upsert a BC extension's app id/name/publisher/idRanges into Cloud Events Storage (source = 'Origo App Range')
+ *   save_app_range          — upsert a BC extension's app id/name/publisher/idRanges into Cloud Events Storage (Source = Publisher-Name, Id = app.id)
  *   check_app_range         — verify a set of BC object ID ranges against all registered apps; reports conflicts and suggests a free range
  *   read_app_json           — reads app.json from a BC extension project and returns its contents including ID ranges
  *   update_app_json_ranges  — updates the idRanges field in app.json and saves it (with optional backup)
@@ -1078,8 +1078,7 @@ async function toolGetConfig({ source, id, decrypt = false, __allowDecrypt = fal
 }
 
 // ── Origo App Range tools ──────────────────────────────────────────────────────
-
-const APP_RANGE_SOURCE = "Origo App Range";
+// App ranges are stored with Source = "<Publisher>-<AppName>" and Id = app.id (GUID)
 
 async function toolSaveAppRange({ appId, appName, publisher, idRanges, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!appId)     throw new Error("Parameter 'appId' is required (app.json 'id' GUID)");
@@ -1097,6 +1096,8 @@ async function toolSaveAppRange({ appId, appName, publisher, idRanges, companyId
   const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
+  // Use Publisher-Name as source, app.id as Id
+  const source = `${publisher}-${appName}`;
   const blobValue = Buffer.from(JSON.stringify(data)).toString("base64");
   await bcTask(conn, company.id, {
     specversion: "1.0",
@@ -1106,13 +1107,13 @@ async function toolSaveAppRange({ appId, appName, publisher, idRanges, companyId
     data:        JSON.stringify({
       mode: "upsert",
       data: [{
-        primaryKey: { Source: APP_RANGE_SOURCE, Id: appId },
+        primaryKey: { Source: source, Id: appId },
         fields:     { Data: blobValue },
       }],
     }),
   });
 
-  return { company: company.name, saved: true, appId, appName, publisher, idRanges };
+  return { company: company.name, saved: true, appId, appName, publisher, source, idRanges };
 }
 
 async function toolCheckAppRange({ idRanges, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
@@ -1127,14 +1128,13 @@ async function toolCheckAppRange({ idRanges, companyId, tenantId, clientId, clie
   const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
-  // Fetch all stored app ranges
+  // Fetch all stored app ranges - no source filter, get all records with app range data
   const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Data.Records.Get",
     source:      "BC Metadata MCP v1.0",
     subject:     CS_TABLE,
     data:        JSON.stringify({
-      tableView: `WHERE(Source=CONST(${APP_RANGE_SOURCE}))`,
       take:      500,
     }),
   });
@@ -1365,15 +1365,16 @@ async function toolPrepareForPullRequest({ projectPath, standardsRepo, claudeDir
       try {
         const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
         const company = await getCompany(companyId, conn);
+        const source  = `${appJson.publisher}-${appJson.name}`;
 
-        // Read current stored record for this app
+        // Read current stored record for this app by app.id
         const existingResult = await bcTask(conn, company.id, {
           specversion: "1.0",
           type:        "Data.Records.Get",
           source:      "BC Metadata MCP v1.0",
           subject:     CS_TABLE,
           data:        JSON.stringify({
-            tableView: `WHERE(Source=CONST(${APP_RANGE_SOURCE}),Id=CONST(${appJson.id}))`,
+            tableView: `WHERE(Id=CONST(${appJson.id}))`,
             take: 1,
           }),
         });
@@ -1398,25 +1399,26 @@ async function toolPrepareForPullRequest({ projectPath, standardsRepo, claudeDir
             subject:     CS_TABLE,
             data:        JSON.stringify({
               mode: "upsert",
-              data: [{ primaryKey: { Source: APP_RANGE_SOURCE, Id: appJson.id }, fields: { Data: blobValue } }],
+              data: [{ primaryKey: { Source: source, Id: appJson.id }, fields: { Data: blobValue } }],
             }),
           });
           report.appRange = {
             status: existingData ? "✅ Updated" : "✅ Registered",
             details: existingData ? "App range updated in Cloud Events Storage" : "App range saved to Cloud Events Storage for the first time",
             company: company.name,
+            source,
           };
         } else {
-          report.appRange = { status: "✅ Verified", details: "App range matches Cloud Events Storage", company: company.name };
+          report.appRange = { status: "✅ Verified", details: "App range matches Cloud Events Storage", company: company.name, source };
         }
 
-        // Conflict check — skip the app's own ranges
+        // Conflict check — get all app ranges (no source filter) and skip the current app's own ranges
         const allResult = await bcTask(conn, company.id, {
           specversion: "1.0",
           type:        "Data.Records.Get",
           source:      "BC Metadata MCP v1.0",
           subject:     CS_TABLE,
-          data:        JSON.stringify({ tableView: `WHERE(Source=CONST(${APP_RANGE_SOURCE}))`, take: 500 }),
+          data:        JSON.stringify({ take: 500 }),
         });
         const allApps = (allResult.result || allResult.value || []).reduce((acc, rec) => {
           try { const d = JSON.parse(Buffer.from((rec.fields || {}).Data || "", "base64").toString("utf8")); if (d && d.idRanges) acc.push(d); } catch (_) {}
@@ -2368,11 +2370,11 @@ const TOOLS = [
   },
   {
     name:        "save_app_range",
-    description: "Saves a BC extension app's ID range information to the Cloud Events Storage table (source = 'Origo App Range'). Stores the app id, name, publisher and idRanges from app.json. Uses upsert semantics keyed on the app id.",
+    description: "Saves a BC extension app's ID range information to the Cloud Events Storage table. Uses Source = Publisher-Name and Id = app.id as the primary key. Stores the app id, name, publisher and idRanges from app.json. Uses upsert semantics - creates new record or updates existing one based on app.id.",
     inputSchema: {
       type:       "object",
       properties: {
-        appId:     { type: "string",  description: "The app GUID from app.json 'id' field. Used as the storage key." },
+        appId:     { type: "string",  description: "The app GUID from app.json 'id' field. Used as the Id in the storage primary key." },
         appName:   { type: "string",  description: "The app name from app.json 'name' field." },
         publisher: { type: "string",  description: "The publisher from app.json 'publisher' field." },
         idRanges:  { type: "array",   description: "The idRanges array from app.json, e.g. [{\"from\": 65300, \"to\": 65399}].", items: { type: "object", properties: { from: { type: "number" }, to: { type: "number" } }, required: ["from", "to"] } },
@@ -2382,7 +2384,7 @@ const TOOLS = [
   },
   {
     name:        "check_app_range",
-    description: "Checks whether a given set of BC object ID ranges conflicts with any app ranges already registered in the Cloud Events Storage table (source = 'Origo App Range'). Returns a list of conflicting apps and suggests the first available non-conflicting range of the same size.",
+    description: "Checks whether a given set of BC object ID ranges conflicts with any app ranges already registered in the Cloud Events Storage table. Retrieves all app range registrations (regardless of source) by scanning for records with idRanges data. Returns a list of conflicting apps and suggests the first available non-conflicting range of the same size.",
     inputSchema: {
       type:       "object",
       properties: {
