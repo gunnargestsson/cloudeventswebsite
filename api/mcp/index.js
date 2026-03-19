@@ -36,9 +36,9 @@
  *
  *   encrypt_data   — AES-256-GCM symmetric encryption using server-side MCP_ENCRYPTION_KEY
  *   decrypt_data   — AES-256-GCM symmetric decryption using server-side MCP_ENCRYPTION_KEY
- *   check_standards_status  — full Origo BC environment check: GitHub sync + local repo, .claude, CLAUDE.md, skills junction, mcp.json, git, node
+ *   check_standards_status  — full Origo BC environment check: GitHub sync + local repo, .claude, CLAUDE.md, skills junction, pr-gateway junction, mcp.json, git, node
  *   update_bc_standards     — pull latest bc-dev-standards and copy CLAUDE.md to .claude
- *   setup_origo_bc_environment — one-time setup: clone repo, create .claude, copy CLAUDE.md, create skills junction
+ *   setup_origo_bc_environment — one-time setup: clone repo, create .claude, copy CLAUDE.md, create skills and pr-gateway junctions
  *   save_app_range          — upsert a BC extension's app id/name/publisher/idRanges into Cloud Events Storage (Source = Publisher-Name, Id = app.id)
  *   check_app_range         — verify a set of BC object ID ranges against all registered apps; reports conflicts and suggests a free range
  *   read_app_json           — reads app.json from a BC extension project and returns its contents including ID ranges
@@ -1830,6 +1830,20 @@ async function toolCheckStandardsStatus({ githubToken, standardsRepo, claudeDir 
     }
   } catch (_) {}
 
+  // ── 5b. PR Gateway junction ─────────────────────────────────────────────────
+  const prGatewayPath = claudePath ? `${claudePath}${sep}pr-gateway` : "";
+  let prGatewayExists = false, prGatewayIsLink = false, prGatewayHasFile = false;
+  try {
+    if (prGatewayPath) {
+      const stat = fs.lstatSync(prGatewayPath);
+      prGatewayExists = true;
+      prGatewayIsLink = stat.isSymbolicLink();
+      try {
+        prGatewayHasFile = fs.existsSync(`${prGatewayPath}${sep}PR-GATEWAY.md`);
+      } catch (_) {}
+    }
+  } catch (_) {}
+
   // ── 6. mcp.json ─────────────────────────────────────────────────────────────
   const mcpJsonPath = appData ? `${appData}\\Code\\User\\mcp.json` : "";
   let mcpExists = false, mcpHasBcOrigo = false;
@@ -1861,9 +1875,10 @@ async function toolCheckStandardsStatus({ githubToken, standardsRepo, claudeDir 
   // ── Derived status ──────────────────────────────────────────────────────────
   const claudeMdOk    = claudeMdExists && claudeMdInSync;
   const junctionOk    = junctionExists && junctionIsLink;
+  const prGatewayOk   = prGatewayExists && prGatewayIsLink;
   const mcpConfigured = mcpHasBcOrigo && mcpHasEncConn && mcpHasGithubToken && mcpHasStdRepo && mcpHasClaudeDir;
   const allGood       = repoExists && repoIsGit && claudeExists && claudeMdOk
-                     && junctionOk && mcpConfigured && !!gitVersion
+                     && junctionOk && prGatewayOk && mcpConfigured && !!gitVersion
                      && (upToDate === true || (upToDate === null && !githubReachable && repoExists));
 
   const ck = (v) => v ? "\u2705" : "\u274C";  // ✅ ❌
@@ -1908,6 +1923,7 @@ async function toolCheckStandardsStatus({ githubToken, standardsRepo, claudeDir 
     bar(`  ${ck(claudeExists)}  .claude folder exists`),
     bar(`  ${ck(claudeMdOk)}  CLAUDE.md applied and in sync`),
     bar(`  ${ck(junctionOk)}  Skills junction active         : ${skillCount} skills found`),
+    bar(`  ${ck(prGatewayOk)}  PR Gateway junction active     : ${prGatewayHasFile ? "PR-GATEWAY.md found" : "not found"}`),
     bar(`  ${ck(mcpConfigured)}  mcp.json configured`),
     bar(`  ${ck(!!gitVersion)}  Git available                  : ${gitVer}`),
     bar(`  ${ck(!!nodeVersion)}  Node available                 : ${nodeVer}`),
@@ -1939,6 +1955,9 @@ async function toolCheckStandardsStatus({ githubToken, standardsRepo, claudeDir 
       action: 'Ask Claude: "Update my BC standards"' });
   if (!junctionOk)
     nextSteps.push({ icon: "\u274C", item: "Skills junction is missing or broken",
+      action: 'Ask Claude: "Set up my Origo BC development environment"' });
+  if (!prGatewayOk)
+    nextSteps.push({ icon: "\u274C", item: "PR Gateway junction is missing or broken",
       action: 'Ask Claude: "Set up my Origo BC development environment"' });
   if (!mcpExists)
     nextSteps.push({ icon: "\u274C", item: "mcp.json not found",
@@ -2001,7 +2020,7 @@ async function toolUpdateBcStandards({ standardsRepo, claudeDir } = {}) {
     updated: beforeSha !== afterSha,
     commits,
     claudeMdCopied: claudeMdDest,
-    note: "Skills folder updates automatically via the existing directory junction.",
+    note: "Skills and pr-gateway folders update automatically via the existing directory junctions.",
   };
 }
 
@@ -2089,7 +2108,29 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
     }
   }
 
-  return { steps, success: steps.every(s => s.status === "✅") };
+  // 6. Create junction: claudeDir\pr-gateway → standardsRepo\pr-gateway
+  const prGatewayLink   = `${claudeDir}\\pr-gateway`;
+  const prGatewayTarget = `${standardsRepo}\\pr-gateway`;
+  
+  if (!isWindows) {
+    steps.push({ 
+      step: "Create pr-gateway junction", 
+      status: "⚠️", 
+      detail: "Skipped: non-Windows platforms are not fully supported. Manually create symlink with: ln -s \"" + prGatewayTarget + "\" \"" + prGatewayLink + "\""
+    });
+  } else {
+    try {
+      if (fs.existsSync(prGatewayLink)) {
+        execSync(`Remove-Item -Path "${prGatewayLink}" -Force -Recurse`, { stdio: "pipe", encoding: "utf8", shell: "powershell.exe" });
+      }
+      execSync(`New-Item -ItemType Junction -Path "${prGatewayLink}" -Target "${prGatewayTarget}"`, { stdio: "pipe", encoding: "utf8", shell: "powershell.exe" });
+      steps.push({ step: "Create pr-gateway junction", status: "✅", detail: `${prGatewayLink} → ${prGatewayTarget}` });
+    } catch (e) {
+      steps.push({ step: "Create pr-gateway junction", status: "❌", detail: e.message });
+    }
+  }
+
+  return { steps, success: steps.every(s => s.status === "✅" || s.status === "⚠️") };
 }
 
 // ── MCP Tool definitions (JSON Schema) ────────────────────────────────────────
@@ -2468,7 +2509,7 @@ const TOOLS = [
   },
   {
     name:        "check_standards_status",
-    description: "Check the Origo BC development standards GitHub sync status and verify the full local environment setup including .claude folder, CLAUDE.md, skills junction, and mcp.json configuration",
+    description: "Check the Origo BC development standards GitHub sync status and verify the full local environment setup including .claude folder, CLAUDE.md, skills junction, pr-gateway junction, and mcp.json configuration",
     inputSchema: {
       type:       "object",
       properties: {
@@ -2480,7 +2521,7 @@ const TOOLS = [
   },
   {
     name:        "update_bc_standards",
-    description: "Pulls the latest changes from the bc-dev-standards GitHub repository and copies CLAUDE.md to the .claude directory. Reports the before and after commit SHAs and all commit messages applied. The skills folder updates automatically via the existing directory junction. Run setup_origo_bc_environment first if the repo is not yet cloned.",
+    description: "Pulls the latest changes from the bc-dev-standards GitHub repository and copies CLAUDE.md to the .claude directory. Reports the before and after commit SHAs and all commit messages applied. The skills and pr-gateway folders update automatically via the existing directory junctions. Run setup_origo_bc_environment first if the repo is not yet cloned.",
     inputSchema: {
       type:       "object",
       properties: {
@@ -2492,7 +2533,7 @@ const TOOLS = [
   },
   {
     name:        "setup_origo_bc_environment",
-    description: "One-time setup: verifies git is in PATH, clones or updates bc-dev-standards to the given local path, creates the .claude directory, copies CLAUDE.md, and creates a directory junction from .claude\\skills to bc-dev-standards\\skills. Returns a step-by-step ✅/❌ status summary. Must be run with the MCP server running locally.",
+    description: "One-time setup: verifies git is in PATH, clones or updates bc-dev-standards to the given local path, creates the .claude directory, copies CLAUDE.md, and creates directory junctions from .claude\\skills to bc-dev-standards\\skills and from .claude\\pr-gateway to bc-dev-standards\\pr-gateway. Returns a step-by-step ✅/❌ status summary. Must be run with the MCP server running locally.",
     inputSchema: {
       type:       "object",
       properties: {
