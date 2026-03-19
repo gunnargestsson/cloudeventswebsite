@@ -2025,8 +2025,13 @@ async function toolUpdateBcStandards({ standardsRepo, claudeDir } = {}) {
 }
 
 async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
-  if (!standardsRepo) throw new Error("Parameter 'standardsRepo' is required (local path where bc-dev-standards will be cloned)");
-  if (!claudeDir)     throw new Error("Parameter 'claudeDir' is required (local path to .claude directory)");
+  const userProfile = process.env.USERPROFILE || process.env.HOME || "";
+  const sep         = process.platform === "win32" ? "\\" : "/";
+  const repoPath    = standardsRepo || (userProfile ? `${userProfile}${sep}bc-dev-standards` : "");
+  const claudePath  = claudeDir     || (userProfile ? `${userProfile}${sep}.claude`          : "");
+
+  if (!repoPath)   throw new Error("Cannot determine standardsRepo path. Provide 'standardsRepo' parameter or set USERPROFILE env var.");
+  if (!claudePath) throw new Error("Cannot determine claudeDir path. Provide 'claudeDir' parameter or set USERPROFILE env var.");
 
   const steps = [];
 
@@ -2042,40 +2047,40 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
   }
 
   // 2. Clone or pull bc-dev-standards
-  if (!fs.existsSync(standardsRepo)) {
+  if (!fs.existsSync(repoPath)) {
     try {
       const shell = process.platform === "win32" ? "powershell.exe" : WIN_SHELL;
-      execSync(`git clone ${BC_DEV_STANDARDS_REPO} "${standardsRepo}"`, { stdio: "pipe", encoding: "utf8", shell });
-      steps.push({ step: "Clone bc-dev-standards", status: "✅", detail: `Cloned to ${standardsRepo}` });
+      execSync(`git clone ${BC_DEV_STANDARDS_REPO} "${repoPath}"`, { stdio: "pipe", encoding: "utf8", shell });
+      steps.push({ step: "Clone bc-dev-standards", status: "✅", detail: `Cloned to ${repoPath}` });
     } catch (e) {
       steps.push({ step: "Clone bc-dev-standards", status: "❌", detail: e.message });
       return { steps, success: false };
     }
   } else {
     try {
-      execGit("git pull --ff-only", standardsRepo);
-      steps.push({ step: "Pull bc-dev-standards", status: "✅", detail: `Updated at ${standardsRepo}` });
+      execGit("git pull --ff-only", repoPath);
+      steps.push({ step: "Pull bc-dev-standards", status: "✅", detail: `Updated at ${repoPath}` });
     } catch (e) {
       steps.push({ step: "Pull bc-dev-standards", status: "❌", detail: e.message });
     }
   }
 
   // 3. Create claudeDir if absent
-  if (!fs.existsSync(claudeDir)) {
+  if (!fs.existsSync(claudePath)) {
     try {
-      fs.mkdirSync(claudeDir, { recursive: true });
-      steps.push({ step: "Create .claude directory", status: "✅", detail: `Created ${claudeDir}` });
+      fs.mkdirSync(claudePath, { recursive: true });
+      steps.push({ step: "Create .claude directory", status: "✅", detail: `Created ${claudePath}` });
     } catch (e) {
       steps.push({ step: "Create .claude directory", status: "❌", detail: e.message });
       return { steps, success: false };
     }
   } else {
-    steps.push({ step: "Create .claude directory", status: "✅", detail: `Already exists: ${claudeDir}` });
+    steps.push({ step: "Create .claude directory", status: "✅", detail: `Already exists: ${claudePath}` });
   }
 
   // 4. Copy CLAUDE.md
-  const claudeMdSrc  = `${standardsRepo}\\CLAUDE.md`;
-  const claudeMdDest = `${claudeDir}\\CLAUDE.md`;
+  const claudeMdSrc  = `${repoPath}${sep}CLAUDE.md`;
+  const claudeMdDest = `${claudePath}${sep}CLAUDE.md`;
   try {
     fs.copyFileSync(claudeMdSrc, claudeMdDest);
     steps.push({ step: "Copy CLAUDE.md", status: "✅", detail: `${claudeMdSrc} → ${claudeMdDest}` });
@@ -2084,8 +2089,8 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
   }
 
   // 5. Create junction: claudeDir\skills → standardsRepo\skills
-  const junctionLink   = `${claudeDir}\\skills`;
-  const junctionTarget = `${standardsRepo}\\skills`;
+  const junctionLink   = `${claudePath}${sep}skills`;
+  const junctionTarget = `${repoPath}${sep}skills`;
   
   // Windows-first approach: assume Windows PowerShell unless proven otherwise
   const isWindows = process.platform === "win32" || WIN_SHELL.includes("powershell");
@@ -2109,8 +2114,8 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
   }
 
   // 6. Create junction: claudeDir\pr-gateway → standardsRepo\pr-gateway
-  const prGatewayLink   = `${claudeDir}\\pr-gateway`;
-  const prGatewayTarget = `${standardsRepo}\\pr-gateway`;
+  const prGatewayLink   = `${claudePath}${sep}pr-gateway`;
+  const prGatewayTarget = `${repoPath}${sep}pr-gateway`;
   
   if (!isWindows) {
     steps.push({ 
@@ -2537,10 +2542,9 @@ const TOOLS = [
     inputSchema: {
       type:       "object",
       properties: {
-        standardsRepo: { type: "string", description: "Local path where bc-dev-standards will be cloned or updated (e.g. C:\\Users\\you\\bc-dev-standards). Falls back to the x-standards-repo request header." },
-        claudeDir:     { type: "string", description: "Local path to the .claude directory (e.g. C:\\Users\\you\\.claude). Falls back to the x-claude-dir request header." },
+        standardsRepo: { type: "string", description: "Local path where bc-dev-standards will be cloned or updated (e.g. C:\\Users\\you\\bc-dev-standards). Falls back to the x-standards-repo request header or %USERPROFILE%\\bc-dev-standards." },
+        claudeDir:     { type: "string", description: "Local path to the .claude directory (e.g. C:\\Users\\you\\.claude). Falls back to the x-claude-dir request header or %USERPROFILE%\\.claude." },
       },
-      required: ["standardsRepo", "claudeDir"],
     },
   },
 ];
