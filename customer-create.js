@@ -395,7 +395,8 @@ async function loadCustomerPostingGroups() {
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Customer Posting Group',
-      fieldNumbers: [1, 20]
+      fieldNumbers: [1, 20],
+      take: 1000
     })
   });
   
@@ -412,7 +413,8 @@ async function loadGenBusPostingGroups() {
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Gen. Business Posting Group',
-      fieldNumbers: [1, 2, 3]
+      fieldNumbers: [1, 2, 3],
+      take: 1000
     })
   });
   
@@ -442,7 +444,8 @@ async function loadVATBusPostingGroups() {
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'VAT Business Posting Group',
-      fieldNumbers: [1, 2]
+      fieldNumbers: [1, 2],
+      take: 1000
     })
   });
   
@@ -459,7 +462,8 @@ async function loadPaymentTerms() {
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Payment Terms',
-      fieldNumbers: [1, 5]
+      fieldNumbers: [1, 5],
+      take: 1000
     })
   });
   
@@ -476,7 +480,8 @@ async function loadCurrencies() {
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Currency',
-      fieldNumbers: [1, 15]
+      fieldNumbers: [1, 15],
+      take: 1000
     })
   });
   
@@ -493,7 +498,8 @@ async function loadPaymentMethods() {
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Payment Method',
-      fieldNumbers: [1, 2]
+      fieldNumbers: [1, 2],
+      take: 1000
     })
   });
   
@@ -510,7 +516,8 @@ async function loadSalespersons() {
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Salesperson/Purchaser',
-      fieldNumbers: [1, 2]
+      fieldNumbers: [1, 2],
+      take: 1000
     })
   });
   
@@ -527,7 +534,8 @@ async function loadLocations() {
     source: 'BC Portal',
     data: JSON.stringify({ 
       tableName: 'Location',
-      fieldNumbers: [1, 2]
+      fieldNumbers: [1, 2],
+      take: 1000
     })
   });
   
@@ -545,7 +553,8 @@ async function loadPostCodes() {
       source: 'BC Portal',
       data: JSON.stringify({ 
         tableName: 'Post Code',
-        fieldNumbers: [1, 2, 4, 5]
+        fieldNumbers: [1, 2, 4, 5],
+        take: 1000
       })
     });
     
