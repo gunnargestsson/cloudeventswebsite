@@ -1076,13 +1076,14 @@ async function toolGetConfig({ source, id, decrypt = false, __allowDecrypt = fal
 
 const BC_DEV_STANDARDS_REPO = "https://github.com/OrigoSoftwareSolutions/bc-dev-standards.git";
 const GITHUB_API_HOST        = "api.github.com";
+const WIN_SHELL              = process.platform === "win32" ? "powershell.exe" : "/bin/bash";
 
 function execGit(command, cwd) {
   return execSync(command, {
     cwd,
     stdio:    "pipe",
     encoding: "utf8",
-    shell:    process.platform === "win32" ? "cmd.exe" : "/bin/sh",
+    shell:    WIN_SHELL,
   }).trim();
 }
 
@@ -1090,7 +1091,7 @@ async function toolCheckStandardsStatus({ githubToken, standardsRepo, claudeDir 
   const userProfile = process.env.USERPROFILE || process.env.HOME || "";
   const appData     = process.env.APPDATA     || "";
   const sep         = process.platform === "win32" ? "\\" : "/";
-  const sh          = process.platform === "win32" ? "cmd.exe" : "/bin/sh";
+  const sh          = WIN_SHELL;
   const repoPath    = standardsRepo || (userProfile ? `${userProfile}${sep}bc-dev-standards` : "");
   const claudePath  = claudeDir     || (userProfile ? `${userProfile}${sep}.claude`          : "");
 
@@ -1347,7 +1348,7 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
   // 1. Check git
   let gitVersion;
   try {
-    gitVersion = execSync("git --version", { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh" }).trim();
+    gitVersion = execSync("git --version", { stdio: "pipe", encoding: "utf8", shell: WIN_SHELL }).trim();
     steps.push({ step: "Check git", status: "✅", detail: gitVersion });
   } catch (e) {
     steps.push({ step: "Check git", status: "❌", detail: e.message });
@@ -1357,7 +1358,7 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
   // 2. Clone or pull bc-dev-standards
   if (!fs.existsSync(standardsRepo)) {
     try {
-      execSync(`git clone ${BC_DEV_STANDARDS_REPO} "${standardsRepo}"`, { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh" });
+      execSync(`git clone ${BC_DEV_STANDARDS_REPO} "${standardsRepo}"`, { stdio: "pipe", encoding: "utf8", shell: WIN_SHELL });
       steps.push({ step: "Clone bc-dev-standards", status: "✅", detail: `Cloned to ${standardsRepo}` });
     } catch (e) {
       steps.push({ step: "Clone bc-dev-standards", status: "❌", detail: e.message });
@@ -1400,9 +1401,17 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
   const junctionTarget = `${standardsRepo}\\skills`;
   try {
     if (fs.existsSync(junctionLink)) {
-      execSync(`rmdir "${junctionLink}"`, { stdio: "pipe", encoding: "utf8", shell: true });
+      if (process.platform === "win32") {
+        execSync(`Remove-Item -Path "${junctionLink}" -Force -Recurse`, { stdio: "pipe", encoding: "utf8", shell: WIN_SHELL });
+      } else {
+        execSync(`rm -rf "${junctionLink}"`, { stdio: "pipe", encoding: "utf8", shell: WIN_SHELL });
+      }
     }
-    execSync(`mklink /J "${junctionLink}" "${junctionTarget}"`, { stdio: "pipe", encoding: "utf8", shell: true });
+    if (process.platform === "win32") {
+      execSync(`New-Item -ItemType Junction -Path "${junctionLink}" -Target "${junctionTarget}"`, { stdio: "pipe", encoding: "utf8", shell: WIN_SHELL });
+    } else {
+      execSync(`ln -s "${junctionTarget}" "${junctionLink}"`, { stdio: "pipe", encoding: "utf8", shell: WIN_SHELL });
+    }
     steps.push({ step: "Create skills junction", status: "✅", detail: `${junctionLink} → ${junctionTarget}` });
   } catch (e) {
     steps.push({ step: "Create skills junction", status: "❌", detail: e.message });
