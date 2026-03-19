@@ -41,6 +41,7 @@
  *   setup_origo_bc_environment — one-time setup: clone repo, create .claude, copy CLAUDE.md, create skills junction
  *   save_app_range          — upsert a BC extension's app id/name/publisher/idRanges into Cloud Events Storage (source = 'Origo App Range')
  *   check_app_range         — verify a set of BC object ID ranges against all registered apps; reports conflicts and suggests a free range
+ *   prepare_for_pull_request — full PR readiness check: app range sync, skill-driven code analysis, documentation completeness
  *
  * Required env vars: BC_TENANT_ID, BC_CLIENT_ID, BC_CLIENT_SECRET
  *                    MCP_ENCRYPTION_KEY  (64 hex chars = 32 bytes, required for encrypt_data / decrypt_data)
@@ -1189,6 +1190,339 @@ async function toolCheckAppRange({ idRanges, companyId, tenantId, clientId, clie
   };
 }
 
+// ── Prepare for Pull Request ───────────────────────────────────────────────────
+
+async function toolPrepareForPullRequest({ projectPath, standardsRepo, claudeDir, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!projectPath) throw new Error("Parameter 'projectPath' is required (local path to the BC extension project folder)");
+
+  const sep         = process.platform === "win32" ? "\\" : "/";
+  const userProfile = process.env.USERPROFILE || process.env.HOME || "";
+  const resolvedStandardsRepo = standardsRepo || (userProfile ? `${userProfile}${sep}bc-dev-standards` : "");
+  const resolvedClaudeDir     = claudeDir     || (userProfile ? `${userProfile}${sep}.claude`          : "");
+
+  function readFileSafe(p) {
+    try { return fs.readFileSync(p, "utf8"); } catch (_) { return null; }
+  }
+
+  function findFilesRecursive(dir, extension, excludeDirs = []) {
+    const results = [];
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = `${dir}${sep}${entry.name}`;
+        if (entry.isDirectory()) {
+          if (!excludeDirs.includes(entry.name.toLowerCase())) {
+            results.push(...findFilesRecursive(fullPath, extension, excludeDirs));
+          }
+        } else if (entry.isFile() && entry.name.toLowerCase().endsWith(extension)) {
+          results.push(fullPath);
+        }
+      }
+    } catch (_) {}
+    return results;
+  }
+
+  const report = {
+    projectPath,
+    appInfo:        null,
+    appRange:       { status: null, details: null },
+    skills:         [],
+    codeAnalysis:   { filesScanned: 0, issues: [], summary: {} },
+    documentation:  {},
+    requiredActions: [],
+  };
+
+  // ── 1. Read app.json ──────────────────────────────────────────────────────
+  const appJsonPath = `${projectPath}${sep}app.json`;
+  const appJsonRaw  = readFileSafe(appJsonPath);
+  let appJson = null;
+
+  if (!appJsonRaw) {
+    report.requiredActions.push({ severity: "❌", item: "app.json not found", action: `Create app.json at ${appJsonPath}` });
+  } else {
+    try { appJson = JSON.parse(appJsonRaw); } catch (e) {
+      report.requiredActions.push({ severity: "❌", item: "app.json is not valid JSON", action: `Fix JSON syntax: ${e.message}` });
+    }
+  }
+
+  if (appJson) {
+    report.appInfo = {
+      id:           appJson.id           || null,
+      name:         appJson.name         || null,
+      publisher:    appJson.publisher    || null,
+      version:      appJson.version      || null,
+      target:       appJson.target       || null,
+      idRanges:     appJson.idRanges     || [],
+      dependencies: (appJson.dependencies || []).map(d => ({ id: d.id, name: d.name, publisher: d.publisher, version: d.version })),
+    };
+
+    // app.json quality checks
+    if (!appJson.target || appJson.target !== "Cloud")
+      report.requiredActions.push({ severity: "⚠️", item: "app.json: target is not 'Cloud'", action: "Set \"target\": \"Cloud\" in app.json" });
+    if (!appJson.applicationInsightsKey)
+      report.requiredActions.push({ severity: "⚠️", item: "app.json: applicationInsightsKey is missing", action: "Add applicationInsightsKey for production telemetry" });
+
+    // ── 2. Save / verify / conflict-check app range ───────────────────────
+    if (appJson.id && appJson.name && appJson.publisher && Array.isArray(appJson.idRanges) && appJson.idRanges.length) {
+      try {
+        const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+        const company = await getCompany(companyId, conn);
+
+        // Read current stored record for this app
+        const existingResult = await bcTask(conn, company.id, {
+          specversion: "1.0",
+          type:        "Data.Records.Get",
+          source:      "BC Metadata MCP v1.0",
+          subject:     CS_TABLE,
+          data:        JSON.stringify({
+            tableView: `WHERE(Source=CONST(${APP_RANGE_SOURCE}),Id=CONST(${appJson.id}))`,
+            take: 1,
+          }),
+        });
+        const existingRecords = existingResult.result || existingResult.value || [];
+        let existingData = null;
+        if (existingRecords.length) {
+          try { existingData = JSON.parse(Buffer.from((existingRecords[0].fields || {}).Data || "", "base64").toString("utf8")); } catch (_) {}
+        }
+
+        const rangesMatch = existingData &&
+          JSON.stringify(existingData.idRanges) === JSON.stringify(appJson.idRanges) &&
+          existingData.appName  === appJson.name &&
+          existingData.publisher === appJson.publisher;
+
+        // Upsert if new or changed
+        if (!existingData || !rangesMatch) {
+          const blobValue = Buffer.from(JSON.stringify({ appId: appJson.id, appName: appJson.name, publisher: appJson.publisher, idRanges: appJson.idRanges })).toString("base64");
+          await bcTask(conn, company.id, {
+            specversion: "1.0",
+            type:        "Data.Records.Set",
+            source:      "BC Metadata MCP v1.0",
+            subject:     CS_TABLE,
+            data:        JSON.stringify({
+              mode: "upsert",
+              data: [{ primaryKey: { Source: APP_RANGE_SOURCE, Id: appJson.id }, fields: { Data: blobValue } }],
+            }),
+          });
+          report.appRange = {
+            status: existingData ? "✅ Updated" : "✅ Registered",
+            details: existingData ? "App range updated in Cloud Events Storage" : "App range saved to Cloud Events Storage for the first time",
+            company: company.name,
+          };
+        } else {
+          report.appRange = { status: "✅ Verified", details: "App range matches Cloud Events Storage", company: company.name };
+        }
+
+        // Conflict check — skip the app's own ranges
+        const allResult = await bcTask(conn, company.id, {
+          specversion: "1.0",
+          type:        "Data.Records.Get",
+          source:      "BC Metadata MCP v1.0",
+          subject:     CS_TABLE,
+          data:        JSON.stringify({ tableView: `WHERE(Source=CONST(${APP_RANGE_SOURCE}))`, take: 500 }),
+        });
+        const allApps = (allResult.result || allResult.value || []).reduce((acc, rec) => {
+          try { const d = JSON.parse(Buffer.from((rec.fields || {}).Data || "", "base64").toString("utf8")); if (d && d.idRanges) acc.push(d); } catch (_) {}
+          return acc;
+        }, []).filter(a => a.appId !== appJson.id);
+
+        const conflicts = [];
+        for (const checkRange of appJson.idRanges) {
+          for (const app of allApps) {
+            for (const appRange of app.idRanges) {
+              if (checkRange.from <= appRange.to && appRange.from <= checkRange.to) {
+                conflicts.push({ checkedRange: checkRange, conflictingApp: { appId: app.appId, appName: app.appName, publisher: app.publisher, conflictingRange: appRange } });
+              }
+            }
+          }
+        }
+        if (conflicts.length) {
+          report.appRange.conflicts = conflicts;
+          report.requiredActions.push({ severity: "❌", item: `ID range conflicts with ${[...new Set(conflicts.map(c => c.conflictingApp.appName))].join(", ")}`, action: "Resolve overlapping ID ranges before merging" });
+        }
+
+      } catch (e) {
+        report.appRange = { status: "⚠️ BC unreachable", details: e.message.slice(0, 150) };
+        report.requiredActions.push({ severity: "⚠️", item: "Could not verify app range in BC", action: `Check BC connection and retry. Error: ${e.message.slice(0, 100)}` });
+      }
+    } else {
+      report.appRange = { status: "❌ Incomplete", details: "app.json is missing id, name, publisher, or idRanges" };
+      report.requiredActions.push({ severity: "❌", item: "app.json missing id / name / publisher / idRanges", action: "Add missing fields to app.json" });
+    }
+
+    // Look for test app.json (convention: test subfolder)
+    const testDirs = ["test", "Test", "tests", "Tests"];
+    for (const td of testDirs) {
+      const testAppJson = readFileSafe(`${projectPath}${sep}${td}${sep}app.json`);
+      if (testAppJson) {
+        try {
+          const ta = JSON.parse(testAppJson);
+          report.appInfo.testApp = { id: ta.id, name: ta.name, publisher: ta.publisher, idRanges: ta.idRanges || [] };
+          // Verify the test range follows the 9xxxx convention (main range + 30000)
+          if (appJson.idRanges && ta.idRanges) {
+            for (const mr of appJson.idRanges) {
+              const expectedFrom = mr.from + 30000;
+              const expectedTo   = mr.to   + 30000;
+              const match = ta.idRanges.some(tr => tr.from === expectedFrom && tr.to === expectedTo);
+              if (!match) {
+                report.requiredActions.push({ severity: "⚠️", item: `Test app ID range does not follow +30000 convention for main range [${mr.from}-${mr.to}]`, action: `Set test app idRanges to [{ "from": ${expectedFrom}, "to": ${expectedTo} }]` });
+              }
+            }
+          }
+        } catch (_) {}
+        break;
+      }
+    }
+  }
+
+  // ── 3. Read skill files ──────────────────────────────────────────────────
+  const skillsDir = resolvedClaudeDir     ? `${resolvedClaudeDir}${sep}skills`              : null;
+  const fallbackSkillsDir = resolvedStandardsRepo ? `${resolvedStandardsRepo}${sep}skills`  : null;
+  const activeSkillsDir   = (skillsDir && fs.existsSync(skillsDir))
+    ? skillsDir
+    : (fallbackSkillsDir && fs.existsSync(fallbackSkillsDir)) ? fallbackSkillsDir : null;
+
+  if (activeSkillsDir) {
+    try {
+      const skillDirs = fs.readdirSync(activeSkillsDir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name);
+      for (const skillName of skillDirs) {
+        const content = readFileSafe(`${activeSkillsDir}${sep}${skillName}${sep}SKILL.md`);
+        if (content) report.skills.push({ name: skillName, content });
+      }
+    } catch (_) {}
+  }
+  if (!report.skills.length) {
+    report.requiredActions.push({ severity: "⚠️", item: "No skill files found", action: "Run setup_origo_bc_environment to set up the skills junction" });
+  }
+
+  // ── 4. Static AL code analysis ───────────────────────────────────────────
+  const EXCLUDE_DIRS = [".alpackages", ".app", "output", "rad", ".git", "node_modules", ".vscode"];
+  const allAlFiles  = findFilesRecursive(projectPath, ".al", EXCLUDE_DIRS);
+  // Separate test files from main files
+  const mainAlFiles = allAlFiles.filter(f => !/(\\|\/)test(\\|\/|s)/i.test(f));
+
+  report.codeAnalysis.filesScanned = allAlFiles.length;
+
+  const MAX_PER_RULE = 10;
+  const cnt = { withStatement: 0, countNotIsEmpty: 0, fileNaming: 0, longObjectName: 0, calcFieldsInLoop: 0 };
+
+  const AL_OBJECT_TYPES = "table|page|codeunit|report|query|xmlport|enum|interface|permissionset";
+  const OBJECT_DECL_RE  = new RegExp(`^\\s*(${AL_OBJECT_TYPES})\\s+\\d+\\s+"([^"]+)"`, "im");
+
+  for (const filePath of mainAlFiles) {
+    const content = readFileSafe(filePath);
+    if (!content) continue;
+
+    const relPath    = filePath.replace(projectPath, "").replace(/^[/\\]/, "");
+    const fileName   = filePath.split(sep).pop();
+    const fileIssues = [];
+    const lines      = content.split("\n");
+
+    // WITH statement
+    if (cnt.withStatement < MAX_PER_RULE) {
+      const hits = lines.map((l, i) => ({ l: l.trim(), n: i + 1 }))
+        .filter(({ l }) => /^\s*with\s+\w/i.test(l) && !l.startsWith("//") && !l.startsWith("*"));
+      if (hits.length) {
+        fileIssues.push({ rule: "No WITH statements (deprecated)", lines: hits.slice(0, 3).map(h => h.n) });
+        cnt.withStatement += hits.length;
+      }
+    }
+
+    // Count() > 0 instead of IsEmpty()
+    if (cnt.countNotIsEmpty < MAX_PER_RULE) {
+      const hits = lines.map((l, i) => ({ l, n: i + 1 }))
+        .filter(({ l }) => /\.Count\(\)\s*(>|<>|!=)\s*0/i.test(l) && !l.trim().startsWith("//"));
+      if (hits.length) {
+        fileIssues.push({ rule: "Use IsEmpty() instead of Count() > 0", lines: hits.slice(0, 3).map(h => h.n) });
+        cnt.countNotIsEmpty += hits.length;
+      }
+    }
+
+    // CALCFIELDS inside loops
+    if (cnt.calcFieldsInLoop < MAX_PER_RULE) {
+      let insideLoop = false;
+      const repeatLines = [];
+      lines.forEach((l, i) => {
+        const trimmed = l.trim().toLowerCase();
+        if (trimmed.startsWith("repeat")) insideLoop = true;
+        if (trimmed.startsWith("until"))  insideLoop = false;
+        if (insideLoop && /\.calcfields\(/i.test(l) && !l.trim().startsWith("//")) {
+          repeatLines.push(i + 1);
+        }
+      });
+      if (repeatLines.length) {
+        fileIssues.push({ rule: "Do not use CalcFields inside a loop", lines: repeatLines.slice(0, 3) });
+        cnt.calcFieldsInLoop += repeatLines.length;
+      }
+    }
+
+    // File naming: ObjectName.ObjectType.al
+    if (cnt.fileNaming < MAX_PER_RULE) {
+      const validNamingRE = /^.+\.(Table|Page|Codeunit|Report|Query|XMLport|Enum|Interface|TableExt|PageExt|ReportExt|EnumExt|ControlAddin|Profile|PageCustomization|PermissionSet|PermissionSetExt)\.al$/i;
+      if (!validNamingRE.test(fileName)) {
+        fileIssues.push({ rule: "File naming: ObjectName.ObjectType.al", detail: `'${fileName}' does not follow the convention` });
+        cnt.fileNaming++;
+      }
+    }
+
+    // Object name > 30 chars
+    if (cnt.longObjectName < MAX_PER_RULE) {
+      const declMatch = OBJECT_DECL_RE.exec(content);
+      if (declMatch && declMatch[2].length > 30) {
+        fileIssues.push({ rule: "Object name max 30 characters", detail: `"${declMatch[2]}" is ${declMatch[2].length} chars` });
+        cnt.longObjectName++;
+      }
+    }
+
+    if (fileIssues.length) report.codeAnalysis.issues.push({ file: relPath, issues: fileIssues });
+  }
+
+  report.codeAnalysis.summary = cnt;
+
+  if (cnt.withStatement   > 0) report.requiredActions.push({ severity: "❌", item: `WITH statements — ${cnt.withStatement} occurrence(s)`,         action: "Remove all WITH statements (deprecated in AL)" });
+  if (cnt.countNotIsEmpty > 0) report.requiredActions.push({ severity: "⚠️", item: `Count() > 0 instead of IsEmpty() — ${cnt.countNotIsEmpty}`,   action: "Replace .Count() > 0 with not .IsEmpty()" });
+  if (cnt.calcFieldsInLoop> 0) report.requiredActions.push({ severity: "⚠️", item: `CalcFields inside loops — ${cnt.calcFieldsInLoop} occurrence(s)`, action: "Move CalcFields calls outside repeat..until loops" });
+  if (cnt.fileNaming      > 0) report.requiredActions.push({ severity: "⚠️", item: `File naming violations — ${cnt.fileNaming} file(s)`,           action: "Rename files to ObjectName.ObjectType.al" });
+  if (cnt.longObjectName  > 0) report.requiredActions.push({ severity: "⚠️", item: `Object names > 30 characters — ${cnt.longObjectName}`,         action: "Shorten object names to max 30 characters" });
+
+  // ── 5. Documentation check ───────────────────────────────────────────────
+  const readmeExists    = fs.existsSync(`${projectPath}${sep}README.md`);
+  const changelogExists = fs.existsSync(`${projectPath}${sep}CHANGELOG.md`);
+  const hasHelpDir      = ["help", "Help", "docs", "Docs"].some(d => fs.existsSync(`${projectPath}${sep}${d}`));
+  const permSetFiles    = allAlFiles.filter(f => /PermissionSet/i.test(f));
+
+  // Check README has actual content (not just a header)
+  const readmeContent = readmeExists ? readFileSafe(`${projectPath}${sep}README.md`) : null;
+  const readmeHasContent = readmeContent && readmeContent.trim().length > 100;
+
+  report.documentation = {
+    readme:      readmeExists     ? (readmeHasContent ? "✅ README.md — has content" : "⚠️ README.md — appears empty or minimal") : "❌ README.md missing",
+    changelog:   changelogExists  ? "✅ CHANGELOG.md found"     : "⚠️  CHANGELOG.md missing",
+    helpDir:     hasHelpDir       ? "✅ Help/docs folder found"  : "⚠️  No help or docs folder",
+    permSets:    permSetFiles.length ? `✅ ${permSetFiles.length} permission set file(s)` : "⚠️  No permission set files found",
+  };
+
+  if (!readmeExists)
+    report.requiredActions.push({ severity: "❌", item: "README.md is missing", action: "Create README.md with: app description, prerequisites, setup steps, feature overview, and version history" });
+  else if (!readmeHasContent)
+    report.requiredActions.push({ severity: "⚠️", item: "README.md appears minimal", action: "Expand README.md — add description, setup, and feature documentation" });
+  if (!changelogExists)
+    report.requiredActions.push({ severity: "⚠️", item: "CHANGELOG.md is missing", action: "Create CHANGELOG.md listing changes per version" });
+  if (!hasHelpDir)
+    report.requiredActions.push({ severity: "⚠️", item: "No help or docs folder", action: "Create a help/ or docs/ folder with page/codeunit usage documentation" });
+  if (!permSetFiles.length)
+    report.requiredActions.push({ severity: "⚠️", item: "No permission set files found", action: "Add a PermissionSet.al file defining required object permissions" });
+
+  // ── 6. Overall status ────────────────────────────────────────────────────
+  const errors   = report.requiredActions.filter(a => a.severity === "❌").length;
+  const warnings = report.requiredActions.filter(a => a.severity === "⚠️").length;
+
+  report.overall = errors   > 0 ? `❌ Not ready for PR — ${errors} error(s), ${warnings} warning(s)`
+                 : warnings > 0 ? `⚠️ Ready with warnings — ${warnings} item(s) to address`
+                                : "✅ Ready for pull request";
+
+  return report;
+}
+
 // ── BC Dev Standards tools (local git / file-system, for local development use) ──
 
 const BC_DEV_STANDARDS_REPO = "https://github.com/OrigoSoftwareSolutions/bc-dev-standards.git";
@@ -1801,6 +2135,19 @@ const TOOLS = [
     },
   },
   {
+    name:        "prepare_for_pull_request",
+    description: "Prepares a Business Central AL extension project for a pull request. Reads app.json, saves or verifies the app ID range in Cloud Events Storage, checks for range conflicts with other registered apps, validates the test app ID range follows the +30000 convention, reads all skill files from the skills directory, performs static AL code analysis (WITH statements, CalcFields in loops, Count() vs IsEmpty(), file naming, object name length), and checks documentation completeness (README.md, CHANGELOG.md, help folder, permission sets). Returns a full PR readiness report with required actions.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        projectPath:   { type: "string", description: "Local path to the root of the BC extension project (the folder containing app.json)." },
+        standardsRepo: { type: "string", description: "Local path to the bc-dev-standards repository. Falls back to x-standards-repo header or %USERPROFILE%\\bc-dev-standards." },
+        claudeDir:     { type: "string", description: "Local path to the .claude directory. Falls back to x-claude-dir header or %USERPROFILE%\\.claude." },
+      },
+      required: ["projectPath"],
+    },
+  },
+  {
     name:        "save_app_range",
     description: "Saves a BC extension app's ID range information to the Cloud Events Storage table (source = 'Origo App Range'). Stores the app id, name, publisher and idRanges from app.json. Uses upsert semantics keyed on the app id.",
     inputSchema: {
@@ -1990,6 +2337,7 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "get_integration_timestamp":     content = await toolGetIntegrationTimestamp(args);     break;
           case "set_integration_timestamp":     content = await toolSetIntegrationTimestamp(args);     break;
           case "reverse_integration_timestamp": content = await toolReverseIntegrationTimestamp(args); break;
+          case "prepare_for_pull_request":      content = await toolPrepareForPullRequest(args);      break;
           case "save_app_range":                content = await toolSaveAppRange(args);                break;
           case "check_app_range":               content = await toolCheckAppRange(args);               break;
           case "set_config":                    content = await toolSetConfig(args);                    break;
