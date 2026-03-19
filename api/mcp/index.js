@@ -36,6 +36,9 @@
  *
  *   encrypt_data   — AES-256-GCM symmetric encryption using server-side MCP_ENCRYPTION_KEY
  *   decrypt_data   — AES-256-GCM symmetric decryption using server-side MCP_ENCRYPTION_KEY
+ *   check_standards_status  — full Origo BC environment check: GitHub sync + local repo, .claude, CLAUDE.md, skills junction, mcp.json, git, node
+ *   update_bc_standards     — pull latest bc-dev-standards and copy CLAUDE.md to .claude
+ *   setup_origo_bc_environment — one-time setup: clone repo, create .claude, copy CLAUDE.md, create skills junction
  *
  * Required env vars: BC_TENANT_ID, BC_CLIENT_ID, BC_CLIENT_SECRET
  *                    MCP_ENCRYPTION_KEY  (64 hex chars = 32 bytes, required for encrypt_data / decrypt_data)
@@ -1083,47 +1086,228 @@ function execGit(command, cwd) {
   }).trim();
 }
 
-async function toolCheckStandardsStatus({ githubToken, standardsRepo } = {}) {
-  const ghHeaders = {
-    Authorization: `Bearer ${githubToken || ""}`,
-    "User-Agent":  "BC-MCP-Server",
-    Accept:        "application/vnd.github+json",
-  };
-  const { statusCode, body: ghBody } = await httpsRequest(
-    GITHUB_API_HOST,
-    "/repos/OrigoSoftwareSolutions/bc-dev-standards/commits/main",
-    "GET",
-    ghHeaders,
-    null,
-  );
-  if (statusCode >= 400) throw new Error(`GitHub API HTTP ${statusCode}: ${ghBody.slice(0, 300)}`);
+async function toolCheckStandardsStatus({ githubToken, standardsRepo, claudeDir } = {}) {
+  const userProfile = process.env.USERPROFILE || process.env.HOME || "";
+  const appData     = process.env.APPDATA     || "";
+  const sep         = process.platform === "win32" ? "\\" : "/";
+  const sh          = process.platform === "win32" ? "cmd.exe" : "/bin/sh";
+  const repoPath    = standardsRepo || (userProfile ? `${userProfile}${sep}bc-dev-standards` : "");
+  const claudePath  = claudeDir     || (userProfile ? `${userProfile}${sep}.claude`          : "");
 
-  const remote = JSON.parse(ghBody);
-  const remoteSha     = remote.sha;
-  const remoteMessage = remote.commit && remote.commit.message ? remote.commit.message.split("\n")[0] : "";
-  const remoteAuthor  = remote.commit && remote.commit.author  ? remote.commit.author.name : "";
-  const remoteDate    = remote.commit && remote.commit.author  ? remote.commit.author.date : "";
-
-  let localSha = null;
-  let upToDate  = null;
-  if (standardsRepo) {
-    try {
-      localSha = execGit("git rev-parse HEAD", standardsRepo);
-      upToDate  = localSha === remoteSha;
-    } catch (e) {
-      localSha = `Error reading local repo: ${e.message}`;
-      upToDate  = false;
+  // ── 1. GitHub Sync ──────────────────────────────────────────────────────────
+  let remoteSha = null, remoteMessage = "", githubReachable = false;
+  try {
+    const ghHeaders = {
+      ...(githubToken ? { Authorization: `Bearer ${githubToken}` } : {}),
+      "User-Agent": "BC-MCP-Server",
+      Accept:       "application/vnd.github+json",
+    };
+    const { statusCode, body: ghBody } = await httpsRequest(
+      GITHUB_API_HOST,
+      "/repos/OrigoSoftwareSolutions/bc-dev-standards/commits/main",
+      "GET", ghHeaders, null,
+    );
+    if (statusCode < 400) {
+      const r      = JSON.parse(ghBody);
+      remoteSha    = r.sha || null;
+      remoteMessage = (r.commit && r.commit.message) ? r.commit.message.split("\n")[0] : "";
+      githubReachable = true;
     }
+  } catch (_) { /* unreachable */ }
+
+  // ── 2. Standards repo ───────────────────────────────────────────────────────
+  let localSha = null, localMessage = "", repoExists = false, repoIsGit = false;
+  try {
+    if (repoPath) repoExists = fs.existsSync(repoPath);
+    if (repoExists) {
+      try {
+        localSha     = execGit("git rev-parse HEAD",    repoPath);
+        localMessage = execGit("git log -1 --format=%s", repoPath);
+        repoIsGit    = true;
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  const upToDate = (remoteSha && localSha) ? (localSha === remoteSha) : null;
+
+  // ── 3. .claude folder ───────────────────────────────────────────────────────
+  let claudeExists = false;
+  try { if (claudePath) claudeExists = fs.existsSync(claudePath); } catch (_) {}
+
+  // ── 4. CLAUDE.md sync ───────────────────────────────────────────────────────
+  const claudeMdDest = claudePath ? `${claudePath}${sep}CLAUDE.md` : "";
+  const claudeMdSrc  = repoPath   ? `${repoPath}${sep}CLAUDE.md`   : "";
+  let claudeMdExists = false, claudeMdInSync = false;
+  try {
+    if (claudeMdDest) claudeMdExists = fs.existsSync(claudeMdDest);
+    if (claudeMdExists && claudeMdSrc && fs.existsSync(claudeMdSrc)) {
+      const hashA = crypto.createHash("sha256").update(fs.readFileSync(claudeMdDest)).digest("hex");
+      const hashB = crypto.createHash("sha256").update(fs.readFileSync(claudeMdSrc)).digest("hex");
+      claudeMdInSync = (hashA === hashB);
+    }
+  } catch (_) {}
+
+  // ── 5. Skills junction ──────────────────────────────────────────────────────
+  const junctionPath = claudePath ? `${claudePath}${sep}skills` : "";
+  let junctionExists = false, junctionIsLink = false, skillCount = 0;
+  try {
+    if (junctionPath) {
+      const stat = fs.lstatSync(junctionPath);
+      junctionExists = true;
+      junctionIsLink = stat.isSymbolicLink();
+      try {
+        skillCount = fs.readdirSync(junctionPath).filter(f => {
+          try { return fs.statSync(`${junctionPath}${sep}${f}`).isDirectory(); } catch (_) { return false; }
+        }).length;
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  // ── 6. mcp.json ─────────────────────────────────────────────────────────────
+  const mcpJsonPath = appData ? `${appData}\\Code\\User\\mcp.json` : "";
+  let mcpExists = false, mcpHasBcOrigo = false;
+  let mcpHasEncConn = false, mcpHasGithubToken = false, mcpHasStdRepo = false, mcpHasClaudeDir = false;
+  try {
+    if (mcpJsonPath && fs.existsSync(mcpJsonPath)) {
+      const mcpObj  = JSON.parse(fs.readFileSync(mcpJsonPath, "utf8"));
+      mcpExists     = true;
+      const servers = mcpObj.servers || {};
+      const bcOrigo = servers["bc-origo"] || servers["bc_origo"] || null;
+      if (bcOrigo) {
+        mcpHasBcOrigo     = true;
+        const h           = bcOrigo.headers || {};
+        mcpHasEncConn     = !!(h["x-encrypted-conn"]  && String(h["x-encrypted-conn"]).trim());
+        mcpHasGithubToken = !!(h["x-github-token"]    && String(h["x-github-token"]).trim());
+        mcpHasStdRepo     = !!(h["x-standards-repo"]  && String(h["x-standards-repo"]).trim());
+        mcpHasClaudeDir   = !!(h["x-claude-dir"]      && String(h["x-claude-dir"]).trim());
+      }
+    }
+  } catch (_) {}
+
+  // ── 7. Git available ────────────────────────────────────────────────────────
+  let gitVersion = null;
+  try { gitVersion = execSync("git --version", { stdio: "pipe", encoding: "utf8", shell: sh }).trim(); } catch (_) {}
+
+  // ── 8. Node available ───────────────────────────────────────────────────────
+  const nodeVersion = process.version || null;
+
+  // ── Derived status ──────────────────────────────────────────────────────────
+  const claudeMdOk    = claudeMdExists && claudeMdInSync;
+  const junctionOk    = junctionExists && junctionIsLink;
+  const mcpConfigured = mcpHasBcOrigo && mcpHasEncConn && mcpHasGithubToken && mcpHasStdRepo && mcpHasClaudeDir;
+  const allGood       = repoExists && repoIsGit && claudeExists && claudeMdOk
+                     && junctionOk && mcpConfigured && !!gitVersion
+                     && (upToDate === true || (upToDate === null && !githubReachable && repoExists));
+
+  const ck = (v) => v ? "\u2705" : "\u274C";  // ✅ ❌
+
+  let syncIcon, syncStatus;
+  if (!githubReachable) { syncIcon = "\u26A0\uFE0F"; syncStatus = "GitHub unreachable — cannot verify sync"; }
+  else if (upToDate === null) { syncIcon = "\u26A0\uFE0F"; syncStatus = "Local repo not found — cannot compare"; }
+  else if (upToDate)          { syncIcon = "\u2705";       syncStatus = "Up to date"; }
+  else                        { syncIcon = "\u26A0\uFE0F"; syncStatus = "Behind — update needed"; }
+
+  const lSha = localSha  ? localSha.slice(0, 7)  : "n/a";
+  const rSha = remoteSha ? remoteSha.slice(0, 7)  : "n/a";
+  const lMsg = localMessage  ? ` \u2014 ${localMessage.slice(0, 28)}`  : "";
+  const rMsg = remoteMessage ? ` \u2014 ${remoteMessage.slice(0, 28)}` : "";
+
+  const W   = 62;
+  const bar = (s) => `\u2551${s.padEnd(W)}\u2551`;
+  const div = `\u2560${"\u2550".repeat(W)}\u2563`;
+
+  const overallText = allGood
+    ? "\u2705 All good"
+    : (mcpConfigured && repoExists && claudeExists && junctionOk && claudeMdOk
+      ? "\u26A0\uFE0F Action needed"
+      : "\u274C Setup required");
+
+  const gitVer  = gitVersion  ? gitVersion.replace("git version ", "").slice(0, 20) : "not found";
+  const nodeVer = nodeVersion ? nodeVersion.slice(0, 20) : "not found";
+
+  const lines = [
+    `\u2554${"\u2550".repeat(W)}\u2557`,
+    bar("        Origo BC Development Environment \u2014 Status"),
+    div,
+    bar("  GitHub Sync"),
+    div,
+    bar(`  ${syncIcon}  Sync status            : ${syncStatus}`),
+    bar(`  ${ck(!!localSha)}  Local SHA              : ${lSha}${lMsg}`),
+    bar(`  ${ck(!!remoteSha)}  Remote SHA             : ${rSha}${rMsg}`),
+    div,
+    bar("  Local Environment"),
+    div,
+    bar(`  ${ck(repoExists && repoIsGit)}  Standards repo present`),
+    bar(`  ${ck(claudeExists)}  .claude folder exists`),
+    bar(`  ${ck(claudeMdOk)}  CLAUDE.md applied and in sync`),
+    bar(`  ${ck(junctionOk)}  Skills junction active         : ${skillCount} skills found`),
+    bar(`  ${ck(mcpConfigured)}  mcp.json configured`),
+    bar(`  ${ck(!!gitVersion)}  Git available                  : ${gitVer}`),
+    bar(`  ${ck(!!nodeVersion)}  Node available                 : ${nodeVer}`),
+    div,
+    bar(`  Overall : ${overallText}`),
+    `\u255A${"\u2550".repeat(W)}\u255D`,
+  ];
+
+  // ── Next Steps ──────────────────────────────────────────────────────────────
+  const nextSteps = [];
+  if (!githubReachable) {
+    nextSteps.push({ icon: "\u26A0\uFE0F", item: "GitHub could not be reached",
+      action: "Check your internet connection and x-github-token in mcp.json" });
+  } else if (upToDate === false) {
+    nextSteps.push({ icon: "\u26A0\uFE0F", item: "Standards are behind GitHub",
+      action: 'Ask Claude: "Update my BC standards"' });
+  }
+  if (!repoExists)
+    nextSteps.push({ icon: "\u274C", item: `Standards repo not found at ${repoPath}`,
+      action: 'Ask Claude: "Set up my Origo BC development environment"' });
+  if (!claudeExists)
+    nextSteps.push({ icon: "\u274C", item: ".claude folder does not exist",
+      action: 'Ask Claude: "Set up my Origo BC development environment"' });
+  if (claudeMdExists && !claudeMdInSync)
+    nextSteps.push({ icon: "\u274C", item: "CLAUDE.md is out of sync with standards repo",
+      action: 'Ask Claude: "Update my BC standards"' });
+  else if (!claudeMdExists && (repoExists || claudeExists))
+    nextSteps.push({ icon: "\u274C", item: "CLAUDE.md is missing from .claude folder",
+      action: 'Ask Claude: "Update my BC standards"' });
+  if (!junctionOk)
+    nextSteps.push({ icon: "\u274C", item: "Skills junction is missing or broken",
+      action: 'Ask Claude: "Set up my Origo BC development environment"' });
+  if (!mcpExists)
+    nextSteps.push({ icon: "\u274C", item: "mcp.json not found",
+      action: 'Ask Claude: "Set up my Origo BC development environment"' });
+  else if (!mcpHasBcOrigo)
+    nextSteps.push({ icon: "\u274C", item: "bc-origo server entry missing from mcp.json",
+      action: 'Ask Claude: "Set up my Origo BC development environment"' });
+  else {
+    if (!mcpHasEncConn)
+      nextSteps.push({ icon: "\u274C", item: "x-encrypted-conn missing in mcp.json",
+        action: "Add your encrypted connection string to mcp.json \u2192 servers \u2192 bc-origo \u2192 headers \u2192 x-encrypted-conn" });
+    if (!mcpHasGithubToken)
+      nextSteps.push({ icon: "\u274C", item: "x-github-token missing in mcp.json",
+        action: "Add a GitHub fine-grained PAT to mcp.json \u2192 servers \u2192 bc-origo \u2192 headers \u2192 x-github-token" });
+    if (!mcpHasStdRepo)
+      nextSteps.push({ icon: "\u274C", item: "x-standards-repo missing in mcp.json",
+        action: "Add the local path to bc-dev-standards in mcp.json \u2192 servers \u2192 bc-origo \u2192 headers \u2192 x-standards-repo" });
+    if (!mcpHasClaudeDir)
+      nextSteps.push({ icon: "\u274C", item: "x-claude-dir missing in mcp.json",
+        action: "Add the local path to .claude folder in mcp.json \u2192 servers \u2192 bc-origo \u2192 headers \u2192 x-claude-dir" });
+  }
+  if (!gitVersion)
+    nextSteps.push({ icon: "\u274C", item: "git is not available in PATH",
+      action: "Install Git for Windows and restart your terminal/IDE" });
+
+  let output = lines.join("\n");
+  if (nextSteps.length > 0) {
+    output += "\n\nNEXT STEPS";
+    for (const step of nextSteps) {
+      output += `\n  ${step.icon}  ${step.item}\n      \u2192 ${step.action}\n`;
+    }
+  } else {
+    output += "\n\n  \u2705 Your Origo BC development environment is fully configured and up to date.\n     You are ready to develop BC extensions.";
   }
 
-  return {
-    remoteSha,
-    remoteLatestCommit: { message: remoteMessage, author: remoteAuthor, date: remoteDate },
-    localSha,
-    upToDate,
-    standardsRepo: standardsRepo || null,
-    ...(standardsRepo ? {} : { note: "Pass standardsRepo to compare against local HEAD" }),
-  };
+  return { summary: output };
 }
 
 async function toolUpdateBcStandards({ standardsRepo, claudeDir } = {}) {
@@ -1541,12 +1725,13 @@ const TOOLS = [
   },
   {
     name:        "check_standards_status",
-    description: "Checks whether the local bc-dev-standards repository is up to date with the remote on GitHub. Calls the GitHub API to fetch the latest commit on main and compares it with the local HEAD. Requires a GitHub fine-grained PAT via githubToken or the x-github-token request header.",
+    description: "Check the Origo BC development standards GitHub sync status and verify the full local environment setup including .claude folder, CLAUDE.md, skills junction, and mcp.json configuration",
     inputSchema: {
       type:       "object",
       properties: {
         githubToken:   { type: "string", description: "GitHub fine-grained PAT for the bc-dev-standards repo. Falls back to the x-github-token request header." },
-        standardsRepo: { type: "string", description: "Local path to the cloned bc-dev-standards repository (e.g. C:\\Users\\you\\bc-dev-standards). Falls back to the x-standards-repo request header." },
+        standardsRepo: { type: "string", description: "Local path to the cloned bc-dev-standards repository. Falls back to x-standards-repo header or %USERPROFILE%\\bc-dev-standards." },
+        claudeDir:     { type: "string", description: "Local path to the .claude directory. Falls back to x-claude-dir header or %USERPROFILE%\\.claude." },
       },
     },
   },
