@@ -1075,7 +1075,12 @@ const BC_DEV_STANDARDS_REPO = "https://github.com/OrigoSoftwareSolutions/bc-dev-
 const GITHUB_API_HOST        = "api.github.com";
 
 function execGit(command, cwd) {
-  return execSync(command, { cwd, stdio: "pipe", encoding: "utf8" }).trim();
+  return execSync(command, {
+    cwd,
+    stdio:    "pipe",
+    encoding: "utf8",
+    shell:    process.platform === "win32" ? "cmd.exe" : "/bin/sh",
+  }).trim();
 }
 
 async function toolCheckStandardsStatus({ githubToken, standardsRepo } = {}) {
@@ -1158,7 +1163,7 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
   // 1. Check git
   let gitVersion;
   try {
-    gitVersion = execSync("git --version", { stdio: "pipe", encoding: "utf8" }).trim();
+    gitVersion = execSync("git --version", { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh" }).trim();
     steps.push({ step: "Check git", status: "✅", detail: gitVersion });
   } catch (e) {
     steps.push({ step: "Check git", status: "❌", detail: e.message });
@@ -1168,7 +1173,7 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
   // 2. Clone or pull bc-dev-standards
   if (!fs.existsSync(standardsRepo)) {
     try {
-      execSync(`git clone ${BC_DEV_STANDARDS_REPO} "${standardsRepo}"`, { stdio: "pipe", encoding: "utf8" });
+      execSync(`git clone ${BC_DEV_STANDARDS_REPO} "${standardsRepo}"`, { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh" });
       steps.push({ step: "Clone bc-dev-standards", status: "✅", detail: `Cloned to ${standardsRepo}` });
     } catch (e) {
       steps.push({ step: "Clone bc-dev-standards", status: "❌", detail: e.message });
