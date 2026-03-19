@@ -63,8 +63,10 @@ function validateTableName(table) {
   }
 }
 
-const https  = require("https");
-const crypto = require("crypto");
+const https        = require("https");
+const crypto       = require("crypto");
+const { execSync } = require("child_process");
+const fs           = require("fs");
 
 const BC_HOST   = "api.businesscentral.dynamics.com";
 const MSFT_HOST = "login.microsoftonline.com";
@@ -1067,6 +1069,159 @@ async function toolGetConfig({ source, id, decrypt = false, __allowDecrypt = fal
   return { company: company.name, source, id, found: true, encrypted: decrypt, data: parsed };
 }
 
+// ── BC Dev Standards tools (local git / file-system, for local development use) ──
+
+const BC_DEV_STANDARDS_REPO = "https://github.com/OrigoSoftwareSolutions/bc-dev-standards.git";
+const GITHUB_API_HOST        = "api.github.com";
+
+function execGit(command, cwd) {
+  return execSync(command, { cwd, stdio: "pipe", encoding: "utf8" }).trim();
+}
+
+async function toolCheckStandardsStatus({ githubToken, standardsRepo } = {}) {
+  const ghHeaders = {
+    Authorization: `Bearer ${githubToken || ""}`,
+    "User-Agent":  "BC-MCP-Server",
+    Accept:        "application/vnd.github+json",
+  };
+  const { statusCode, body: ghBody } = await httpsRequest(
+    GITHUB_API_HOST,
+    "/repos/OrigoSoftwareSolutions/bc-dev-standards/commits/main",
+    "GET",
+    ghHeaders,
+    null,
+  );
+  if (statusCode >= 400) throw new Error(`GitHub API HTTP ${statusCode}: ${ghBody.slice(0, 300)}`);
+
+  const remote = JSON.parse(ghBody);
+  const remoteSha     = remote.sha;
+  const remoteMessage = remote.commit && remote.commit.message ? remote.commit.message.split("\n")[0] : "";
+  const remoteAuthor  = remote.commit && remote.commit.author  ? remote.commit.author.name : "";
+  const remoteDate    = remote.commit && remote.commit.author  ? remote.commit.author.date : "";
+
+  let localSha = null;
+  let upToDate  = null;
+  if (standardsRepo) {
+    try {
+      localSha = execGit("git rev-parse HEAD", standardsRepo);
+      upToDate  = localSha === remoteSha;
+    } catch (e) {
+      localSha = `Error reading local repo: ${e.message}`;
+      upToDate  = false;
+    }
+  }
+
+  return {
+    remoteSha,
+    remoteLatestCommit: { message: remoteMessage, author: remoteAuthor, date: remoteDate },
+    localSha,
+    upToDate,
+    standardsRepo: standardsRepo || null,
+    ...(standardsRepo ? {} : { note: "Pass standardsRepo to compare against local HEAD" }),
+  };
+}
+
+async function toolUpdateBcStandards({ standardsRepo, claudeDir } = {}) {
+  if (!standardsRepo) throw new Error("Parameter 'standardsRepo' is required (local path to bc-dev-standards repo)");
+  if (!claudeDir)     throw new Error("Parameter 'claudeDir' is required (local path to .claude directory)");
+
+  const beforeSha = execGit("git rev-parse HEAD", standardsRepo);
+  execGit("git pull --ff-only", standardsRepo);
+  const afterSha  = execGit("git rev-parse HEAD", standardsRepo);
+
+  let commits = [];
+  if (beforeSha !== afterSha) {
+    const log = execGit(`git log --oneline ${beforeSha}..${afterSha}`, standardsRepo);
+    commits = log ? log.split("\n") : [];
+  }
+
+  const claudeMdSrc  = `${standardsRepo}\\CLAUDE.md`;
+  const claudeMdDest = `${claudeDir}\\CLAUDE.md`;
+  fs.copyFileSync(claudeMdSrc, claudeMdDest);
+
+  return {
+    beforeSha,
+    afterSha,
+    updated: beforeSha !== afterSha,
+    commits,
+    claudeMdCopied: claudeMdDest,
+    note: "Skills folder updates automatically via the existing directory junction.",
+  };
+}
+
+async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
+  if (!standardsRepo) throw new Error("Parameter 'standardsRepo' is required (local path where bc-dev-standards will be cloned)");
+  if (!claudeDir)     throw new Error("Parameter 'claudeDir' is required (local path to .claude directory)");
+
+  const steps = [];
+
+  // 1. Check git
+  let gitVersion;
+  try {
+    gitVersion = execSync("git --version", { stdio: "pipe", encoding: "utf8" }).trim();
+    steps.push({ step: "Check git", status: "✅", detail: gitVersion });
+  } catch (e) {
+    steps.push({ step: "Check git", status: "❌", detail: e.message });
+    return { steps, success: false, error: "git is not available in PATH — install Git for Windows and retry." };
+  }
+
+  // 2. Clone or pull bc-dev-standards
+  if (!fs.existsSync(standardsRepo)) {
+    try {
+      execSync(`git clone ${BC_DEV_STANDARDS_REPO} "${standardsRepo}"`, { stdio: "pipe", encoding: "utf8" });
+      steps.push({ step: "Clone bc-dev-standards", status: "✅", detail: `Cloned to ${standardsRepo}` });
+    } catch (e) {
+      steps.push({ step: "Clone bc-dev-standards", status: "❌", detail: e.message });
+      return { steps, success: false };
+    }
+  } else {
+    try {
+      execGit("git pull --ff-only", standardsRepo);
+      steps.push({ step: "Pull bc-dev-standards", status: "✅", detail: `Updated at ${standardsRepo}` });
+    } catch (e) {
+      steps.push({ step: "Pull bc-dev-standards", status: "❌", detail: e.message });
+    }
+  }
+
+  // 3. Create claudeDir if absent
+  if (!fs.existsSync(claudeDir)) {
+    try {
+      fs.mkdirSync(claudeDir, { recursive: true });
+      steps.push({ step: "Create .claude directory", status: "✅", detail: `Created ${claudeDir}` });
+    } catch (e) {
+      steps.push({ step: "Create .claude directory", status: "❌", detail: e.message });
+      return { steps, success: false };
+    }
+  } else {
+    steps.push({ step: "Create .claude directory", status: "✅", detail: `Already exists: ${claudeDir}` });
+  }
+
+  // 4. Copy CLAUDE.md
+  const claudeMdSrc  = `${standardsRepo}\\CLAUDE.md`;
+  const claudeMdDest = `${claudeDir}\\CLAUDE.md`;
+  try {
+    fs.copyFileSync(claudeMdSrc, claudeMdDest);
+    steps.push({ step: "Copy CLAUDE.md", status: "✅", detail: `${claudeMdSrc} → ${claudeMdDest}` });
+  } catch (e) {
+    steps.push({ step: "Copy CLAUDE.md", status: "❌", detail: e.message });
+  }
+
+  // 5. Create junction: claudeDir\skills → standardsRepo\skills
+  const junctionLink   = `${claudeDir}\\skills`;
+  const junctionTarget = `${standardsRepo}\\skills`;
+  try {
+    if (fs.existsSync(junctionLink)) {
+      execSync(`rmdir "${junctionLink}"`, { stdio: "pipe", encoding: "utf8", shell: true });
+    }
+    execSync(`mklink /J "${junctionLink}" "${junctionTarget}"`, { stdio: "pipe", encoding: "utf8", shell: true });
+    steps.push({ step: "Create skills junction", status: "✅", detail: `${junctionLink} → ${junctionTarget}` });
+  } catch (e) {
+    steps.push({ step: "Create skills junction", status: "❌", detail: e.message });
+  }
+
+  return { steps, success: steps.every(s => s.status === "✅") };
+}
+
 // ── MCP Tool definitions (JSON Schema) ────────────────────────────────────────
 
 const TOOLS = [
@@ -1379,11 +1534,46 @@ const TOOLS = [
       required: ["ciphertext"],
     },
   },
+  {
+    name:        "check_standards_status",
+    description: "Checks whether the local bc-dev-standards repository is up to date with the remote on GitHub. Calls the GitHub API to fetch the latest commit on main and compares it with the local HEAD. Requires a GitHub fine-grained PAT via githubToken or the x-github-token request header.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        githubToken:   { type: "string", description: "GitHub fine-grained PAT for the bc-dev-standards repo. Falls back to the x-github-token request header." },
+        standardsRepo: { type: "string", description: "Local path to the cloned bc-dev-standards repository (e.g. C:\\Users\\you\\bc-dev-standards). Falls back to the x-standards-repo request header." },
+      },
+    },
+  },
+  {
+    name:        "update_bc_standards",
+    description: "Pulls the latest changes from the bc-dev-standards GitHub repository and copies CLAUDE.md to the .claude directory. Reports the before and after commit SHAs and all commit messages applied. The skills folder updates automatically via the existing directory junction. Run setup_origo_bc_environment first if the repo is not yet cloned.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        standardsRepo: { type: "string", description: "Local path to the cloned bc-dev-standards repository. Falls back to the x-standards-repo request header." },
+        claudeDir:     { type: "string", description: "Local path to the .claude directory (e.g. C:\\Users\\you\\.claude). Falls back to the x-claude-dir request header." },
+      },
+      required: ["standardsRepo", "claudeDir"],
+    },
+  },
+  {
+    name:        "setup_origo_bc_environment",
+    description: "One-time setup: verifies git is in PATH, clones or updates bc-dev-standards to the given local path, creates the .claude directory, copies CLAUDE.md, and creates a directory junction from .claude\\skills to bc-dev-standards\\skills. Returns a step-by-step ✅/❌ status summary. Must be run with the MCP server running locally.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        standardsRepo: { type: "string", description: "Local path where bc-dev-standards will be cloned or updated (e.g. C:\\Users\\you\\bc-dev-standards). Falls back to the x-standards-repo request header." },
+        claudeDir:     { type: "string", description: "Local path to the .claude directory (e.g. C:\\Users\\you\\.claude). Falls back to the x-claude-dir request header." },
+      },
+      required: ["standardsRepo", "claudeDir"],
+    },
+  },
 ];
 
 // ── JSON-RPC 2.0 dispatcher ────────────────────────────────────────────────────
 
-async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = "", allowDecrypt = false } = {}) {
+async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = "", headerGithubToken = "", headerStandardsRepo = "", headerClaudeDir = "", allowDecrypt = false } = {}) {
   if (!msg || msg.jsonrpc !== "2.0") {
     return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid Request" } };
   }
@@ -1432,8 +1622,11 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
         args.__allowDecrypt = !!allowDecrypt;
         // Inject header-provided defaults as workspace-level fallbacks
         // (per-call arguments always take priority).
-        if (headerEncryptedConn && !args.encryptedConn) args.encryptedConn = headerEncryptedConn;
+        if (headerEncryptedConn  && !args.encryptedConn)  args.encryptedConn  = headerEncryptedConn;
         if (headerCompanyId    && !args.companyId)    args.companyId    = headerCompanyId;
+        if (headerGithubToken  && !args.githubToken)  args.githubToken  = headerGithubToken;
+        if (headerStandardsRepo && !args.standardsRepo) args.standardsRepo = headerStandardsRepo;
+        if (headerClaudeDir    && !args.claudeDir)    args.claudeDir    = headerClaudeDir;
         let content;
 
         switch (toolName) {
@@ -1460,6 +1653,9 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "get_config":                    content = await toolGetConfig(args);                    break;
           case "encrypt_data":                  content = toolEncryptData(args);                       break;
           case "decrypt_data":                  content = toolDecryptData(args, { allowExternal: !!allowDecrypt }); break;
+          case "check_standards_status":        content = await toolCheckStandardsStatus(args);        break;
+          case "update_bc_standards":           content = await toolUpdateBcStandards(args);           break;
+          case "setup_origo_bc_environment":    content = await toolSetupOrigoEnv(args);               break;
           default:
             return {
               jsonrpc: "2.0", id,
@@ -1675,7 +1871,7 @@ module.exports = async function (context, req) {
       headers: {
         "Access-Control-Allow-Origin":  "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, x-encrypted-conn, x-company-id",
+        "Access-Control-Allow-Headers": "Content-Type, x-encrypted-conn, x-company-id, x-github-token, x-standards-repo, x-claude-dir",
       },
     };
     return;
@@ -1695,22 +1891,25 @@ module.exports = async function (context, req) {
   }
 
   // Read per-workspace defaults from request headers.
-  // Set in .vscode/mcp.json → headers → "x-encrypted-conn" / "x-company-id".
-  const headerEncryptedConn = req.headers["x-encrypted-conn"] || "";
-  const headerCompanyId     = req.headers["x-company-id"]     || "";
-  const allowDecrypt        = isTrustedDecryptCaller(req);
+  // Set in mcp.json → headers → "x-encrypted-conn" / "x-company-id" / "x-github-token" etc.
+  const headerEncryptedConn  = req.headers["x-encrypted-conn"]  || "";
+  const headerCompanyId      = req.headers["x-company-id"]      || "";
+  const headerGithubToken    = req.headers["x-github-token"]    || "";
+  const headerStandardsRepo  = req.headers["x-standards-repo"]  || "";
+  const headerClaudeDir      = req.headers["x-claude-dir"]      || "";
+  const allowDecrypt         = isTrustedDecryptCaller(req);
 
   const body = req.body;
   const corsHeaders = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" };
 
   // Batch request (array of messages)
   if (Array.isArray(body)) {
-    const responses = (await Promise.all(body.map(msg => handleMessage(msg, { headerEncryptedConn, headerCompanyId, allowDecrypt })))).filter((r) => r !== null);
+    const responses = (await Promise.all(body.map(msg => handleMessage(msg, { headerEncryptedConn, headerCompanyId, headerGithubToken, headerStandardsRepo, headerClaudeDir, allowDecrypt })))).filter((r) => r !== null);
     context.res = { status: 200, headers: corsHeaders, body: JSON.stringify(responses) };
     return;
   }
 
-  const response = await handleMessage(body, { headerEncryptedConn, headerCompanyId, allowDecrypt });
+  const response = await handleMessage(body, { headerEncryptedConn, headerCompanyId, headerGithubToken, headerStandardsRepo, headerClaudeDir, allowDecrypt });
   if (response === null) {
     // Notification — acknowledge with 202, no body
     context.res = { status: 202, headers: { "Access-Control-Allow-Origin": "*" } };
