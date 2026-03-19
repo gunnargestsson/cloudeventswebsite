@@ -39,6 +39,8 @@
  *   check_standards_status  — full Origo BC environment check: GitHub sync + local repo, .claude, CLAUDE.md, skills junction, mcp.json, git, node
  *   update_bc_standards     — pull latest bc-dev-standards and copy CLAUDE.md to .claude
  *   setup_origo_bc_environment — one-time setup: clone repo, create .claude, copy CLAUDE.md, create skills junction
+ *   save_app_range          — upsert a BC extension's app id/name/publisher/idRanges into Cloud Events Storage (source = 'Origo App Range')
+ *   check_app_range         — verify a set of BC object ID ranges against all registered apps; reports conflicts and suggests a free range
  *
  * Required env vars: BC_TENANT_ID, BC_CLIENT_ID, BC_CLIENT_SECRET
  *                    MCP_ENCRYPTION_KEY  (64 hex chars = 32 bytes, required for encrypt_data / decrypt_data)
@@ -1072,6 +1074,121 @@ async function toolGetConfig({ source, id, decrypt = false, __allowDecrypt = fal
   return { company: company.name, source, id, found: true, encrypted: decrypt, data: parsed };
 }
 
+// ── Origo App Range tools ──────────────────────────────────────────────────────
+
+const APP_RANGE_SOURCE = "Origo App Range";
+
+async function toolSaveAppRange({ appId, appName, publisher, idRanges, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!appId)     throw new Error("Parameter 'appId' is required (app.json 'id' GUID)");
+  if (!appName)   throw new Error("Parameter 'appName' is required (app.json 'name')");
+  if (!publisher) throw new Error("Parameter 'publisher' is required (app.json 'publisher')");
+  if (!Array.isArray(idRanges) || !idRanges.length)
+    throw new Error("Parameter 'idRanges' is required (array from app.json idRanges)");
+
+  for (const r of idRanges) {
+    if (typeof r.from !== "number" || typeof r.to !== "number" || r.from > r.to)
+      throw new Error(`Each idRanges entry must have numeric 'from' <= 'to'. Got: ${JSON.stringify(r)}`);
+  }
+
+  const data = { appId, appName, publisher, idRanges };
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const blobValue = Buffer.from(JSON.stringify(data)).toString("base64");
+  await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Set",
+    source:      "BC Metadata MCP v1.0",
+    subject:     CS_TABLE,
+    data:        JSON.stringify({
+      mode: "upsert",
+      data: [{
+        primaryKey: { Source: APP_RANGE_SOURCE, Id: appId },
+        fields:     { Data: blobValue },
+      }],
+    }),
+  });
+
+  return { company: company.name, saved: true, appId, appName, publisher, idRanges };
+}
+
+async function toolCheckAppRange({ idRanges, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!Array.isArray(idRanges) || !idRanges.length)
+    throw new Error("Parameter 'idRanges' is required (array of { from, to } objects to check)");
+
+  for (const r of idRanges) {
+    if (typeof r.from !== "number" || typeof r.to !== "number" || r.from > r.to)
+      throw new Error(`Each idRanges entry must have numeric 'from' <= 'to'. Got: ${JSON.stringify(r)}`);
+  }
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  // Fetch all stored app ranges
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Data.Records.Get",
+    source:      "BC Metadata MCP v1.0",
+    subject:     CS_TABLE,
+    data:        JSON.stringify({
+      tableView: `WHERE(Source=CONST(${APP_RANGE_SOURCE}))`,
+      take:      500,
+    }),
+  });
+
+  const records = result.result || result.value || [];
+  const apps = [];
+  for (const rec of records) {
+    const blob = (rec.fields || {}).Data || "";
+    try {
+      const parsed = JSON.parse(Buffer.from(blob, "base64").toString("utf8"));
+      if (parsed && parsed.idRanges) apps.push(parsed);
+    } catch (_) {}
+  }
+
+  // Check overlap: two ranges [a,b] and [c,d] overlap when a <= d && c <= b
+  const conflicts = [];
+  for (const checkRange of idRanges) {
+    for (const app of apps) {
+      for (const appRange of app.idRanges) {
+        if (checkRange.from <= appRange.to && appRange.from <= checkRange.to) {
+          conflicts.push({
+            checkedRange:  checkRange,
+            conflictingApp: { appId: app.appId, appName: app.appName, publisher: app.publisher, conflictingRange: appRange },
+          });
+        }
+      }
+    }
+  }
+
+  // Build a suggested non-conflicting range if there are conflicts
+  // Collect all registered ranges sorted by 'from' and find the first available gap of the same size as the first requested range
+  const requestedSize = idRanges[0].to - idRanges[0].from + 1;
+  const allRanges = apps.flatMap(a => a.idRanges).sort((a, b) => a.from - b.from);
+  let suggestedFrom = null;
+
+  // Start looking from 50000 (reasonable BC custom range start)
+  let candidate = 50000;
+  for (const r of allRanges) {
+    if (candidate + requestedSize - 1 < r.from) { suggestedFrom = candidate; break; }
+    candidate = Math.max(candidate, r.to + 1);
+  }
+  if (suggestedFrom === null) suggestedFrom = candidate;
+
+  const suggestion = conflicts.length > 0
+    ? { from: suggestedFrom, to: suggestedFrom + requestedSize - 1, size: requestedSize, note: "First available non-conflicting range of the same size" }
+    : null;
+
+  return {
+    company:    company.name,
+    checked:    idRanges,
+    hasConflict: conflicts.length > 0,
+    conflicts,
+    registeredApps: apps.length,
+    suggestion,
+  };
+}
+
 // ── BC Dev Standards tools (local git / file-system, for local development use) ──
 
 const BC_DEV_STANDARDS_REPO = "https://github.com/OrigoSoftwareSolutions/bc-dev-standards.git";
@@ -1684,6 +1801,31 @@ const TOOLS = [
     },
   },
   {
+    name:        "save_app_range",
+    description: "Saves a BC extension app's ID range information to the Cloud Events Storage table (source = 'Origo App Range'). Stores the app id, name, publisher and idRanges from app.json. Uses upsert semantics keyed on the app id.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        appId:     { type: "string",  description: "The app GUID from app.json 'id' field. Used as the storage key." },
+        appName:   { type: "string",  description: "The app name from app.json 'name' field." },
+        publisher: { type: "string",  description: "The publisher from app.json 'publisher' field." },
+        idRanges:  { type: "array",   description: "The idRanges array from app.json, e.g. [{\"from\": 65300, \"to\": 65399}].", items: { type: "object", properties: { from: { type: "number" }, to: { type: "number" } }, required: ["from", "to"] } },
+      },
+      required: ["appId", "appName", "publisher", "idRanges"],
+    },
+  },
+  {
+    name:        "check_app_range",
+    description: "Checks whether a given set of BC object ID ranges conflicts with any app ranges already registered in the Cloud Events Storage table (source = 'Origo App Range'). Returns a list of conflicting apps and suggests the first available non-conflicting range of the same size.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        idRanges: { type: "array", description: "The ID ranges to check, e.g. [{\"from\": 65300, \"to\": 65399}].", items: { type: "object", properties: { from: { type: "number" }, to: { type: "number" } }, required: ["from", "to"] } },
+      },
+      required: ["idRanges"],
+    },
+  },
+  {
     name:        "set_config",
     description: "Writes a JSON configuration object to the Cloud Events Storage table (Source + Id primary key). Uses upsert semantics — creates a new record or updates the existing one. Optionally encrypts the data with the server-side AES-256-GCM key before storing.",
     inputSchema: {
@@ -1848,6 +1990,8 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "get_integration_timestamp":     content = await toolGetIntegrationTimestamp(args);     break;
           case "set_integration_timestamp":     content = await toolSetIntegrationTimestamp(args);     break;
           case "reverse_integration_timestamp": content = await toolReverseIntegrationTimestamp(args); break;
+          case "save_app_range":                content = await toolSaveAppRange(args);                break;
+          case "check_app_range":               content = await toolCheckAppRange(args);               break;
           case "set_config":                    content = await toolSetConfig(args);                    break;
           case "get_config":                    content = await toolGetConfig(args);                    break;
           case "encrypt_data":                  content = toolEncryptData(args);                       break;
