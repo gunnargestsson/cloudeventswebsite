@@ -41,7 +41,9 @@
  *   setup_origo_bc_environment — one-time setup: clone repo, create .claude, copy CLAUDE.md, create skills junction
  *   save_app_range          — upsert a BC extension's app id/name/publisher/idRanges into Cloud Events Storage (source = 'Origo App Range')
  *   check_app_range         — verify a set of BC object ID ranges against all registered apps; reports conflicts and suggests a free range
- *   prepare_for_pull_request — full PR readiness check: app range sync, skill-driven code analysis, documentation completeness
+ *   read_app_json           — reads app.json from a BC extension project and returns its contents including ID ranges
+ *   update_app_json_ranges  — updates the idRanges field in app.json and saves it (with optional backup)
+ *   prepare_for_pull_request — full PR readiness check: app range sync, skill-driven code analysis, copilot rules validation, documentation completeness (README/CHANGELOG in repo root). Does not perform git operations.
  *
  * Required env vars: BC_TENANT_ID, BC_CLIENT_ID, BC_CLIENT_SECRET
  *                    MCP_ENCRYPTION_KEY  (64 hex chars = 32 bytes, required for encrypt_data / decrypt_data)
@@ -1190,6 +1192,102 @@ async function toolCheckAppRange({ idRanges, companyId, tenantId, clientId, clie
   };
 }
 
+// ── App.json file operations ───────────────────────────────────────────────────
+
+async function toolReadAppJson({ projectPath } = {}) {
+  if (!projectPath) throw new Error("Parameter 'projectPath' is required (local path to the BC extension project folder)");
+
+  const sep = process.platform === "win32" ? "\\" : "/";
+  const appJsonPath = `${projectPath}${sep}app.json`;
+
+  if (!fs.existsSync(appJsonPath)) {
+    throw new Error(`app.json not found at: ${appJsonPath}`);
+  }
+
+  let appJson;
+  try {
+    const content = fs.readFileSync(appJsonPath, "utf8");
+    appJson = JSON.parse(content);
+  } catch (e) {
+    throw new Error(`Failed to read or parse app.json: ${e.message}`);
+  }
+
+  return {
+    path: appJsonPath,
+    id: appJson.id || null,
+    name: appJson.name || null,
+    publisher: appJson.publisher || null,
+    version: appJson.version || null,
+    target: appJson.target || null,
+    idRanges: appJson.idRanges || [],
+    dependencies: (appJson.dependencies || []).map(d => ({
+      id: d.id,
+      name: d.name,
+      publisher: d.publisher,
+      version: d.version,
+    })),
+    raw: appJson,
+  };
+}
+
+async function toolUpdateAppJsonRanges({ projectPath, idRanges, backup = true } = {}) {
+  if (!projectPath) throw new Error("Parameter 'projectPath' is required (local path to the BC extension project folder)");
+  if (!Array.isArray(idRanges) || !idRanges.length)
+    throw new Error("Parameter 'idRanges' is required (array of { from, to } objects)");
+
+  for (const r of idRanges) {
+    if (typeof r.from !== "number" || typeof r.to !== "number" || r.from > r.to)
+      throw new Error(`Each idRanges entry must have numeric 'from' <= 'to'. Got: ${JSON.stringify(r)}`);
+  }
+
+  const sep = process.platform === "win32" ? "\\" : "/";
+  const appJsonPath = `${projectPath}${sep}app.json`;
+
+  if (!fs.existsSync(appJsonPath)) {
+    throw new Error(`app.json not found at: ${appJsonPath}`);
+  }
+
+  let appJson, originalContent;
+  try {
+    originalContent = fs.readFileSync(appJsonPath, "utf8");
+    appJson = JSON.parse(originalContent);
+  } catch (e) {
+    throw new Error(`Failed to read or parse app.json: ${e.message}`);
+  }
+
+  // Create backup if requested
+  if (backup) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const backupPath = `${projectPath}${sep}app.json.backup.${timestamp}`;
+    try {
+      fs.writeFileSync(backupPath, originalContent, "utf8");
+    } catch (e) {
+      throw new Error(`Failed to create backup at ${backupPath}: ${e.message}`);
+    }
+  }
+
+  // Update idRanges
+  const previousRanges = appJson.idRanges || [];
+  appJson.idRanges = idRanges;
+
+  // Write updated app.json with proper formatting (2-space indent)
+  try {
+    fs.writeFileSync(appJsonPath, JSON.stringify(appJson, null, 2) + "\n", "utf8");
+  } catch (e) {
+    throw new Error(`Failed to write updated app.json: ${e.message}`);
+  }
+
+  return {
+    path: appJsonPath,
+    updated: true,
+    previousRanges,
+    newRanges: idRanges,
+    backup: backup ? `${projectPath}${sep}app.json.backup.${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}` : null,
+    appId: appJson.id,
+    appName: appJson.name,
+  };
+}
+
 // ── Prepare for Pull Request ───────────────────────────────────────────────────
 
 async function toolPrepareForPullRequest({ projectPath, standardsRepo, claudeDir, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
@@ -1374,24 +1472,46 @@ async function toolPrepareForPullRequest({ projectPath, standardsRepo, claudeDir
     }
   }
 
-  // ── 3. Read skill files ──────────────────────────────────────────────────
-  const skillsDir = resolvedClaudeDir     ? `${resolvedClaudeDir}${sep}skills`              : null;
-  const fallbackSkillsDir = resolvedStandardsRepo ? `${resolvedStandardsRepo}${sep}skills`  : null;
-  const activeSkillsDir   = (skillsDir && fs.existsSync(skillsDir))
-    ? skillsDir
-    : (fallbackSkillsDir && fs.existsSync(fallbackSkillsDir)) ? fallbackSkillsDir : null;
+  // ── 3. Read skill files from both global and project-local .claude ──────
+  const globalSkillsDir = resolvedClaudeDir ? `${resolvedClaudeDir}${sep}skills` : null;
+  const projectClaudeDir = `${projectPath}${sep}.claude`;
+  const projectSkillsDir = fs.existsSync(projectClaudeDir) ? `${projectClaudeDir}${sep}skills` : null;
+  const fallbackSkillsDir = resolvedStandardsRepo ? `${resolvedStandardsRepo}${sep}skills` : null;
 
-  if (activeSkillsDir) {
+  const skillDirectories = [
+    { type: "project", dir: projectSkillsDir },
+    { type: "global",  dir: globalSkillsDir },
+    { type: "fallback", dir: fallbackSkillsDir },
+  ].filter(s => s.dir && fs.existsSync(s.dir));
+
+  for (const { type, dir } of skillDirectories) {
     try {
-      const skillDirs = fs.readdirSync(activeSkillsDir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name);
+      const skillDirs = fs.readdirSync(dir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name);
       for (const skillName of skillDirs) {
-        const content = readFileSafe(`${activeSkillsDir}${sep}${skillName}${sep}SKILL.md`);
-        if (content) report.skills.push({ name: skillName, content });
+        const content = readFileSafe(`${dir}${sep}${skillName}${sep}SKILL.md`);
+        if (content && !report.skills.some(s => s.name === skillName)) {
+          report.skills.push({ name: skillName, source: type, content });
+        }
       }
     } catch (_) {}
   }
+
+  // Read copilot-instructions and CLAUDE.md from both project and global locations
+  const copilotInstructions = [];
+  const projectGithubDir = `${projectPath}${sep}.github`;
+  const projectCopilot = readFileSafe(`${projectGithubDir}${sep}copilot-instructions.md`);
+  if (projectCopilot) copilotInstructions.push({ source: "project", content: projectCopilot });
+  
+  const projectClaude = readFileSafe(`${projectClaudeDir}${sep}CLAUDE.md`);
+  if (projectClaude) copilotInstructions.push({ source: "project", content: projectClaude });
+  
+  const globalClaude = readFileSafe(resolvedClaudeDir ? `${resolvedClaudeDir}${sep}CLAUDE.md` : null);
+  if (globalClaude && globalClaude !== projectClaude) copilotInstructions.push({ source: "global", content: globalClaude });
+
+  report.copilotRules = copilotInstructions;
+
   if (!report.skills.length) {
-    report.requiredActions.push({ severity: "⚠️", item: "No skill files found", action: "Run setup_origo_bc_environment to set up the skills junction" });
+    report.requiredActions.push({ severity: "⚠️", item: "No skill files found", action: "Run setup_origo_bc_environment to set up the skills junction or add project-specific skills to .claude/skills" });
   }
 
   // ── 4. Static AL code analysis ───────────────────────────────────────────
@@ -1484,33 +1604,103 @@ async function toolPrepareForPullRequest({ projectPath, standardsRepo, claudeDir
   if (cnt.fileNaming      > 0) report.requiredActions.push({ severity: "⚠️", item: `File naming violations — ${cnt.fileNaming} file(s)`,           action: "Rename files to ObjectName.ObjectType.al" });
   if (cnt.longObjectName  > 0) report.requiredActions.push({ severity: "⚠️", item: `Object names > 30 characters — ${cnt.longObjectName}`,         action: "Shorten object names to max 30 characters" });
 
-  // ── 5. Documentation check ───────────────────────────────────────────────
+  // ── 5. Documentation check — README, CHANGELOG, Help must be in repo root ───
+  // These files must be in the repository root, not in a subfolder
   const readmeExists    = fs.existsSync(`${projectPath}${sep}README.md`);
   const changelogExists = fs.existsSync(`${projectPath}${sep}CHANGELOG.md`);
-  const hasHelpDir      = ["help", "Help", "docs", "Docs"].some(d => fs.existsSync(`${projectPath}${sep}${d}`));
-  const permSetFiles    = allAlFiles.filter(f => /PermissionSet/i.test(f));
+  
+  // Help can be in help/ or docs/ subfolder, but must exist at repo root level
+  const helpDirs = ["help", "Help", "docs", "Docs"];
+  const helpDir = helpDirs.find(d => fs.existsSync(`${projectPath}${sep}${d}`));
+  const hasHelpDir = !!helpDir;
+  
+  const permSetFiles = allAlFiles.filter(f => /PermissionSet/i.test(f));
 
   // Check README has actual content (not just a header)
   const readmeContent = readmeExists ? readFileSafe(`${projectPath}${sep}README.md`) : null;
   const readmeHasContent = readmeContent && readmeContent.trim().length > 100;
 
+  // Validate README sections based on loaded rules
+  const readmeHasSections = {
+    description: readmeContent && /##?\s*(Description|Overview|About)/im.test(readmeContent),
+    prerequisites: readmeContent && /##?\s*(Prerequisites|Requirements)/im.test(readmeContent),
+    setup: readmeContent && /##?\s*(Setup|Installation|Getting Started)/im.test(readmeContent),
+    features: readmeContent && /##?\s*(Features|Functionality|Usage)/im.test(readmeContent),
+    version: readmeContent && /##?\s*(Version|Changelog|History)/im.test(readmeContent),
+  };
+
+  // Check CHANGELOG follows Keep a Changelog format
+  const changelogContent = changelogExists ? readFileSafe(`${projectPath}${sep}CHANGELOG.md`) : null;
+  const changelogHasVersions = changelogContent && /##\s*\[?\d+\.\d+\.\d+\]?/m.test(changelogContent);
+  const changelogHasRecent = changelogContent && /##\s*\[?Unreleased\]?|##\s*\[?\d+\.\d+\.\d+\]?\s*-\s*\d{4}-\d{2}-\d{2}/im.test(changelogContent);
+
   report.documentation = {
     readme:      readmeExists     ? (readmeHasContent ? "✅ README.md — has content" : "⚠️ README.md — appears empty or minimal") : "❌ README.md missing",
-    changelog:   changelogExists  ? "✅ CHANGELOG.md found"     : "⚠️  CHANGELOG.md missing",
-    helpDir:     hasHelpDir       ? "✅ Help/docs folder found"  : "⚠️  No help or docs folder",
+    readmeLocation: readmeExists ? `✅ README.md in repository root` : "❌ README.md not found in root",
+    readmeSections: readmeHasSections,
+    changelog:   changelogExists  ? (changelogHasVersions ? "✅ CHANGELOG.md — has versions" : "⚠️ CHANGELOG.md — missing version entries") : "❌ CHANGELOG.md missing",
+    changelogLocation: changelogExists ? `✅ CHANGELOG.md in repository root` : "❌ CHANGELOG.md not found in root",
+    changelogFormat: changelogHasRecent ? "✅ Recent changes documented" : "⚠️ No recent version or Unreleased section",
+    helpDir:     hasHelpDir       ? `✅ ${helpDir}/ folder found in root`  : "⚠️  No help or docs folder in root",
     permSets:    permSetFiles.length ? `✅ ${permSetFiles.length} permission set file(s)` : "⚠️  No permission set files found",
   };
 
   if (!readmeExists)
-    report.requiredActions.push({ severity: "❌", item: "README.md is missing", action: "Create README.md with: app description, prerequisites, setup steps, feature overview, and version history" });
+    report.requiredActions.push({ 
+      severity: "❌", 
+      item: "README.md is missing from repository root", 
+      action: "Create README.md in repository root with: app description, prerequisites, setup steps, feature overview, and version history" 
+    });
   else if (!readmeHasContent)
-    report.requiredActions.push({ severity: "⚠️", item: "README.md appears minimal", action: "Expand README.md — add description, setup, and feature documentation" });
+    report.requiredActions.push({ 
+      severity: "⚠️", 
+      item: "README.md appears minimal", 
+      action: "Expand README.md — add description, setup, and feature documentation. Check loaded skills for required sections." 
+    });
+  else {
+    // Check for missing sections
+    const missingSections = Object.entries(readmeHasSections).filter(([_, has]) => !has).map(([name, _]) => name);
+    if (missingSections.length > 0) {
+      report.requiredActions.push({
+        severity: "⚠️",
+        item: `README.md missing sections: ${missingSections.join(", ")}`,
+        action: `Add missing sections to README.md: ${missingSections.join(", ")}`
+      });
+    }
+  }
+  
   if (!changelogExists)
-    report.requiredActions.push({ severity: "⚠️", item: "CHANGELOG.md is missing", action: "Create CHANGELOG.md listing changes per version" });
+    report.requiredActions.push({ 
+      severity: "⚠️", 
+      item: "CHANGELOG.md is missing from repository root", 
+      action: "Create CHANGELOG.md in repository root following Keep a Changelog format (https://keepachangelog.com/)" 
+    });
+  else if (!changelogHasVersions)
+    report.requiredActions.push({ 
+      severity: "⚠️", 
+      item: "CHANGELOG.md has no version entries", 
+      action: "Add version entries to CHANGELOG.md (## [1.0.0] - YYYY-MM-DD format)" 
+    });
+  else if (!changelogHasRecent)
+    report.requiredActions.push({ 
+      severity: "⚠️", 
+      item: "CHANGELOG.md has no recent changes", 
+      action: "Add an [Unreleased] section or current version entry with recent changes" 
+    });
+    
   if (!hasHelpDir)
-    report.requiredActions.push({ severity: "⚠️", item: "No help or docs folder", action: "Create a help/ or docs/ folder with page/codeunit usage documentation" });
+    report.requiredActions.push({ 
+      severity: "⚠️", 
+      item: "No help or docs folder in repository root", 
+      action: "Create a help/ or docs/ folder in repository root with page/codeunit usage documentation" 
+    });
+    
   if (!permSetFiles.length)
-    report.requiredActions.push({ severity: "⚠️", item: "No permission set files found", action: "Add a PermissionSet.al file defining required object permissions" });
+    report.requiredActions.push({ 
+      severity: "⚠️", 
+      item: "No permission set files found", 
+      action: "Add a PermissionSet.al file defining required object permissions" 
+    });
 
   // ── 6. Overall status ────────────────────────────────────────────────────
   const errors   = report.requiredActions.filter(a => a.severity === "❌").length;
@@ -1520,21 +1710,44 @@ async function toolPrepareForPullRequest({ projectPath, standardsRepo, claudeDir
                  : warnings > 0 ? `⚠️ Ready with warnings — ${warnings} item(s) to address`
                                 : "✅ Ready for pull request";
 
+  // Note about next steps
+  report.nextSteps = {
+    note: "Review required actions above. Git operations (commit, push, PR creation) are the developer's responsibility.",
+    gitWorkflow: [
+      "1. Address all ❌ errors and review ⚠️ warnings",
+      "2. Update documentation (README.md, CHANGELOG.md, help files) based on loaded skills/rules",
+      "3. Test your changes in BC",
+      "4. git add .",
+      "5. git commit -m \"Your commit message\"",
+      "6. git push",
+      "7. Create pull request on GitHub",
+    ],
+    loadedRules: {
+      skills: report.skills.map(s => `${s.name} (${s.source})`),
+      copilotRules: copilotInstructions.map(c => c.source),
+    },
+  };
+
   return report;
 }
 
 // ── BC Dev Standards tools (local git / file-system, for local development use) ──
+// Windows-first philosophy: BC development happens primarily on Windows.
+// All shell commands prioritize PowerShell over bash. Non-Windows platforms are 
+// supported for basic operations but may have limitations (e.g., symlinks instead of junctions).
 
 const BC_DEV_STANDARDS_REPO = "https://github.com/OrigoSoftwareSolutions/bc-dev-standards.git";
 const GITHUB_API_HOST        = "api.github.com";
 const WIN_SHELL              = process.platform === "win32" ? "powershell.exe" : "/bin/bash";
 
 function execGit(command, cwd) {
+  // Always use PowerShell on Windows for consistency
+  const shell = process.platform === "win32" ? "powershell.exe" : WIN_SHELL;
   return execSync(command, {
     cwd,
     stdio:    "pipe",
     encoding: "utf8",
-    shell:    WIN_SHELL,
+    shell,
   }).trim();
 }
 
@@ -1799,7 +2012,8 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
   // 1. Check git
   let gitVersion;
   try {
-    gitVersion = execSync("git --version", { stdio: "pipe", encoding: "utf8", shell: WIN_SHELL }).trim();
+    const shell = process.platform === "win32" ? "powershell.exe" : WIN_SHELL;
+    gitVersion = execSync("git --version", { stdio: "pipe", encoding: "utf8", shell }).trim();
     steps.push({ step: "Check git", status: "✅", detail: gitVersion });
   } catch (e) {
     steps.push({ step: "Check git", status: "❌", detail: e.message });
@@ -1809,7 +2023,8 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
   // 2. Clone or pull bc-dev-standards
   if (!fs.existsSync(standardsRepo)) {
     try {
-      execSync(`git clone ${BC_DEV_STANDARDS_REPO} "${standardsRepo}"`, { stdio: "pipe", encoding: "utf8", shell: WIN_SHELL });
+      const shell = process.platform === "win32" ? "powershell.exe" : WIN_SHELL;
+      execSync(`git clone ${BC_DEV_STANDARDS_REPO} "${standardsRepo}"`, { stdio: "pipe", encoding: "utf8", shell });
       steps.push({ step: "Clone bc-dev-standards", status: "✅", detail: `Cloned to ${standardsRepo}` });
     } catch (e) {
       steps.push({ step: "Clone bc-dev-standards", status: "❌", detail: e.message });
@@ -1850,22 +2065,26 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
   // 5. Create junction: claudeDir\skills → standardsRepo\skills
   const junctionLink   = `${claudeDir}\\skills`;
   const junctionTarget = `${standardsRepo}\\skills`;
-  try {
-    if (fs.existsSync(junctionLink)) {
-      if (process.platform === "win32") {
-        execSync(`Remove-Item -Path "${junctionLink}" -Force -Recurse`, { stdio: "pipe", encoding: "utf8", shell: WIN_SHELL });
-      } else {
-        execSync(`rm -rf "${junctionLink}"`, { stdio: "pipe", encoding: "utf8", shell: WIN_SHELL });
+  
+  // Windows-first approach: assume Windows PowerShell unless proven otherwise
+  const isWindows = process.platform === "win32" || WIN_SHELL.includes("powershell");
+  
+  if (!isWindows) {
+    steps.push({ 
+      step: "Create skills junction", 
+      status: "⚠️", 
+      detail: "Skipped: non-Windows platforms are not fully supported. Manually create symlink with: ln -s \"" + junctionTarget + "\" \"" + junctionLink + "\""
+    });
+  } else {
+    try {
+      if (fs.existsSync(junctionLink)) {
+        execSync(`Remove-Item -Path "${junctionLink}" -Force -Recurse`, { stdio: "pipe", encoding: "utf8", shell: "powershell.exe" });
       }
+      execSync(`New-Item -ItemType Junction -Path "${junctionLink}" -Target "${junctionTarget}"`, { stdio: "pipe", encoding: "utf8", shell: "powershell.exe" });
+      steps.push({ step: "Create skills junction", status: "✅", detail: `${junctionLink} → ${junctionTarget}` });
+    } catch (e) {
+      steps.push({ step: "Create skills junction", status: "❌", detail: e.message });
     }
-    if (process.platform === "win32") {
-      execSync(`New-Item -ItemType Junction -Path "${junctionLink}" -Target "${junctionTarget}"`, { stdio: "pipe", encoding: "utf8", shell: WIN_SHELL });
-    } else {
-      execSync(`ln -s "${junctionTarget}" "${junctionLink}"`, { stdio: "pipe", encoding: "utf8", shell: WIN_SHELL });
-    }
-    steps.push({ step: "Create skills junction", status: "✅", detail: `${junctionLink} → ${junctionTarget}` });
-  } catch (e) {
-    steps.push({ step: "Create skills junction", status: "❌", detail: e.message });
   }
 
   return { steps, success: steps.every(s => s.status === "✅") };
@@ -2136,13 +2355,13 @@ const TOOLS = [
   },
   {
     name:        "prepare_for_pull_request",
-    description: "Prepares a Business Central AL extension project for a pull request. Reads app.json, saves or verifies the app ID range in Cloud Events Storage, checks for range conflicts with other registered apps, validates the test app ID range follows the +30000 convention, reads all skill files from the skills directory, performs static AL code analysis (WITH statements, CalcFields in loops, Count() vs IsEmpty(), file naming, object name length), and checks documentation completeness (README.md, CHANGELOG.md, help folder, permission sets). Returns a full PR readiness report with required actions.",
+    description: "Prepares a Business Central AL extension project for a pull request. Reads app.json, saves or verifies the app ID range in Cloud Events Storage, checks for range conflicts with other registered apps, validates the test app ID range follows the +30000 convention, reads skill files from both project-local (.claude/skills) and global skills directories, reads copilot-instructions.md and CLAUDE.md from project .github/ and .claude/ folders, performs static AL code analysis (WITH statements, CalcFields in loops, Count() vs IsEmpty(), file naming, object name length) against loaded rules, and validates documentation completeness in repository root (README.md with required sections, CHANGELOG.md following Keep a Changelog format, help/ folder, permission sets). Returns a full PR readiness report with required actions. Does NOT perform git operations — commit and push are the developer's responsibility.",
     inputSchema: {
       type:       "object",
       properties: {
-        projectPath:   { type: "string", description: "Local path to the root of the BC extension project (the folder containing app.json)." },
+        projectPath:   { type: "string", description: "Local path to the root of the BC extension project (the folder containing app.json). This is the repository root." },
         standardsRepo: { type: "string", description: "Local path to the bc-dev-standards repository. Falls back to x-standards-repo header or %USERPROFILE%\\bc-dev-standards." },
-        claudeDir:     { type: "string", description: "Local path to the .claude directory. Falls back to x-claude-dir header or %USERPROFILE%\\.claude." },
+        claudeDir:     { type: "string", description: "Local path to the global .claude directory. Falls back to x-claude-dir header or %USERPROFILE%\\.claude. Project-local .claude is always checked." },
       },
       required: ["projectPath"],
     },
@@ -2170,6 +2389,30 @@ const TOOLS = [
         idRanges: { type: "array", description: "The ID ranges to check, e.g. [{\"from\": 65300, \"to\": 65399}].", items: { type: "object", properties: { from: { type: "number" }, to: { type: "number" } }, required: ["from", "to"] } },
       },
       required: ["idRanges"],
+    },
+  },
+  {
+    name:        "read_app_json",
+    description: "Reads the app.json file from a BC extension project and returns its contents, including the object ID ranges. Useful for verifying current configuration before making changes.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        projectPath: { type: "string", description: "Local path to the root of the BC extension project (the folder containing app.json)." },
+      },
+      required: ["projectPath"],
+    },
+  },
+  {
+    name:        "update_app_json_ranges",
+    description: "Updates the idRanges field in the app.json file and saves it back to disk. Creates a timestamped backup of the original file by default. Returns the previous and new ranges, plus the backup path if created.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        projectPath: { type: "string", description: "Local path to the root of the BC extension project (the folder containing app.json)." },
+        idRanges:    { type: "array",  description: "The new ID ranges to write, e.g. [{\"from\": 65300, \"to\": 65399}].", items: { type: "object", properties: { from: { type: "number" }, to: { type: "number" } }, required: ["from", "to"] } },
+        backup:      { type: "boolean", description: "When true (default), creates a timestamped backup of app.json before updating it." },
+      },
+      required: ["projectPath", "idRanges"],
     },
   },
   {
@@ -2340,6 +2583,8 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "prepare_for_pull_request":      content = await toolPrepareForPullRequest(args);      break;
           case "save_app_range":                content = await toolSaveAppRange(args);                break;
           case "check_app_range":               content = await toolCheckAppRange(args);               break;
+          case "read_app_json":                 content = await toolReadAppJson(args);                 break;
+          case "update_app_json_ranges":        content = await toolUpdateAppJsonRanges(args);         break;
           case "set_config":                    content = await toolSetConfig(args);                    break;
           case "get_config":                    content = await toolGetConfig(args);                    break;
           case "encrypt_data":                  content = toolEncryptData(args);                       break;
