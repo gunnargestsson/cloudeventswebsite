@@ -337,9 +337,50 @@ Copy the GUID of the company you want and paste it into `x-company-id` in `.vsco
 **Files**:
 - `SPECIFICATION.md` - Complete implementation guide with UX contract, scope, implementation plan, and test checklist
 
+---
 
+### Requirement 14: Azure Blob Cache Service
+**Folder**: `requirement-14-cache-service/`
+**Status**: ❌ Not Implemented
+**Description**: Generic cache service as an Azure Function that stores temporary data (XML, JSON, text, binary) in Azure Blob Storage and returns a publicly accessible URI. Supports caching of Business Central API responses, large payloads, temporary file storage, and shareable data URIs. Adapted from an existing C# implementation into JavaScript/Node.js to match the current application stack.
 
+**Key Features**:
+- HTTP POST endpoint `/api/cache` accepting data, contentType, ttl, fileName, encoding
+- Azure Blob Storage integration with public read access
+- GUID-based blob naming prevents collisions
+- TTL (time-to-live) metadata with configurable expiry (1 min to 7 days)
+- Support for text (UTF-8) and binary (base64) encoding
+- Content-Type detection and configuration
+- Returns URI, blobName, expiresAt, sizeBytes
+- CORS support for cross-origin requests
+- Extension extraction from fileName or contentType
+- Input validation (required fields, TTL bounds, MIME type)
 
+**Use Cases**:
+- Cache large XML/JSON responses from BC API
+- Temporary file storage for sharing
+- Base64 image upload and hosting
+- Document preview link generation
+
+**Technical Stack**:
+- Backend: Azure Functions (Node.js 18)
+- Storage: Azure Blob Storage (SDK v12)
+- Container: `cache` with blob-level public access
+- Dependencies: `@azure/storage-blob`, `uuid`
+
+**Files**:
+- `SPECIFICATION.md` - Complete implementation guide with API spec, validation rules, code skeleton, dependencies, use cases, testing checklist, and migration notes from C# original
+
+**Optional Enhancements (Future)**:
+- GET /api/cache/{blobName} with expiry validation
+- DELETE /api/cache/{blobName} for manual cleanup
+- Timer-triggered cleanup function (daily sweep)
+- Compression support (gzip for large text/JSON)
+- Authentication (API key or Azure AD token)
+
+---
+
+## Architecture Overview
 
 ```
 Client (Browser)

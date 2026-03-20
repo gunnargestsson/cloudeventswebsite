@@ -7,13 +7,14 @@
   },
   "dependencies": {
     "@azure/identity": "^4.7.0",
+    "@azure/storage-blob": "^12.31.0",
     "@azure/storage-file-datalake": "^12.24.0",
+    "@kenjiuno/msgreader": "^1.28.0",
     "busboy": "^1.6.0",
+    "date-fns": "^2.30.0",
     "pdf-parse": "^1.1.1",
     "pdfjs-dist": "^3.11.174",
-    "xlsx": "^0.18.5",
-    "@kenjiuno/msgreader": "^1.28.0",
     "uuid": "^9.0.0",
-    "date-fns": "^2.30.0"
+    "xlsx": "^0.18.5"
   }
 }
