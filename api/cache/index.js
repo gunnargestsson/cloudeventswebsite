@@ -1,4 +1,4 @@
-const { BlobServiceClient } = require('@azure/storage-blob');
+const { BlockBlobClient } = require('@azure/storage-blob');
 const { v4: uuidv4 } = require('uuid');
 
 const DEFAULT_TTL = 3600; // 1 hour
@@ -63,9 +63,18 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const blobServiceClient = new BlobServiceClient(sasUrl);
-    const containerClient = blobServiceClient.getContainerClient('');
-    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    // Parse the SAS URL to extract base URL and query parameters
+    // Expected format: https://account.blob.core.windows.net/container?sv=...&sig=...
+    const sasUrlObj = new URL(sasUrl);
+    const containerPath = sasUrlObj.pathname.replace(/^\//, '').replace(/\/$/, ''); // Remove leading/trailing slashes
+    const baseUrl = `${sasUrlObj.protocol}//${sasUrlObj.host}/${containerPath}`;
+    const sasQuery = sasUrlObj.search; // Includes the leading ?
+    
+    // Construct full blob URL with SAS token
+    const blobUrlWithSas = `${baseUrl}/${blobName}${sasQuery}`;
+    
+    // Create BlockBlobClient directly with the full URL
+    const blockBlobClient = new BlockBlobClient(blobUrlWithSas);
 
     // Convert XML string to buffer
     const buffer = Buffer.from(xml, 'utf-8');
@@ -79,6 +88,9 @@ module.exports = async function (context, req) {
       metadata: { expiresAt },
     });
 
+    // Construct the public URL (without SAS parameters for response)
+    const publicUrl = `${baseUrl}/${blobName}`;
+
     // 5. Return response
     context.res = {
       status: 200,
@@ -87,7 +99,7 @@ module.exports = async function (context, req) {
         'Access-Control-Allow-Origin': '*'
       },
       body: {
-        uri: blockBlobClient.url,
+        uri: publicUrl,
         blobName,
         expiresAt,
         sizeBytes: buffer.length,
