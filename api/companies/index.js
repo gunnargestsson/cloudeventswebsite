@@ -82,10 +82,23 @@ module.exports = async function (context, req) {
 
   try {
     const token = await getToken(tenantId, clientId, clientSecret);
-    const { statusCode, raw } = await httpsGet(
+
+    // Try with environment first; if BC returns 500 (known "Sequence contains more
+    // than one matching element" error with domain-name tenants), fall back to the
+    // tenant-level endpoint which omits the environment segment and returns companies
+    // across all environments — includes environmentName so the caller can filter.
+    let statusCode, raw;
+    ({ statusCode, raw } = await httpsGet(
       `/v2.0/${tenantId}/${environment}/api/v2.0/companies`,
       `Bearer ${token}`,
-    );
+    ));
+
+    if (statusCode === 500) {
+      ({ statusCode, raw } = await httpsGet(
+        `/v2.0/${tenantId}/api/v2.0/companies`,
+        `Bearer ${token}`,
+      ));
+    }
 
     if (statusCode !== 200) {
       context.res = {
@@ -97,7 +110,11 @@ module.exports = async function (context, req) {
     }
 
     const data      = JSON.parse(raw);
-    const companies = (data.value || []).map(c => ({ id: c.id, name: c.name, displayName: c.displayName }));
+    // Filter to the requested environment if environmentName is present in the response
+    const allCompanies = (data.value || []);
+    const filtered = allCompanies.filter(c => !c.environmentName || c.environmentName.toLowerCase() === environment.toLowerCase());
+    const source   = filtered.length > 0 ? filtered : allCompanies;
+    const companies = source.map(c => ({ id: c.id, name: c.name, displayName: c.displayName }));
     context.res = {
       status: 200,
       headers: { "Content-Type": "application/json", ...CORS },
