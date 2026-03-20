@@ -19,6 +19,7 @@
  *   set_records        — Data.Records.Set — create / modify / delete / upsert records in any table
  *   search_customers   — Data.Records.Get — customer lookup by name or number
  *   search_items       — Data.Records.Get — item lookup by description or number
+ *   search_records     — Data.Records.Get — generic search across any readable table by a code field and/or a name/description field
  *   list_translations  — Cloud Event Translation — list UI translations (filter by source/lcid)
  *   set_translations   — Cloud Event Translation — upsert UI translation pairs
  *   get_record_count             — Data.Records.Get (take:1, field 1 only) — total record count for any table with optional filter
@@ -633,19 +634,40 @@ async function toolSearchCustomers({ query, take = 10, companyId, tenantId, clie
   const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
-  const isNo   = /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20;
-  const filter = isNo
-    ? `WHERE(No.=FILTER(${query}*)|Name=FILTER(*${query}*))`
-    : `WHERE(Name=FILTER(*${query}*))`;
+  const isNo = /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20;
 
-  const result = await bcTask(conn, company.id, {
-    specversion: "1.0",
-    type:        "Data.Records.Get",
-    source:      "BC Metadata MCP v1.0",
-    data:        JSON.stringify({ tableName: "Customer", tableView: filter, fieldNumbers: [1, 2, 5, 8, 23, 35], take }),
-  });
+  // BC does not support OR across different fields in a table view.
+  // When the query could be a No., run two separate queries and merge.
+  let records;
+  if (isNo) {
+    const [byNo, byName] = await Promise.all([
+      bcTask(conn, company.id, {
+        specversion: "1.0",
+        type:        "Data.Records.Get",
+        source:      "BC Metadata MCP v1.0",
+        data:        JSON.stringify({ tableName: "Customer", tableView: `WHERE(No.=FILTER(${query}*))`, fieldNumbers: [1, 2, 5, 8, 23, 35], take }),
+      }),
+      bcTask(conn, company.id, {
+        specversion: "1.0",
+        type:        "Data.Records.Get",
+        source:      "BC Metadata MCP v1.0",
+        data:        JSON.stringify({ tableName: "Customer", tableView: `WHERE(Name=FILTER(*${query}*))`, fieldNumbers: [1, 2, 5, 8, 23, 35], take }),
+      }),
+    ]);
+    const seen = new Set();
+    records = [...(byNo.result || byNo.value || []), ...(byName.result || byName.value || [])]
+      .filter(r => { const k = (r.primaryKey || {}).No || JSON.stringify(r); return seen.has(k) ? false : seen.add(k); })
+      .slice(0, take);
+  } else {
+    const result = await bcTask(conn, company.id, {
+      specversion: "1.0",
+      type:        "Data.Records.Get",
+      source:      "BC Metadata MCP v1.0",
+      data:        JSON.stringify({ tableName: "Customer", tableView: `WHERE(Name=FILTER(*${query}*))`, fieldNumbers: [1, 2, 5, 8, 23, 35], take }),
+    });
+    records = result.result || result.value || [];
+  }
 
-  const records = result.result || result.value || [];
   return { company: company.name, query, count: records.length, customers: records };
 }
 
@@ -656,19 +678,106 @@ async function toolSearchItems({ query, take = 10, companyId, tenantId, clientId
   const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
-  const filter = /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20
-    ? `WHERE(No.=FILTER(${query}*)|Description=FILTER(*${query}*))`
-    : `WHERE(Description=FILTER(*${query}*))`;
+  const isNo = /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20;
 
-  const result = await bcTask(conn, company.id, {
-    specversion: "1.0",
-    type:        "Data.Records.Get",
-    source:      "BC Metadata MCP v1.0",
-    data:        JSON.stringify({ tableName: "Item", tableView: filter, fieldNumbers: [1, 3, 8, 18, 21, 54], take }),
+  // BC does not support OR across different fields in a table view.
+  // When the query could be a No., run two separate queries and merge.
+  let records;
+  if (isNo) {
+    const [byNo, byDesc] = await Promise.all([
+      bcTask(conn, company.id, {
+        specversion: "1.0",
+        type:        "Data.Records.Get",
+        source:      "BC Metadata MCP v1.0",
+        data:        JSON.stringify({ tableName: "Item", tableView: `WHERE(No.=FILTER(${query}*))`, fieldNumbers: [1, 3, 8, 18, 21, 54], take }),
+      }),
+      bcTask(conn, company.id, {
+        specversion: "1.0",
+        type:        "Data.Records.Get",
+        source:      "BC Metadata MCP v1.0",
+        data:        JSON.stringify({ tableName: "Item", tableView: `WHERE(Description=FILTER(*${query}*))`, fieldNumbers: [1, 3, 8, 18, 21, 54], take }),
+      }),
+    ]);
+    const seen = new Set();
+    records = [...(byNo.result || byNo.value || []), ...(byDesc.result || byDesc.value || [])]
+      .filter(r => { const k = (r.primaryKey || {}).No || JSON.stringify(r); return seen.has(k) ? false : seen.add(k); })
+      .slice(0, take);
+  } else {
+    const result = await bcTask(conn, company.id, {
+      specversion: "1.0",
+      type:        "Data.Records.Get",
+      source:      "BC Metadata MCP v1.0",
+      data:        JSON.stringify({ tableName: "Item", tableView: `WHERE(Description=FILTER(*${query}*))`, fieldNumbers: [1, 3, 8, 18, 21, 54], take }),
+    });
+    records = result.result || result.value || [];
+  }
+
+  return { company: company.name, query, count: records.length, items: records };
+}
+
+/**
+ * Generic table search. Accepts any table readable via Data.Records.Get.
+ * When codeField is supplied and the query looks like a code (short, word-characters only),
+ * two parallel requests are made — one by codeField prefix, one by nameField substring —
+ * and the results are merged and deduplicated.  Only a nameField substring search is
+ * performed when the query contains spaces or non-word characters.
+ */
+async function toolSearchRecords({ table, query, codeField, nameField, fields, take = 20, lcid = 1033, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table)     throw new Error("Parameter 'table' is required");
+  if (!query)     throw new Error("Parameter 'query' is required");
+  if (!nameField) throw new Error("Parameter 'nameField' is required");
+  validateTableName(table);
+  take = Math.min(Number(take) || 20, 200);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const fieldNumbers = Array.isArray(fields) && fields.length ? fields.map(Number) : undefined;
+  const baseData = (view) => JSON.stringify({
+    tableName: String(table),
+    tableView: view,
+    ...(fieldNumbers ? { fieldNumbers } : {}),
+    take,
+    lcid,
   });
 
-  const records = result.result || result.value || [];
-  return { company: company.name, query, count: records.length, items: records };
+  const looksLikeCode = codeField && /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20;
+
+  let records;
+  if (looksLikeCode) {
+    // BC does not support OR across different fields — run two separate requests.
+    const [byCode, byName] = await Promise.all([
+      bcTask(conn, company.id, {
+        specversion: "1.0",
+        type:        "Data.Records.Get",
+        source:      "BC Metadata MCP v1.0",
+        data:        baseData(`WHERE(${codeField}=FILTER(${query}*))`),
+      }),
+      bcTask(conn, company.id, {
+        specversion: "1.0",
+        type:        "Data.Records.Get",
+        source:      "BC Metadata MCP v1.0",
+        data:        baseData(`WHERE(${nameField}=FILTER(*${query}*))`),
+      }),
+    ]);
+    const seen = new Set();
+    records = [...(byCode.result || byCode.value || []), ...(byName.result || byName.value || [])]
+      .filter(r => {
+        const key = JSON.stringify(r.primaryKey || r);
+        return seen.has(key) ? false : seen.add(key);
+      })
+      .slice(0, take);
+  } else {
+    const result = await bcTask(conn, company.id, {
+      specversion: "1.0",
+      type:        "Data.Records.Get",
+      source:      "BC Metadata MCP v1.0",
+      data:        baseData(`WHERE(${nameField}=FILTER(*${query}*))`),
+    });
+    records = result.result || result.value || [];
+  }
+
+  return { company: company.name, table: String(table), query, count: records.length, records };
 }
 
 async function toolListTranslations({ source, lcid, missingOnly = false, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
@@ -2341,6 +2450,23 @@ const TOOLS = [
     },
   },
   {
+    name:        "search_records",
+    description: "Generic search across any Business Central table that is readable via Data.Records.Get. Searches a name/description field by substring and optionally a code field by prefix. When 'codeField' is provided and the query is a short alphanumeric string, two parallel queries are executed (code prefix + name substring) and results are merged — because BC does not support OR filters across different fields. Supply 'fields' as an array of field numbers to limit the returned columns.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:      { type: "string",  description: "BC table name to search (e.g. 'Customer', 'G/L Account', 'Vendor')." },
+        query:      { type: "string",  description: "Search string — used as a code prefix on 'codeField' and a substring match on 'nameField'." },
+        nameField:  { type: "string",  description: "Field name to match with a wildcard substring filter (e.g. 'Name', 'Description')." },
+        codeField:  { type: "string",  description: "Optional field name for prefix matching when the query looks like a code (e.g. 'No.', 'Code'). Omit when the table has no code/number key." },
+        fields:     { type: "array", items: { type: "integer" }, description: "Optional array of field numbers to include in the results. Omit to return all default fields." },
+        take:       { type: "integer", description: "Max records to return (default 20, max 200)." },
+        lcid:       { type: "integer", description: "Language LCID for translated captions (default 1033 = English)." },
+      },
+      required: ["table", "query", "nameField"],
+    },
+  },
+  {
     name:        "get_integration_timestamp",
     description: "Returns the latest non-reversed Date & Time entry from the Cloud Events Integration table for a given source + tableId combination. Returns null if no entry exists.",
     inputSchema: {
@@ -2620,8 +2746,9 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "get_sales_order_statistics":  content = await toolGetSalesOrderStatistics(args);   break;
           case "get_records":           content = await toolGetRecords(args);              break;
           case "set_records":           content = await toolSetRecords(args);              break;
-          case "search_customers":      content = await toolSearchCustomers(args);        break;
-          case "search_items":       content = await toolSearchItems(args);       break;
+          case "search_customers":   content = await toolSearchCustomers(args);   break;
+          case "search_items":        content = await toolSearchItems(args);        break;
+          case "search_records":      content = await toolSearchRecords(args);      break;
           case "list_translations":            content = await toolListTranslations(args);            break;
           case "set_translations":             content = await toolSetTranslations(args);             break;
           case "get_integration_timestamp":     content = await toolGetIntegrationTimestamp(args);     break;
