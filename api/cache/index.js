@@ -33,14 +33,24 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // 2. Validate input
-    const { xml, ttl } = req.body || {};
+    // 2. Validate input (accept both JSON and form-urlencoded)
+    let xml, ttl;
+    
+    if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+      // JSON format (BC sends {"Xml": "...", "Ttl": 3600})
+      xml = req.body.Xml || req.body.xml;
+      ttl = req.body.Ttl || req.body.ttl;
+    } else {
+      // Form-urlencoded fallback
+      xml = req.body?.xml;
+      ttl = req.body?.ttl;
+    }
     
     if (!xml) {
       context.res = { 
         status: 400,
         headers: { 'Access-Control-Allow-Origin': '*' },
-        body: { error: 'xml field is required' } 
+        body: { error: 'Xml field is required' } 
       };
       return;
     }
@@ -63,48 +73,61 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // Parse the SAS URL to extract base URL and query parameters
-    // Expected format: https://account.blob.core.windows.net/container?sv=...&sig=...
-    const sasUrlObj = new URL(sasUrl);
-    const containerPath = sasUrlObj.pathname.replace(/^\//, '').replace(/\/$/, ''); // Remove leading/trailing slashes
-    const baseUrl = `${sasUrlObj.protocol}//${sasUrlObj.host}/${containerPath}`;
-    const sasQuery = sasUrlObj.search; // Includes the leading ?
-    
-    // Construct full blob URL with SAS token
-    const blobUrlWithSas = `${baseUrl}/${blobName}${sasQuery}`;
-    
-    // Create BlockBlobClient directly with the full URL
-    const blockBlobClient = new BlockBlobClient(blobUrlWithSas);
+    try {
+      // Parse the SAS URL to extract base URL and query parameters
+      // Expected format: https://account.blob.core.windows.net/container?sv=...&sig=...
+      const sasUrlObj = new URL(sasUrl);
+      const containerPath = sasUrlObj.pathname.replace(/^\//, '').replace(/\/$/, '');
+      const baseUrl = `${sasUrlObj.protocol}//${sasUrlObj.host}/${containerPath}`;
+      const sasQuery = sasUrlObj.search;
+      
+      // Construct full blob URL with SAS token
+      const blobUrlWithSas = `${baseUrl}/${blobName}${sasQuery}`;
+      
+      // Create BlockBlobClient directly with the full URL
+      const blockBlobClient = new BlockBlobClient(blobUrlWithSas);
 
-    // Convert XML string to buffer
-    const buffer = Buffer.from(xml, 'utf-8');
+      // Convert XML string to buffer
+      const buffer = Buffer.from(xml, 'utf-8');
 
-    // Calculate expiry
-    const expiresAt = new Date(Date.now() + validTtl * 1000).toISOString();
+      // Calculate expiry
+      const expiresAt = new Date(Date.now() + validTtl * 1000).toISOString();
 
-    // Upload with metadata
-    await blockBlobClient.upload(buffer, buffer.length, {
-      blobHTTPHeaders: { blobContentType: 'text/xml; charset=utf-8' },
-      metadata: { expiresAt },
-    });
+      // Upload with metadata
+      await blockBlobClient.upload(buffer, buffer.length, {
+        blobHTTPHeaders: { blobContentType: 'text/xml; charset=utf-8' },
+        metadata: { expiresAt },
+      });
 
-    // Construct the public URL (without SAS parameters for response)
-    const publicUrl = `${baseUrl}/${blobName}`;
+      // Construct the public URL (without SAS parameters for response)
+      const publicUrl = `${baseUrl}/${blobName}`;
 
-    // 5. Return response
-    context.res = {
-      status: 200,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      },
-      body: {
-        uri: publicUrl,
-        blobName,
-        expiresAt,
-        sizeBytes: buffer.length,
-      },
-    };
+      // 5. Return response
+      context.res = {
+        status: 200,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+        body: {
+          uri: publicUrl,
+          blobName,
+          expiresAt,
+          sizeBytes: buffer.length,
+        },
+      };
+    } catch (urlError) {
+      context.log.error('SAS URL error:', urlError.message, urlError.stack);
+      context.res = {
+        status: 500,
+        headers: { 'Access-Control-Allow-Origin': '*' },
+        body: { 
+          error: 'Failed to upload to storage',
+          details: 'Check that CACHE_SAS_URL is a valid blob container SAS URL',
+        },
+      };
+      return;
+    }
 
   } catch (error) {
     context.log.error('Cache service error:', error);
