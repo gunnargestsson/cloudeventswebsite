@@ -97,7 +97,7 @@ const MSFT_HOST = "login.microsoftonline.com";
 
 // ── HTTPS helper ───────────────────────────────────────────────────────────────
 
-function httpsRequest(hostname, path, method, headers, body) {
+function httpsRequest(hostname, path, method, headers, body, encoding = "utf8") {
   return new Promise((resolve, reject) => {
     const bodyBuf = body != null ? Buffer.from(body, "utf8") : null;
     const reqHeaders = {
@@ -108,7 +108,7 @@ function httpsRequest(hostname, path, method, headers, body) {
     const req = https.request({ hostname, path, method, headers: reqHeaders }, (res) => {
       const chunks = [];
       res.on("data", (c) => chunks.push(c));
-      res.on("end", () => resolve({ statusCode: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+      res.on("end", () => resolve({ statusCode: res.statusCode, body: Buffer.concat(chunks).toString(encoding) }));
     });
     req.on("error", reject);
     if (bodyBuf) req.write(bodyBuf);
@@ -212,16 +212,19 @@ async function bcTask(conn, companyId, envelope, { returnDownloadUrl = false } =
   if (returnDownloadUrl) return task;
 
   const url = new URL(task.data);
+  // Use latin1 encoding so binary PDF bytes (and any other non-UTF-8 content) are preserved
+  // as-is. JSON responses are all-ASCII so JSON.parse still works correctly.
   const { body: resultRaw } = await httpsRequest(
     url.hostname, url.pathname + url.search, "GET",
     { Authorization: auth },
     null,
+    "latin1",
   );
   let result;
   try {
     result = JSON.parse(resultRaw);
   } catch {
-    // Response is plain text / markdown — return as-is
+    // Response is plain text / binary — return as-is
     return resultRaw;
   }
   if (result.status === "Error") throw new Error(result.error || JSON.stringify(result));
@@ -1314,7 +1317,8 @@ async function toolGetCustomerStatementPdf({ customerNo, startDate, endDate, com
   // BC returns the PDF bytes inline as a string starting with %PDF.
   // If it returned a task object with a download URL instead, expose that URL.
   if (typeof result === "string" && result.startsWith("%PDF")) {
-    const base64 = Buffer.from(result, "binary").toString("base64");
+    // result arrived as latin1 string — latin1 is a 1-to-1 byte map so this is lossless
+    const base64 = Buffer.from(result, "latin1").toString("base64");
     return {
       company:         company.name,
       customerNo:      String(customerNo),
