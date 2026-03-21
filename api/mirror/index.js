@@ -217,7 +217,8 @@ function httpsText(hostname, path, headers) {
 
 async function bcTask(conn, token, companyId, type, subject, data, asText = false) {
   const { tenantId, environment } = conn;
-  const envelope = { specversion: "1.0", type, source: SOURCE };
+  const taskId = crypto.randomUUID();
+  const envelope = { specversion: "1.0", id: taskId, type, source: SOURCE };
   if (subject !== undefined && subject !== null) envelope.subject = String(subject);
   if (data !== undefined && data !== null) envelope.data = JSON.stringify(data);
 
@@ -230,7 +231,18 @@ async function bcTask(conn, token, companyId, type, subject, data, asText = fals
   const taskUrl = new URL(task.data);
   if (asText) {
     const raw = await httpsText(taskUrl.hostname, taskUrl.pathname + taskUrl.search, { Authorization: `Bearer ${token}` });
-    return { data: raw };
+    // After the CSV is ready, GET the queue record to read the BC-updated 'time'.
+    // BC sets this to the modification timestamp of the last record included in the CSV —
+    // the correct value to store as the integration timestamp for next-batch incremental sync.
+    let bcTime = null;
+    try {
+      const queuePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${taskId})`;
+      const queueRecord = await httpsJson(BC_HOST, queuePath, "GET", { Authorization: `Bearer ${token}` }, null);
+      bcTime = queueRecord.time || null;
+    } catch {
+      // Queue GET failed — bcTime stays null; caller falls back to local clock.
+    }
+    return { data: raw, time: bcTime };
   }
   const result = await httpsJson(taskUrl.hostname, taskUrl.pathname + taskUrl.search, "GET", { Authorization: `Bearer ${token}` }, null);
   if (result.status === "Error") throw new Error(result.error || "BC result failed");
@@ -809,7 +821,7 @@ async function runMirror(conn, token, companyId, tableId) {
       fieldNumbers: tableCfg.fieldNumbers && tableCfg.fieldNumbers.length ? tableCfg.fieldNumbers : undefined,
     }, true);
 
-    return { noOfRecords, csv: extractCsvPayload(csvResult) };
+    return { noOfRecords, csv: extractCsvPayload(csvResult), bcTime: csvResult.time || null };
   });
 
   const noOfRecords = Number(runResult.noOfRecords || 0);
@@ -828,14 +840,18 @@ async function runMirror(conn, token, companyId, tableId) {
   const csv = runResult.csv;
   if (!csv) throw new Error("CSV.Records.Get returned no CSV payload");
 
+  // Use the BC queue 'time' as the confirmed integration timestamp; fall back to local clock.
+  const tsDt = runResult.bcTime ? new Date(runResult.bcTime) : endDt;
+  const tsIso = isoNoMs(tsDt);
+
   // Records exist — now write the timestamp and upload the file.
-  await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableId, endIso);
+  await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableId, tsIso);
 
   try {
-    const yyyy = format(endDt, "yyyy");
-    const mm = format(endDt, "MM");
-    const dd = format(endDt, "dd");
-    const stamp = formatMirrorFileStamp(endDt);
+    const yyyy = format(tsDt, "yyyy");
+    const mm = format(tsDt, "MM");
+    const dd = format(tsDt, "dd");
+    const stamp = formatMirrorFileStamp(tsDt);
     const csvPath = pathJoin("Tables", washName(tableCfg.tableName), yyyy, mm, dd, `${stamp}.csv`);
 
     await uploadTextToMirror(connection, csvPath, csv);
@@ -845,7 +861,7 @@ async function runMirror(conn, token, companyId, tableId) {
       tableName: tableCfg.tableName,
       skipped: false,
       mirroredRecords: noOfRecords,
-      endDateTime: endIso,
+      endDateTime: tsIso,
       filePath: csvPath,
     };
   } catch (error) {
