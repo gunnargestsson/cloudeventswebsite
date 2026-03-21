@@ -338,13 +338,21 @@ async function setStoredTables(conn, token, companyId, tables) {
   await setConfig(conn, token, companyId, CONFIG_TABLES_ID, JSON.stringify(tables));
 }
 
+function normalizeWhereFilter(raw) {
+  // Store only the WHERE(...) clause. Strip any SORTING/ORDER prefix the user may have included.
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const m = s.match(/WHERE\(.*\)\s*$/i);
+  return m ? m[0].trim() : s;
+}
+
 function normalizeTableConfig(table) {
   return {
     tableId: Number(table.tableId),
     tableName: String(table.tableName || ""),
     dataPerCompany: Boolean(table.dataPerCompany),
     fieldNumbers: Array.isArray(table.fieldNumbers) ? table.fieldNumbers.map(Number).filter((n) => n >= 1 && n <= 1999999999) : [],
-    tableView: String(table.tableView || ""),
+    tableView: normalizeWhereFilter(table.tableView),
     intervalMin: Math.max(1, Number(table.intervalMin || 60)),
     active: Boolean(table.active),
   };
@@ -590,19 +598,22 @@ function isoNoMs(dateObj) {
   return dateObj.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-function appendWhere(baseView, clause) {
-  const s = String(baseView || "").trim();
-  if (!s) return `WHERE(${clause})`;
-  if (/\bWHERE\(/i.test(s)) {
-    return s.replace(/\)\s*$/, `,${clause})`);
-  }
-  return `${s} WHERE(${clause})`;
+function buildWhereClause(storedWhere, extraClause) {
+  // storedWhere is already a bare WHERE(...) string or empty.
+  if (!storedWhere && !extraClause) return "";
+  if (!storedWhere) return `WHERE(${extraClause})`;
+  if (!extraClause) return storedWhere;
+  // Append extraClause inside the existing WHERE(...)
+  return storedWhere.replace(/\)\s*$/i, `,${extraClause})`);
 }
 
 function buildRunTableView(tableCfg, startIso, endIso) {
-  if (!startIso) return tableCfg.tableView || "";
-  const range = `SystemModifiedAt=FILTER(${startIso}..${endIso})`;
-  return appendWhere(tableCfg.tableView, range);
+  const rangeClause = startIso ? `SystemModifiedAt=FILTER(${startIso}..${endIso})` : null;
+  const where = buildWhereClause(tableCfg.tableView || "", rangeClause);
+  // Always sort by SystemModifiedAt ascending so incremental sync is deterministic.
+  // Return null when there is nothing to add — caller omits the parameter entirely.
+  const suffix = where ? ` ${where}` : "";
+  return `SORTING(SystemModifiedAt) ORDER(Ascending)${suffix}`;
 }
 
 function parseMirrorUrl(urlString) {
@@ -804,7 +815,7 @@ async function runMirror(conn, token, companyId, tableId) {
     const tableSelector = parseTableRef(tableRef);
     const countResult = await dataRecordsGet(conn, token, companyId, {
       ...tableSelector,
-      tableView: runTableView || undefined,
+      tableView: runTableView,
       skip: 0,
       take: 1,
       fieldNumbers: [1],
@@ -817,7 +828,7 @@ async function runMirror(conn, token, companyId, tableId) {
 
     const csvResult = await bcTask(conn, token, companyId, "CSV.Records.Get", null, {
       ...tableSelector,
-      tableView: runTableView || undefined,
+      tableView: runTableView,
       fieldNumbers: tableCfg.fieldNumbers && tableCfg.fieldNumbers.length ? tableCfg.fieldNumbers : undefined,
     }, true);
 
