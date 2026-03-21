@@ -35,6 +35,7 @@
  *   reopen_sales_order          — Sales.Order.Reopen — reopen a released sales order
  *   post_sales_order            — Sales.Order.Post — post a sales order, returns posted invoice no.
  *   get_sales_document_pdf      — Sales.SalesInvoice.Pdf / Sales.SalesShipment.Pdf / Sales.SalesCreditMemo.Pdf / Sales.ReturnReceipt.Pdf — returns download URL for PDF
+ *   get_customer_statement_pdf  — Customer.Statement.Pdf — returns download URL for a customer account statement PDF
  *   get_purchase_order_statistics — Purchase.Order.Statistics — amounts, VAT totals for a purchase order
  *   release_purchase_order      — Purchase.Order.Release — release a purchase order
  *   reopen_purchase_order       — Purchase.Order.Reopen — reopen a released purchase order
@@ -1286,6 +1287,35 @@ async function toolGetSalesDocumentPdf({ documentType, documentNo, companyId, te
     documentType:    String(documentType),
     documentNo:      String(documentNo),
     messageType,
+    downloadUrl:     task.data || null,
+    datacontenttype: task.datacontenttype || "application/pdf",
+    note:            "GET the downloadUrl with a Bearer token to receive the binary PDF file.",
+  };
+}
+
+async function toolGetCustomerStatementPdf({ customerNo, startDate, endDate, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!customerNo) throw new Error("Parameter 'customerNo' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = {};
+  if (startDate) data.startDate = startDate;
+  if (endDate)   data.endDate   = endDate;
+
+  const task = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Customer.Statement.Pdf",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(customerNo),
+    data,
+  }, { returnDownloadUrl: true });
+
+  return {
+    company:         company.name,
+    customerNo:      String(customerNo),
+    startDate:       startDate || null,
+    endDate:         endDate   || null,
     downloadUrl:     task.data || null,
     datacontenttype: task.datacontenttype || "application/pdf",
     note:            "GET the downloadUrl with a Bearer token to receive the binary PDF file.",
@@ -2945,6 +2975,19 @@ const TOOLS = [
     },
   },
   {
+    name:        "get_customer_statement_pdf",
+    description: "Returns a download URL for a customer account statement PDF (Customer.Statement.Pdf). Optionally filter by date range. GET the returned downloadUrl with a Bearer token to receive the binary PDF.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        customerNo: { type: "string", description: "Customer number or SystemId." },
+        startDate:  { type: "string", description: "Statement start date (YYYY-MM-DD). Optional." },
+        endDate:    { type: "string", description: "Statement end date (YYYY-MM-DD). Optional." },
+      },
+      required: ["customerNo"],
+    },
+  },
+  {
     name:        "get_purchase_order_statistics",
     description: "Returns comprehensive statistics for a purchase order (amounts, VAT totals, quantities, weight and volume) using the Purchase.Order.Statistics Cloud Event.",
     inputSchema: {
@@ -3215,6 +3258,7 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "reopen_sales_order":          content = await toolReopenSalesOrder(args);           break;
           case "post_sales_order":            content = await toolPostSalesOrder(args);             break;
           case "get_sales_document_pdf":      content = await toolGetSalesDocumentPdf(args);        break;
+          case "get_customer_statement_pdf":   content = await toolGetCustomerStatementPdf(args);   break;
           case "get_purchase_order_statistics": content = await toolGetPurchaseOrderStatistics(args); break;
           case "release_purchase_order":      content = await toolReleasePurchaseOrder(args);       break;
           case "reopen_purchase_order":       content = await toolReopenPurchaseOrder(args);        break;
