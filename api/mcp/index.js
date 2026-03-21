@@ -34,8 +34,8 @@
  *   release_sales_order         — Sales.Order.Release — release a sales order
  *   reopen_sales_order          — Sales.Order.Reopen — reopen a released sales order
  *   post_sales_order            — Sales.Order.Post — post a sales order, returns posted invoice no.
- *   get_sales_document_pdf      — Sales.SalesInvoice.Pdf / Sales.SalesShipment.Pdf / Sales.SalesCreditMemo.Pdf / Sales.ReturnReceipt.Pdf — returns download URL for PDF
- *   get_customer_statement_pdf  — Customer.Statement.Pdf — returns download URL for a customer account statement PDF
+ *   get_sales_document_pdf      — Sales.SalesInvoice.Pdf / Sales.SalesShipment.Pdf / Sales.SalesCreditMemo.Pdf / Sales.ReturnReceipt.Pdf — downloads PDF from BC and returns pdfBase64
+ *   get_customer_statement_pdf  — Customer.Statement.Pdf — downloads PDF from BC and returns pdfBase64
  *   get_purchase_order_statistics — Purchase.Order.Statistics — amounts, VAT totals for a purchase order
  *   release_purchase_order      — Purchase.Order.Release — release a purchase order
  *   reopen_purchase_order       — Purchase.Order.Reopen — reopen a released purchase order
@@ -190,7 +190,7 @@ async function bcGet(path, conn) {
 
 // ── CloudEvents task (two-step POST → GET) ─────────────────────────────────────
 
-async function bcTask(conn, companyId, envelope, { returnDownloadUrl = false } = {}) {
+async function bcTask(conn, companyId, envelope) {
   const token    = await getToken(conn);
   const auth     = `Bearer ${token}`;
   const taskPath = `/v2.0/${conn.tenantId}/${conn.environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/tasks`;
@@ -207,9 +207,6 @@ async function bcTask(conn, companyId, envelope, { returnDownloadUrl = false } =
   if (!task.data || !String(task.data).startsWith("https://api.businesscentral.dynamics.com/")) {
     return task;
   }
-
-  // For PDF types the caller only needs the download URL — don't fetch the binary.
-  if (returnDownloadUrl) return task;
 
   const url = new URL(task.data);
   // Use latin1 encoding so binary PDF bytes (and any other non-UTF-8 content) are preserved
@@ -1277,22 +1274,23 @@ async function toolGetSalesDocumentPdf({ documentType, documentNo, companyId, te
   const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
-  // The PDF response returns a binary download URL — stop after the first POST.
-  const task = await bcTask(conn, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        messageType,
     source:      "BC Metadata MCP v1.0",
     subject:     String(documentNo),
-  }, { returnDownloadUrl: true });
+  });
 
+  if (typeof result !== "string") throw new Error(`Unexpected response from BC for ${messageType}: ${JSON.stringify(result)}`);
+  const base64 = Buffer.from(result, "latin1").toString("base64");
   return {
     company:         company.name,
     documentType:    String(documentType),
     documentNo:      String(documentNo),
     messageType,
-    downloadUrl:     task.data || null,
-    datacontenttype: task.datacontenttype || "application/pdf",
-    note:            "GET the downloadUrl with a Bearer token to receive the binary PDF file.",
+    datacontenttype: "application/pdf",
+    pdfBase64:       base64,
+    note:            "pdfBase64 contains the base64-encoded PDF. Decode it to get the binary PDF file.",
   };
 }
 
@@ -1314,31 +1312,18 @@ async function toolGetCustomerStatementPdf({ customerNo, startDate, endDate, com
     data,
   });
 
-  // BC returns the PDF bytes inline as a string starting with %PDF.
-  // If it returned a task object with a download URL instead, expose that URL.
-  if (typeof result === "string" && result.startsWith("%PDF")) {
-    // result arrived as latin1 string — latin1 is a 1-to-1 byte map so this is lossless
-    const base64 = Buffer.from(result, "latin1").toString("base64");
-    return {
-      company:         company.name,
-      customerNo:      String(customerNo),
-      startDate:       startDate || null,
-      endDate:         endDate   || null,
-      datacontenttype: "application/pdf",
-      pdfBase64:       base64,
-      note:            "pdfBase64 contains the base64-encoded PDF. Decode it to get the binary PDF file.",
-    };
-  }
-
-  // Fallback: task returned a download URL (unexpected for this type, but handle gracefully)
+  // BC downloads the PDF binary via the task data URL; result arrives as a latin1 string.
+  if (typeof result !== "string") throw new Error(`Unexpected response from BC for Customer.Statement.Pdf: ${JSON.stringify(result)}`);
+  // result arrived as latin1 string — latin1 is a 1-to-1 byte map so this is lossless
+  const base64 = Buffer.from(result, "latin1").toString("base64");
   return {
     company:         company.name,
     customerNo:      String(customerNo),
     startDate:       startDate || null,
     endDate:         endDate   || null,
-    downloadUrl:     (result && result.data) || null,
-    datacontenttype: (result && result.datacontenttype) || "application/pdf",
-    note:            "GET the downloadUrl with a Bearer token to receive the binary PDF file.",
+    datacontenttype: "application/pdf",
+    pdfBase64:       base64,
+    note:            "pdfBase64 contains the base64-encoded PDF. Decode it to get the binary PDF file.",
   };
 }
 
@@ -2984,7 +2969,7 @@ const TOOLS = [
   },
   {
     name:        "get_sales_document_pdf",
-    description: "Returns a download URL for a PDF of a posted sales document (invoice, shipment, credit memo, or return receipt). GET the returned downloadUrl with a Bearer token to receive the binary PDF.",
+    description: "Downloads a PDF of a posted sales document (invoice, shipment, credit memo, or return receipt) from BC and returns it as a base64-encoded string in pdfBase64.",
     inputSchema: {
       type:       "object",
       properties: {
