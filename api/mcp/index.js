@@ -1303,21 +1303,37 @@ async function toolGetCustomerStatementPdf({ customerNo, startDate, endDate, com
   if (startDate) data.startDate = startDate;
   if (endDate)   data.endDate   = endDate;
 
-  const task = await bcTask(conn, company.id, {
+  const result = await bcTask(conn, company.id, {
     specversion: "1.0",
     type:        "Customer.Statement.Pdf",
     source:      "BC Metadata MCP v1.0",
     subject:     String(customerNo),
     data,
-  }, { returnDownloadUrl: true });
+  });
 
+  // BC returns the PDF bytes inline as a string starting with %PDF.
+  // If it returned a task object with a download URL instead, expose that URL.
+  if (typeof result === "string" && result.startsWith("%PDF")) {
+    const base64 = Buffer.from(result, "binary").toString("base64");
+    return {
+      company:         company.name,
+      customerNo:      String(customerNo),
+      startDate:       startDate || null,
+      endDate:         endDate   || null,
+      datacontenttype: "application/pdf",
+      pdfBase64:       base64,
+      note:            "pdfBase64 contains the base64-encoded PDF. Decode it to get the binary PDF file.",
+    };
+  }
+
+  // Fallback: task returned a download URL (unexpected for this type, but handle gracefully)
   return {
     company:         company.name,
     customerNo:      String(customerNo),
     startDate:       startDate || null,
     endDate:         endDate   || null,
-    downloadUrl:     task.data || null,
-    datacontenttype: task.datacontenttype || "application/pdf",
+    downloadUrl:     (result && result.data) || null,
+    datacontenttype: (result && result.datacontenttype) || "application/pdf",
     note:            "GET the downloadUrl with a Bearer token to receive the binary PDF file.",
   };
 }
@@ -2976,7 +2992,7 @@ const TOOLS = [
   },
   {
     name:        "get_customer_statement_pdf",
-    description: "Returns a download URL for a customer account statement PDF (Customer.Statement.Pdf). Optionally filter by date range. GET the returned downloadUrl with a Bearer token to receive the binary PDF.",
+    description: "Returns a customer account statement PDF (Customer.Statement.Pdf). The PDF is returned as a base64-encoded string in pdfBase64. Optionally filter by date range.",
     inputSchema: {
       type:       "object",
       properties: {
