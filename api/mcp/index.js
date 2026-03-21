@@ -15,7 +15,7 @@
  *   list_companies     — /api/v2.0/companies — all companies in the BC environment
  *   list_message_types — Help.MessageTypes.Get — all Cloud Event message types
  *   get_message_type_help — Help.Implementation.Get — full implementation guide (markdown) for one message type
- *   get_records        — Data.Records.Get — records from any table with filter/paging
+ *   get_records        — Data.Records.Get — records from any table with filter/paging/date range
  *   set_records        — Data.Records.Set — create / modify / delete / upsert records in any table
  *   search_customers   — Data.Records.Get — customer lookup by name or number
  *   search_items       — Data.Records.Get — item lookup by description or number
@@ -25,6 +25,20 @@
  *   get_record_count             — Data.Records.Get (take:1, field 1 only) — total record count for any table with optional filter
  *   get_decimal_total            — Data.Totals.Get — sum one decimal field across records in any table with optional filter
  *   get_sales_order_statistics  — Sales.Order.Statistics — amounts, VAT totals, quantities for a sales order
+ *   get_record_ids              — Data.RecordIds.Get — SystemId + SystemModifiedAt for incremental sync
+ *   get_table_permissions       — Help.Permissions.Get — read/write permissions for a table
+ *   get_customer_credit_limit   — Customer.CreditLimit.Get — balance, outstanding, credit limit, remaining credit
+ *   get_customer_sales_history  — Customer.SalesHistory.Get — items sold to a customer within a date range
+ *   get_item_availability       — Item.Availability.Get — inventory or projected availability per location
+ *   get_item_price              — Item.Price.Get — price list lines for an item
+ *   release_sales_order         — Sales.Order.Release — release a sales order
+ *   reopen_sales_order          — Sales.Order.Reopen — reopen a released sales order
+ *   post_sales_order            — Sales.Order.Post — post a sales order, returns posted invoice no.
+ *   get_sales_document_pdf      — Sales.SalesInvoice.Pdf / Sales.SalesShipment.Pdf / Sales.SalesCreditMemo.Pdf / Sales.ReturnReceipt.Pdf — returns download URL for PDF
+ *   get_purchase_order_statistics — Purchase.Order.Statistics — amounts, VAT totals for a purchase order
+ *   release_purchase_order      — Purchase.Order.Release — release a purchase order
+ *   reopen_purchase_order       — Purchase.Order.Reopen — reopen a released purchase order
+ *   post_purchase_order         — Purchase.Order.Post — post a purchase order, returns posted invoice no.
  *   call_message_type  — any Cloud Event type — generic caller: send any message type with subject + data; use get_message_type_help first to understand the schema
  *   get_integration_timestamp   — Cloud Events Integration — latest non-reversed DateTime for source+tableId
  *   set_integration_timestamp   — Cloud Events Integration — insert a DateTime entry for source+tableId
@@ -175,7 +189,7 @@ async function bcGet(path, conn) {
 
 // ── CloudEvents task (two-step POST → GET) ─────────────────────────────────────
 
-async function bcTask(conn, companyId, envelope) {
+async function bcTask(conn, companyId, envelope, { returnDownloadUrl = false } = {}) {
   const token    = await getToken(conn);
   const auth     = `Bearer ${token}`;
   const taskPath = `/v2.0/${conn.tenantId}/${conn.environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/tasks`;
@@ -192,6 +206,9 @@ async function bcTask(conn, companyId, envelope) {
   if (!task.data || !String(task.data).startsWith("https://api.businesscentral.dynamics.com/")) {
     return task;
   }
+
+  // For PDF types the caller only needs the download URL — don't fetch the binary.
+  if (returnDownloadUrl) return task;
 
   const url = new URL(task.data);
   const { body: resultRaw } = await httpsRequest(
@@ -516,7 +533,7 @@ async function toolGetMessageTypeHelp({ type, lcid = 1033, companyId, tenantId, 
   return { company: company.name, type: String(type), markdown };
 }
 
-async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid = 1033, format = "json", companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+async function toolGetRecords({ table, filter, fields, startDateTime, endDateTime, skip = 0, take = 50, lcid = 1033, format = "json", companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   validateTableName(table);
   take = Math.min(Number(take) || 50, 200);
@@ -560,7 +577,9 @@ async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid
   }
 
   const data = { tableName: String(table), skip, take };
-  if (filter) data.tableView = String(filter);
+  if (filter)        data.tableView     = String(filter);
+  if (startDateTime) data.startDateTime = String(startDateTime);
+  if (endDateTime)   data.endDateTime   = String(endDateTime);
   if (resolvedFieldNumbers.length) data.fieldNumbers = resolvedFieldNumbers;
 
   const result = await bcTask(conn, company.id, {
@@ -1065,6 +1084,279 @@ async function toolCallMessageType({ type, subject, data, lcid = 1033, companyId
     catch { return { company: company.name, type: String(type), result }; }
   }
   return { company: company.name, type: String(type), result };
+}
+
+async function toolGetRecordIds({ table, startDateTime, endDateTime, filter, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required");
+  validateTableName(table);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = { tableName: String(table) };
+  if (startDateTime) data.startDateTime = String(startDateTime);
+  if (endDateTime)   data.endDateTime   = String(endDateTime);
+  if (filter)        data.tableView     = String(filter);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Data.RecordIds.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(data),
+  });
+
+  const records    = result.result || result.value || (Array.isArray(result) ? result : []);
+  const noOfRecords = result.noOfRecords;
+  return { company: company.name, table: String(table), noOfRecords, records };
+}
+
+async function toolGetTablePermissions({ table, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required");
+  validateTableName(table);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Help.Permissions.Get",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(table),
+  });
+
+  return { company: company.name, table: String(table), ...result };
+}
+
+async function toolGetCustomerCreditLimit({ customerNo, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!customerNo) throw new Error("Parameter 'customerNo' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Customer.CreditLimit.Get",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(customerNo),
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolGetCustomerSalesHistory({ customerNo, fromDate, toDate, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!customerNo) throw new Error("Parameter 'customerNo' is required");
+  if (!fromDate)   throw new Error("Parameter 'fromDate' is required (YYYY-MM-DD)");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = { customerNo: String(customerNo), fromDate: String(fromDate) };
+  if (toDate) data.toDate = String(toDate);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Customer.SalesHistory.Get",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(customerNo),
+    data:        JSON.stringify(data),
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolGetItemAvailability({ itemNo, requestedDeliveryDate, variantCode, locationFilter, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!itemNo) throw new Error("Parameter 'itemNo' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = {};
+  if (requestedDeliveryDate) data.requestedDeliveryDate = String(requestedDeliveryDate);
+  if (variantCode)           data.variantCode           = String(variantCode);
+  if (locationFilter)        data.locationFilter        = String(locationFilter);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Item.Availability.Get",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(itemNo),
+    data:        JSON.stringify(data),
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolGetItemPrice({ itemNo, customerNo, requestedDeliveryDate, quantity, variantCode, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!itemNo) throw new Error("Parameter 'itemNo' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = {};
+  if (customerNo)                              data.customerNo            = String(customerNo);
+  if (requestedDeliveryDate)                   data.requestedDeliveryDate = String(requestedDeliveryDate);
+  if (quantity !== undefined && quantity !== null) data.quantity          = Number(quantity);
+  if (variantCode)                             data.variantCode           = String(variantCode);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Item.Price.Get",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(itemNo),
+    data:        JSON.stringify(data),
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolReleaseSalesOrder({ orderNo, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!orderNo) throw new Error("Parameter 'orderNo' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Sales.Order.Release",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(orderNo),
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolReopenSalesOrder({ orderNo, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!orderNo) throw new Error("Parameter 'orderNo' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Sales.Order.Reopen",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(orderNo),
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolPostSalesOrder({ orderNo, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!orderNo) throw new Error("Parameter 'orderNo' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Sales.Order.Post",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(orderNo),
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolGetSalesDocumentPdf({ documentType, documentNo, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!documentType) throw new Error("Parameter 'documentType' is required: Invoice, Shipment, CreditMemo, or ReturnReceipt");
+  if (!documentNo)   throw new Error("Parameter 'documentNo' is required");
+
+  const typeMap = {
+    "invoice":       "Sales.SalesInvoice.Pdf",
+    "shipment":      "Sales.SalesShipment.Pdf",
+    "creditmemo":    "Sales.SalesCreditMemo.Pdf",
+    "returnreceipt": "Sales.ReturnReceipt.Pdf",
+  };
+  const messageType = typeMap[String(documentType).toLowerCase().replace(/[^a-z]/g, "")];
+  if (!messageType) throw new Error(`Unknown documentType '${documentType}'. Valid values: Invoice, Shipment, CreditMemo, ReturnReceipt`);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  // The PDF response returns a binary download URL — stop after the first POST.
+  const task = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        messageType,
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(documentNo),
+  }, { returnDownloadUrl: true });
+
+  return {
+    company:         company.name,
+    documentType:    String(documentType),
+    documentNo:      String(documentNo),
+    messageType,
+    downloadUrl:     task.data || null,
+    datacontenttype: task.datacontenttype || "application/pdf",
+    note:            "GET the downloadUrl with a Bearer token to receive the binary PDF file.",
+  };
+}
+
+async function toolGetPurchaseOrderStatistics({ orderNo, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!orderNo) throw new Error("Parameter 'orderNo' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Purchase.Order.Statistics",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(orderNo),
+  });
+
+  if (typeof result === "string") {
+    try { return JSON.parse(result); } catch { return { raw: result }; }
+  }
+  return result;
+}
+
+async function toolReleasePurchaseOrder({ orderNo, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!orderNo) throw new Error("Parameter 'orderNo' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Purchase.Order.Release",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(orderNo),
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolReopenPurchaseOrder({ orderNo, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!orderNo) throw new Error("Parameter 'orderNo' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Purchase.Order.Reopen",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(orderNo),
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolPostPurchaseOrder({ orderNo, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!orderNo) throw new Error("Parameter 'orderNo' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Purchase.Order.Post",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(orderNo),
+  });
+
+  return { company: company.name, ...result };
 }
 
 async function toolReverseIntegrationTimestamp({ source, tableId, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
@@ -2367,17 +2659,19 @@ const TOOLS = [
   },
   {
     name:        "get_records",
-    description: "Reads records from a Business Central table with optional filter, field selection, and paging. Returns up to 50 records by default (max 200).",
+    description: "Reads records from a Business Central table with optional filter, field selection, date range, and paging. Returns up to 50 records by default (max 200).",
     inputSchema: {
       type:       "object",
       properties: {
-        table:  { type: "string",  description: "BC table name (e.g. 'Customer', 'Item', 'Sales Header')." },
-        filter: { type: "string",  description: "BC-style tableView filter, e.g. \"WHERE(Blocked=CONST( ))\"." },
-        fields: { type: "array",   items: { type: "integer" }, description: "Field numbers to return (omit for all)." },
-        skip:   { type: "integer", description: "Records to skip for paging (default 0)." },
-        take:   { type: "integer", description: "Max records to return (default 50, max 200)." },
-        lcid:   { type: "integer", description: "Language LCID for enum captions (default 1033)." },
-        format: { type: "string",  enum: ["json", "markdown"], description: "Output format: 'json' (default) or 'markdown' for LLM-friendly table output." },
+        table:         { type: "string",  description: "BC table name (e.g. 'Customer', 'Item', 'Sales Header')." },
+        filter:        { type: "string",  description: "BC-style tableView filter, e.g. \"WHERE(Blocked=CONST( ))\"." },
+        fields:        { type: "array",   items: { type: "integer" }, description: "Field numbers to return (omit for all)." },
+        startDateTime: { type: "string",  description: "ISO 8601 UTC datetime — filter records with SystemModifiedAt >= this value, e.g. '2026-01-01T00:00:00Z'." },
+        endDateTime:   { type: "string",  description: "ISO 8601 UTC datetime — filter records with SystemModifiedAt <= this value." },
+        skip:          { type: "integer", description: "Records to skip for paging (default 0)." },
+        take:          { type: "integer", description: "Max records to return (default 50, max 200)." },
+        lcid:          { type: "integer", description: "Language LCID for enum captions (default 1033)." },
+        format:        { type: "string",  enum: ["json", "markdown"], description: "Output format: 'json' (default) or 'markdown' for LLM-friendly table output." },
       },
       required: ["table"],
     },
@@ -2525,6 +2819,173 @@ const TOOLS = [
         },
       },
       required: ["source", "lcid", "translations"],
+    },
+  },
+  {
+    name:        "get_record_ids",
+    description: "Returns SystemId + SystemModifiedAt for every record matching an optional filter and date range using Data.RecordIds.Get. Designed for fast incremental sync — no field data is returned.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:         { type: "string", description: "BC table name (e.g. 'Customer', 'Item')." },
+        startDateTime: { type: "string", description: "ISO 8601 UTC datetime — return records modified at or after this time." },
+        endDateTime:   { type: "string", description: "ISO 8601 UTC datetime — return records modified at or before this time." },
+        filter:        { type: "string", description: "Optional BC tableView filter." },
+      },
+      required: ["table"],
+    },
+  },
+  {
+    name:        "get_table_permissions",
+    description: "Returns read and write permissions for the current service principal on a Business Central table (Help.Permissions.Get).",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table: { type: "string", description: "BC table name (e.g. 'Customer', 'G/L Account')." },
+      },
+      required: ["table"],
+    },
+  },
+  {
+    name:        "get_customer_credit_limit",
+    description: "Returns credit limit details for a customer: balance, outstanding amounts, credit limit, remaining credit (with tolerance), and whether the limit is exceeded (Customer.CreditLimit.Get).",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        customerNo: { type: "string", description: "Customer number (e.g. '10000')." },
+      },
+      required: ["customerNo"],
+    },
+  },
+  {
+    name:        "get_customer_sales_history",
+    description: "Returns a summary of items sold to a customer within a date range from posted sales invoices (Customer.SalesHistory.Get). Returns item number, description, quantity, and number of orders per item.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        customerNo: { type: "string", description: "Customer number." },
+        fromDate:   { type: "string", description: "Start date (YYYY-MM-DD, required)." },
+        toDate:     { type: "string", description: "End date (YYYY-MM-DD, defaults to today)." },
+      },
+      required: ["customerNo", "fromDate"],
+    },
+  },
+  {
+    name:        "get_item_availability",
+    description: "Returns inventory or projected availability for an item, optionally filtered by location and variant (Item.Availability.Get). Response format (physical inventory or calculated quantity) depends on BC Cloud Events Setup.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        itemNo:                  { type: "string", description: "Item number." },
+        requestedDeliveryDate:   { type: "string", description: "Requested delivery date (YYYY-MM-DD)." },
+        variantCode:             { type: "string", description: "Item variant code." },
+        locationFilter:          { type: "string", description: "BC filter syntax for locations, e.g. 'BLUE|RED'." },
+      },
+      required: ["itemNo"],
+    },
+  },
+  {
+    name:        "get_item_price",
+    description: "Returns price list lines for an item, optionally for a specific customer, quantity, date and variant (Item.Price.Get).",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        itemNo:                { type: "string",  description: "Item number." },
+        customerNo:            { type: "string",  description: "Customer number for customer-specific pricing." },
+        requestedDeliveryDate: { type: "string",  description: "Requested delivery date (YYYY-MM-DD)." },
+        quantity:              { type: "number",  description: "Quantity (for quantity-break pricing)." },
+        variantCode:           { type: "string",  description: "Item variant code." },
+      },
+      required: ["itemNo"],
+    },
+  },
+  {
+    name:        "release_sales_order",
+    description: "Releases a sales order in Business Central (Sales.Order.Release). Returns status before/after and order details.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        orderNo: { type: "string", description: "Sales order number or SystemId." },
+      },
+      required: ["orderNo"],
+    },
+  },
+  {
+    name:        "reopen_sales_order",
+    description: "Reopens a released sales order in Business Central (Sales.Order.Reopen).",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        orderNo: { type: "string", description: "Sales order number or SystemId." },
+      },
+      required: ["orderNo"],
+    },
+  },
+  {
+    name:        "post_sales_order",
+    description: "Posts a sales order in Business Central (Sales.Order.Post). The original order is deleted and a posted sales invoice is created. Returns the posted invoice number and totals.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        orderNo: { type: "string", description: "Sales order number or SystemId." },
+      },
+      required: ["orderNo"],
+    },
+  },
+  {
+    name:        "get_sales_document_pdf",
+    description: "Returns a download URL for a PDF of a posted sales document (invoice, shipment, credit memo, or return receipt). GET the returned downloadUrl with a Bearer token to receive the binary PDF.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        documentType: { type: "string", enum: ["Invoice", "Shipment", "CreditMemo", "ReturnReceipt"], description: "Type of posted sales document." },
+        documentNo:   { type: "string", description: "Document number or SystemId." },
+      },
+      required: ["documentType", "documentNo"],
+    },
+  },
+  {
+    name:        "get_purchase_order_statistics",
+    description: "Returns comprehensive statistics for a purchase order (amounts, VAT totals, quantities, weight and volume) using the Purchase.Order.Statistics Cloud Event.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        orderNo: { type: "string", description: "Purchase order number or SystemId." },
+      },
+      required: ["orderNo"],
+    },
+  },
+  {
+    name:        "release_purchase_order",
+    description: "Releases a purchase order in Business Central (Purchase.Order.Release). Returns status before/after and order details.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        orderNo: { type: "string", description: "Purchase order number or SystemId." },
+      },
+      required: ["orderNo"],
+    },
+  },
+  {
+    name:        "reopen_purchase_order",
+    description: "Reopens a released purchase order in Business Central (Purchase.Order.Reopen).",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        orderNo: { type: "string", description: "Purchase order number or SystemId." },
+      },
+      required: ["orderNo"],
+    },
+  },
+  {
+    name:        "post_purchase_order",
+    description: "Posts a purchase order in Business Central (Purchase.Order.Post). The original order is deleted and a posted purchase invoice is created. Returns the posted invoice number and totals.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        orderNo: { type: "string", description: "Purchase order number or SystemId." },
+      },
+      required: ["orderNo"],
     },
   },
   {
@@ -2744,6 +3205,20 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "get_record_count":            content = await toolGetRecordCount(args);            break;
           case "get_decimal_total":           content = await toolGetDecimalTotal(args);           break;
           case "get_sales_order_statistics":  content = await toolGetSalesOrderStatistics(args);   break;
+          case "get_record_ids":              content = await toolGetRecordIds(args);               break;
+          case "get_table_permissions":       content = await toolGetTablePermissions(args);        break;
+          case "get_customer_credit_limit":   content = await toolGetCustomerCreditLimit(args);     break;
+          case "get_customer_sales_history":  content = await toolGetCustomerSalesHistory(args);    break;
+          case "get_item_availability":       content = await toolGetItemAvailability(args);        break;
+          case "get_item_price":              content = await toolGetItemPrice(args);               break;
+          case "release_sales_order":         content = await toolReleaseSalesOrder(args);          break;
+          case "reopen_sales_order":          content = await toolReopenSalesOrder(args);           break;
+          case "post_sales_order":            content = await toolPostSalesOrder(args);             break;
+          case "get_sales_document_pdf":      content = await toolGetSalesDocumentPdf(args);        break;
+          case "get_purchase_order_statistics": content = await toolGetPurchaseOrderStatistics(args); break;
+          case "release_purchase_order":      content = await toolReleasePurchaseOrder(args);       break;
+          case "reopen_purchase_order":       content = await toolReopenPurchaseOrder(args);        break;
+          case "post_purchase_order":         content = await toolPostPurchaseOrder(args);          break;
           case "get_records":           content = await toolGetRecords(args);              break;
           case "set_records":           content = await toolSetRecords(args);              break;
           case "search_customers":   content = await toolSearchCustomers(args);   break;
