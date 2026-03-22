@@ -59,14 +59,15 @@ function parsePfx(pfxBuffer, password) {
 
 /**
  * Detect SOAP version (1.1 or 1.2) from the service URL.
- * URLs containing '/20131015/' use the 2013 Sambankaskema schema → SOAP 1.2 (WCF).
- * All other paths (ASMX / older schemas) use SOAP 1.1.
+ * All WCF .svc endpoints use SOAP 1.2 + WS-Addressing 1.0.
+ * Legacy ASMX endpoints (e.g., /20051201/…Service.asmx or bank proprietary
+ * /b2b.asmx URLs) use SOAP 1.1.
  *
  * @param {string} serviceUrl
  * @returns {'1.1'|'1.2'}
  */
 function detectSoapVersion(serviceUrl) {
-  return serviceUrl.includes('/20131015/') ? '1.2' : '1.1';
+  return /\.svc($|\?|\/)/i.test(serviceUrl) ? '1.2' : '1.1';
 }
 
 // ── XML escaping ──────────────────────────────────────────────────────────────
@@ -144,8 +145,8 @@ function buildEnvelope(params, soapVersion, certDer) {
 
 /**
  * Apply a WS-Security XML digital signature to the envelope.
- * Signs Body-1 and TS-1 using RSA-SHA1 with Exclusive C14N.
- * KeyInfo references BinarySecurityToken BST-1.
+ * Signs Body, Timestamp, and all WS-Addressing headers using RSA-SHA256 with Exclusive C14N.
+ * KeyInfo references BinarySecurityToken BST-1 via SHA-1 thumbprint (matching WCF Basic256 initiator token parameters).
  *
  * @param {string} xmlString   Unsigned SOAP envelope
  * @param {Buffer} certDer     DER-encoded client certificate
@@ -153,31 +154,45 @@ function buildEnvelope(params, soapVersion, certDer) {
  * @returns {string} Signed XML envelope
  */
 function signEnvelope(xmlString, certDer, keyPem) {
+  // WCF uses X509KeyIdentifierClauseType.Thumbprint with AlwaysToRecipient,
+  // which means the BST is embedded AND the Signature/KeyInfo uses a
+  // ThumbprintSHA1 wsse:KeyIdentifier rather than a Direct Reference URI.
+  // Compute SHA-1 thumbprint (base64) of the DER-encoded certificate.
+  const md = forge.md.sha1.create();
+  md.update(certDer.toString('binary'));
+  const thumbprintB64 = Buffer.from(md.digest().getBytes(), 'binary').toString('base64');
+
   // idMode:'wssecurity' makes ensureHasId() look up wsu:Id by its namespace URI
   // so that Reference/@URI="#Body-1" / "#TS-1" are preserved correctly.
   //
   // getKeyInfoContent replaces the v3/v4 keyInfoProvider API (removed in v6).
-  // It returns the wsse:SecurityTokenReference that points to BST-1.
+  // It returns the wsse:SecurityTokenReference using ThumbprintSHA1.
   const sig = new SignedXml({
     privateKey: keyPem,
     idMode: 'wssecurity',
     getKeyInfoContent: () =>
       '<wsse:SecurityTokenReference' +
       ' xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">' +
-      '<wsse:Reference URI="#BST-1"' +
-      ' ValueType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3"/>' +
+      '<wsse:KeyIdentifier' +
+      ' ValueType="http://docs.oasis-open.org/wss/oasis-wss-soap-message-security-1.1#ThumbprintSHA1"' +
+      ' EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">' +
+      thumbprintB64 +
+      '</wsse:KeyIdentifier>' +
       '</wsse:SecurityTokenReference>',
   });
 
   sig.canonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#';
-  sig.signatureAlgorithm        = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1';
+  // WCF CustomMutualCertificateBinding uses MessageSecurityVersion
+  // WSSecurity11WSTrust13WSSecureConversation13WSSecurityPolicy12 which
+  // defaults to the Basic256 algorithm suite → RSA-SHA256 signatures, SHA-256 digests.
+  sig.signatureAlgorithm        = 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256';
 
   // WCF AsymmetricBinding policy (sp:SignedParts) requires Body, Timestamp,
   // and all WS-Addressing headers: To, Action, MessageID, ReplyTo.
   // Use local-name() element selectors — no namespace resolver needed.
-  const C14N = 'http://www.w3.org/2001/10/xml-exc-c14n#';
-  const SHA1 = 'http://www.w3.org/2000/09/xmldsig#sha1';
-  const ref  = xpath => ({ xpath, transforms: [C14N], digestAlgorithm: SHA1 });
+  const C14N   = 'http://www.w3.org/2001/10/xml-exc-c14n#';
+  const SHA256 = 'http://www.w3.org/2001/04/xmlenc#sha256';
+  const ref    = xpath => ({ xpath, transforms: [C14N], digestAlgorithm: SHA256 });
 
   sig.addReference(ref('//*[local-name()="Body"]'));
   sig.addReference(ref('//*[local-name()="Timestamp"]'));

@@ -479,8 +479,14 @@ const BANKS = [
       {
         name: 'QueryClaims',
         mkUrl: h => `https://${h}/Claims/20131015/ClaimService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Claims/20131015/IClaimService/QueryClaims',
-        body: '<QueryClaims xmlns="http://schemas.b2b.is/Claims/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</QueryClaims>',
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/QueryClaims',
+        body: '<QueryClaims xmlns="http://IcelandicOnlineBanking/2013/10/15/Claims">\n  <Query xmlns:ct="http://IcelandicOnlineBanking/2013/10/15/ClaimTypes">\n    <ct:Claimant><!-- REPLACE: claimant kennitala --></ct:Claimant>\n    <ct:Period ct:DateSpanReferenceDate="DueDate">\n      <ct:DateFrom><!-- REPLACE: YYYY-MM-DD --></ct:DateFrom>\n      <ct:DateTo><!-- REPLACE: YYYY-MM-DD --></ct:DateTo>\n    </ct:Period>\n    <ct:Status>Open</ct:Status>\n    <ct:State>Active</ct:State>\n    <ct:RecordFrom>1</ct:RecordFrom>\n    <ct:RecordTo>100</ct:RecordTo>\n  </Query>\n</QueryClaims>',
+      },
+      {
+        name: 'GetClaimOperationResult',
+        mkUrl: h => `https://${h}/Claims/20131015/ClaimService.svc`,
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/GetClaimOperationResult',
+        body: '<GetClaimOperationResult xmlns="http://IcelandicOnlineBanking/2013/10/15/Claims">\n  <Id><!-- REPLACE: operation ID from CreateClaim response --></Id>\n</GetClaimOperationResult>',
       },
       {
         name: 'GetCurrencyRates',
@@ -517,8 +523,14 @@ const BANKS = [
       {
         name: 'QueryClaims',
         mkUrl: h => `https://${h}/Claims/20131015/ClaimService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Claims/20131015/IClaimService/QueryClaims',
-        body: '<QueryClaims xmlns="http://schemas.b2b.is/Claims/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</QueryClaims>',
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/QueryClaims',
+        body: '<QueryClaims xmlns="http://IcelandicOnlineBanking/2013/10/15/Claims">\n  <Query xmlns:ct="http://IcelandicOnlineBanking/2013/10/15/ClaimTypes">\n    <ct:Claimant><!-- REPLACE: claimant kennitala --></ct:Claimant>\n    <ct:Period ct:DateSpanReferenceDate="DueDate">\n      <ct:DateFrom><!-- REPLACE: YYYY-MM-DD --></ct:DateFrom>\n      <ct:DateTo><!-- REPLACE: YYYY-MM-DD --></ct:DateTo>\n    </ct:Period>\n    <ct:Status>Open</ct:Status>\n    <ct:State>Active</ct:State>\n    <ct:RecordFrom>1</ct:RecordFrom>\n    <ct:RecordTo>100</ct:RecordTo>\n  </Query>\n</QueryClaims>',
+      },
+      {
+        name: 'GetClaimOperationResult',
+        mkUrl: h => `https://${h}/Claims/20131015/ClaimService.svc`,
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/GetClaimOperationResult',
+        body: '<GetClaimOperationResult xmlns="http://IcelandicOnlineBanking/2013/10/15/Claims">\n  <Id><!-- REPLACE: operation ID from CreateClaim response --></Id>\n</GetClaimOperationResult>',
       },
       {
         name: 'GetCurrencyRates',
@@ -552,8 +564,14 @@ const BANKS = [
       {
         name: 'QueryClaims',
         mkUrl: h => `https://${h}/Claims/20131015/ClaimService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Claims/20131015/IClaimService/QueryClaims',
-        body: '<QueryClaims xmlns="http://schemas.b2b.is/Claims/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</QueryClaims>',
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/QueryClaims',
+        body: '<QueryClaims xmlns="http://IcelandicOnlineBanking/2013/10/15/Claims">\n  <Query xmlns:ct="http://IcelandicOnlineBanking/2013/10/15/ClaimTypes">\n    <ct:Claimant><!-- REPLACE: claimant kennitala --></ct:Claimant>\n    <ct:Period ct:DateSpanReferenceDate="DueDate">\n      <ct:DateFrom><!-- REPLACE: YYYY-MM-DD --></ct:DateFrom>\n      <ct:DateTo><!-- REPLACE: YYYY-MM-DD --></ct:DateTo>\n    </ct:Period>\n    <ct:Status>Open</ct:Status>\n    <ct:State>Active</ct:State>\n    <ct:RecordFrom>1</ct:RecordFrom>\n    <ct:RecordTo>100</ct:RecordTo>\n  </Query>\n</QueryClaims>',
+      },
+      {
+        name: 'GetClaimOperationResult',
+        mkUrl: h => `https://${h}/Claims/20131015/ClaimService.svc`,
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/GetClaimOperationResult',
+        body: '<GetClaimOperationResult xmlns="http://IcelandicOnlineBanking/2013/10/15/Claims">\n  <Id><!-- REPLACE: operation ID from CreateClaim response --></Id>\n</GetClaimOperationResult>',
       },
       {
         name: 'GetCurrencyRates',
@@ -610,8 +628,14 @@ const BANKS = [
       {
         name: 'QueryClaims',
         mkUrl: h => `https://${h}/Claims/20131015/ClaimService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Claims/20131015/IClaimService/QueryClaims',
-        body: '<QueryClaims xmlns="http://schemas.b2b.is/Claims/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</QueryClaims>',
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/QueryClaims',
+        body: '<QueryClaims xmlns="http://IcelandicOnlineBanking/2013/10/15/Claims">\n  <Query xmlns:ct="http://IcelandicOnlineBanking/2013/10/15/ClaimTypes">\n    <ct:Claimant><!-- REPLACE: claimant kennitala --></ct:Claimant>\n    <ct:Period ct:DateSpanReferenceDate="DueDate">\n      <ct:DateFrom><!-- REPLACE: YYYY-MM-DD --></ct:DateFrom>\n      <ct:DateTo><!-- REPLACE: YYYY-MM-DD --></ct:DateTo>\n    </ct:Period>\n    <ct:Status>Open</ct:Status>\n    <ct:State>Active</ct:State>\n    <ct:RecordFrom>1</ct:RecordFrom>\n    <ct:RecordTo>100</ct:RecordTo>\n  </Query>\n</QueryClaims>',
+      },
+      {
+        name: 'GetClaimOperationResult',
+        mkUrl: h => `https://${h}/Claims/20131015/ClaimService.svc`,
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/GetClaimOperationResult',
+        body: '<GetClaimOperationResult xmlns="http://IcelandicOnlineBanking/2013/10/15/Claims">\n  <Id><!-- REPLACE: operation ID from CreateClaim response --></Id>\n</GetClaimOperationResult>',
       },
       {
         name: 'GetCurrencyRates',

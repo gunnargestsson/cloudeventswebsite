@@ -1304,13 +1304,15 @@ async function toolGetCustomerStatementPdf({ customerNo, startDate, endDate, com
   if (startDate) data.startDate = startDate;
   if (endDate)   data.endDate   = endDate;
 
-  const result = await bcTask(conn, company.id, {
+  const envelope = {
     specversion: "1.0",
     type:        "Customer.Statement.Pdf",
     source:      "BC Metadata MCP v1.0",
     subject:     String(customerNo),
-    data,
-  });
+  };
+  if (Object.keys(data).length > 0) envelope.data = JSON.stringify(data);
+
+  const result = await bcTask(conn, company.id, envelope);
 
   // BC downloads the PDF binary via the task data URL; result arrives as a latin1 string.
   if (typeof result !== "string") throw new Error(`Unexpected response from BC for Customer.Statement.Pdf: ${JSON.stringify(result)}`);
