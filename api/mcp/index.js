@@ -26,6 +26,10 @@
  *   get_decimal_total            — Data.Totals.Get — sum one decimal field across records in any table with optional filter
  *   get_sales_order_statistics  — Sales.Order.Statistics — amounts, VAT totals, quantities for a sales order
  *   get_record_ids              — Data.RecordIds.Get — SystemId + SystemModifiedAt for incremental sync
+ *   get_csv_records             — CSV.Records.Get — export all matching records as a UTF-8 CSV (Open Mirroring format)
+ *   get_deleted_records         — Deleted.Records.Get — full record snapshots from the Cloud Events Delete Log
+ *   get_deleted_record_ids      — Deleted.RecordIds.Get — lightweight deletion log: id + deletedAt per deleted record
+ *   get_csv_deleted_records     — CSV.DeletedRecords.Get — deleted-record audit log as a UTF-8 CSV
  *   get_table_permissions       — Help.Permissions.Get — read/write permissions for a table
  *   get_customer_credit_limit   — Customer.CreditLimit.Get — balance, outstanding, credit limit, remaining credit
  *   get_customer_sales_history  — Customer.SalesHistory.Get — items sold to a customer within a date range
@@ -1109,6 +1113,103 @@ async function toolGetRecordIds({ table, startDateTime, endDateTime, filter, com
   const records    = result.result || result.value || (Array.isArray(result) ? result : []);
   const noOfRecords = result.noOfRecords;
   return { company: company.name, table: String(table), noOfRecords, records };
+}
+
+async function toolGetCsvRecords({ table, fieldNumbers, startDateTime, endDateTime, filter, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required");
+  validateTableName(table);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = { tableName: String(table) };
+  if (Array.isArray(fieldNumbers) && fieldNumbers.length) data.fieldNumbers = fieldNumbers.map(Number);
+  if (startDateTime) data.startDateTime = String(startDateTime);
+  if (endDateTime)   data.endDateTime   = String(endDateTime);
+  if (filter)        data.tableView     = String(filter);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "CSV.Records.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(data),
+  });
+
+  // bcTask follows the redirect URL and returns the CSV as a latin1 string
+  const csv = typeof result === "string" ? result : JSON.stringify(result);
+  return { company: company.name, table: String(table), datacontenttype: "text/csv", csv };
+}
+
+async function toolGetDeletedRecords({ table, fieldNumbers, startDateTime, endDateTime, skip = 0, take = 100, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required");
+  validateTableName(table);
+  take = Math.min(Number(take) || 100, 1000);
+  skip = Math.max(Number(skip) || 0, 0);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = { tableName: String(table), skip, take };
+  if (Array.isArray(fieldNumbers) && fieldNumbers.length) data.fieldNumbers = fieldNumbers.map(Number);
+  if (startDateTime) data.startDateTime = String(startDateTime);
+  if (endDateTime)   data.endDateTime   = String(endDateTime);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Deleted.Records.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(data),
+  });
+
+  const records     = result.result || result.value || (Array.isArray(result) ? result : []);
+  const noOfRecords = result.noOfRecords;
+  return { company: company.name, table: String(table), skip, take, noOfRecords, records };
+}
+
+async function toolGetDeletedRecordIds({ table, startDateTime, endDateTime, skip = 0, take = 100, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required");
+  validateTableName(table);
+  take = Math.min(Number(take) || 100, 1000);
+  skip = Math.max(Number(skip) || 0, 0);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = { tableName: String(table), skip, take };
+  if (startDateTime) data.startDateTime = String(startDateTime);
+  if (endDateTime)   data.endDateTime   = String(endDateTime);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Deleted.RecordIds.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(data),
+  });
+
+  const records     = result.result || result.value || (Array.isArray(result) ? result : []);
+  const noOfRecords = result.noOfRecords;
+  return { company: company.name, table: String(table), skip, take, noOfRecords, records };
+}
+
+async function toolGetCsvDeletedRecords({ table, tableNo, fromDate, toDate, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = {};
+  if (table)   { validateTableName(table); data.tableName = String(table); }
+  if (tableNo) data.tableNo = Number(tableNo);
+  if (fromDate) data.fromDate = String(fromDate);
+  if (toDate)   data.toDate   = String(toDate);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "CSV.DeletedRecords.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(data),
+  });
+
+  const csv = typeof result === "string" ? result : JSON.stringify(result);
+  return { company: company.name, datacontenttype: "text/csv", csv };
 }
 
 async function toolGetTablePermissions({ table, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
@@ -2873,6 +2974,65 @@ const TOOLS = [
     },
   },
   {
+    name:        "get_csv_records",
+    description: "Exports all matching records from a BC table as a UTF-8 CSV file in Open Mirroring format (CSV.Records.Get). The full result set is returned — no pagination. Column headers follow the {fieldName}-{fieldNo} convention. System fields (Timestamp, SystemId, SystemCreatedAt, SystemCreatedBy, SystemModifiedAt, SystemModifiedBy) are always appended. A $Company column is added for per-company tables. Unsupported field types (BLOB, Media, etc.) are silently skipped.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:         { type: "string", description: "BC table name (e.g. 'Customer', 'Item')." },
+        fieldNumbers:  { type: "array",  items: { type: "integer" }, description: "Optional list of specific field numbers to include. All non-BLOB fields returned when omitted." },
+        startDateTime: { type: "string", description: "ISO 8601 UTC datetime — include only records with SystemModifiedAt >= this value." },
+        endDateTime:   { type: "string", description: "ISO 8601 UTC datetime — include only records with SystemModifiedAt <= this value." },
+        filter:        { type: "string", description: "Optional BC tableView filter expression, e.g. \"WHERE(Blocked = CONST( ))\"." },
+      },
+      required: ["table"],
+    },
+  },
+  {
+    name:        "get_deleted_records",
+    description: "Retrieves full record snapshots from the Cloud Events Delete Log for records deleted from a specified BC table (Deleted.Records.Get). Requires 'Store Record' to be enabled in Cloud Events Delete Setup for the table. Supports pagination via skip/take and date-range filtering on the deletion timestamp.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:         { type: "string",  description: "BC table name (e.g. 'Customer') or use tableNo." },
+        fieldNumbers:  { type: "array",   items: { type: "integer" }, description: "Optional list of field numbers to include. All fields returned when omitted." },
+        startDateTime: { type: "string",  description: "ISO 8601 UTC datetime — include only records deleted at or after this time." },
+        endDateTime:   { type: "string",  description: "ISO 8601 UTC datetime — include only records deleted at or before this time." },
+        skip:          { type: "integer", description: "Number of records to skip for pagination. Default 0." },
+        take:          { type: "integer", description: "Number of records to return. Default 100, max 1000." },
+      },
+      required: ["table"],
+    },
+  },
+  {
+    name:        "get_deleted_record_ids",
+    description: "Returns a lightweight list of deleted record IDs and deletion timestamps from the Cloud Events Delete Log (Deleted.RecordIds.Get). Does NOT require 'Store Record' to be enabled. Designed for fast incremental deletion-sync. Returns id (SystemId GUID) and deletedAt (ISO 8601) per record. Supports pagination via skip/take and date-range filtering.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:         { type: "string",  description: "BC table name (e.g. 'Customer') or use tableNo." },
+        startDateTime: { type: "string",  description: "ISO 8601 UTC datetime — include only records deleted at or after this time." },
+        endDateTime:   { type: "string",  description: "ISO 8601 UTC datetime — include only records deleted at or before this time." },
+        skip:          { type: "integer", description: "Number of records to skip for pagination. Default 0." },
+        take:          { type: "integer", description: "Number of records to return. Default 100, max 1000." },
+      },
+      required: ["table"],
+    },
+  },
+  {
+    name:        "get_csv_deleted_records",
+    description: "Exports deleted-record audit data from the Cloud Events Delete Log as a UTF-8 CSV file (CSV.DeletedRecords.Get). Columns: systemId, tableId, tableName, deletedAt, userId. Suitable for compliance reporting and data archival. Optionally filter by table and/or date range.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:    { type: "string",  description: "Optional BC table name to filter by." },
+        tableNo:  { type: "integer", description: "Optional BC table number to filter by." },
+        fromDate: { type: "string",  description: "ISO 8601 UTC start datetime for the deletion window." },
+        toDate:   { type: "string",  description: "ISO 8601 UTC end datetime for the deletion window." },
+      },
+    },
+  },
+  {
     name:        "get_table_permissions",
     description: "Returns read and write permissions for the current service principal on a Business Central table (Help.Permissions.Get).",
     inputSchema: {
@@ -3256,6 +3416,10 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "get_decimal_total":           content = await toolGetDecimalTotal(args);           break;
           case "get_sales_order_statistics":  content = await toolGetSalesOrderStatistics(args);   break;
           case "get_record_ids":              content = await toolGetRecordIds(args);               break;
+          case "get_csv_records":             content = await toolGetCsvRecords(args);              break;
+          case "get_deleted_records":         content = await toolGetDeletedRecords(args);          break;
+          case "get_deleted_record_ids":      content = await toolGetDeletedRecordIds(args);        break;
+          case "get_csv_deleted_records":     content = await toolGetCsvDeletedRecords(args);       break;
           case "get_table_permissions":       content = await toolGetTablePermissions(args);        break;
           case "get_customer_credit_limit":   content = await toolGetCustomerCreditLimit(args);     break;
           case "get_customer_sales_history":  content = await toolGetCustomerSalesHistory(args);    break;
