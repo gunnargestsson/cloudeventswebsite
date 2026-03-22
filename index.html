@@ -271,6 +271,11 @@
           <div class="nav-card-title" id="nav-claude-chat-title">Claude Chat</div>
           <div class="nav-card-desc" id="nav-claude-chat-desc">Chat with Claude using Business Central MCP tools</div>
         </a>
+        <a href="iobws-proxy-tester.html" class="nav-card">
+          <div class="nav-card-icon">🏦</div>
+          <div class="nav-card-title" id="nav-iobws-title">IOBWS Proxy Tester</div>
+          <div class="nav-card-desc" id="nav-iobws-desc">Test Icelandic bank proxy endpoints</div>
+        </a>
       </div>
     </div>
   </main>
@@ -278,7 +283,7 @@
 
 <script>
 const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',1036:'French',1034:'Spanish',1043:'Dutch',1053:'Swedish',1044:'Norwegian'};
-const UI_STRINGS = ['Home', 'API Key', 'Connected', 'Not connected', 'Open Mirror', 'Mirror Business Central tables', 'Claude Chat', 'Chat with Claude using Business Central MCP tools'];
+const UI_STRINGS = ['Home', 'API Key', 'Connected', 'Not connected', 'Open Mirror', 'Mirror Business Central tables', 'Claude Chat', 'Chat with Claude using Business Central MCP tools', 'IOBWS Proxy Tester', 'Test Icelandic bank proxy endpoints'];
 
 async function loadUiTranslations() {
   const settings = bcSettingsLoad();
@@ -298,6 +303,10 @@ function applyUiTranslations() {
   if (desc) desc.textContent = t('Mirror Business Central tables');
   if (claudeTitle) claudeTitle.textContent = t('Claude Chat');
   if (claudeDesc) claudeDesc.textContent = t('Chat with Claude using Business Central MCP tools');
+  const iobwsTitle = document.getElementById('nav-iobws-title');
+  const iobwsDesc  = document.getElementById('nav-iobws-desc');
+  if (iobwsTitle) iobwsTitle.textContent = t('IOBWS Proxy Tester');
+  if (iobwsDesc)  iobwsDesc.textContent  = t('Test Icelandic bank proxy endpoints');
 }
 
 function updateTopBarConnection() {

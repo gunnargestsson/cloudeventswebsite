@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Origo BC Portal – IOBWS Proxy Tester</title>
+<script src="settings.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0d14;
+    --surface: #111520;
+    --surface2: #171d2e;
+    --surface3: #0f1320;
+    --border: #1e2640;
+    --border-bright: #2d3a5e;
+    --accent: #4f7fff;
+    --accent2: #7c5cfc;
+    --accent-glow: rgba(79,127,255,0.18);
+    --text: #e8ecf5;
+    --text-dim: #6b7799;
+    --text-mid: #9ba8c8;
+    --green: #27c08a;
+    --red: #f25f5c;
+    --amber: #f5a623;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(79,127,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79,127,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+  #app { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+  /* ── HEADER ── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,13,20,0.85);
+    backdrop-filter: blur(12px);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+    text-decoration: none; color: inherit;
+    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.15rem; letter-spacing: -0.02em;
+  }
+  .logo-icon {
+    width: 34px; height: 34px; border-radius: 9px; overflow: hidden; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .logo span { color: var(--text-dim); font-weight: 400; font-size: 0.78rem; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .pill {
+    display: flex; align-items: center; gap: 7px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 99px; padding: 5px 14px;
+    font-size: 0.72rem; color: var(--text-mid); text-decoration: none;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .pill:hover { border-color: var(--accent); color: var(--text); }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); }
+  .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .status-dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); }
+
+  /* ── MAIN ── */
+  main { flex: 1; padding: 32px; max-width: 1440px; margin: 0 auto; width: 100%; }
+
+  .breadcrumb {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 0.72rem; color: var(--text-dim); margin-bottom: 24px;
+  }
+  .breadcrumb a { color: var(--text-mid); text-decoration: none; }
+  .breadcrumb a:hover { color: var(--text); }
+  .breadcrumb .sep { color: var(--border-bright); }
+
+  /* ── TESTER LAYOUT ── */
+  .tester-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .tester-layout { grid-template-columns: 1fr; } }
+
+  /* ── PANELS ── */
+  .panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px;
+  }
+  .panel-title {
+    font-family: 'Syne', sans-serif; font-weight: 700;
+    font-size: 1.15rem; letter-spacing: -0.03em; margin-bottom: 20px;
+  }
+
+  /* ── BANK BUTTONS ── */
+  .bank-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .bank-btn {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text-mid);
+    font-family: 'DM Mono', monospace; font-size: 0.75rem; padding: 7px 14px;
+    cursor: pointer; transition: border-color 0.2s, color 0.2s, background 0.2s;
+  }
+  .bank-btn:hover { border-color: var(--accent); color: var(--text); }
+  .bank-btn.active {
+    border-color: var(--accent); background: rgba(79,127,255,0.12); color: var(--text);
+  }
+
+  /* ── FIELD ROWS ── */
+  .field-row { margin-bottom: 14px; }
+  .field-row > label {
+    display: block; font-size: 0.66rem; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;
+  }
+  .field-row input,
+  .field-row select,
+  .field-row textarea {
+    width: 100%;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text);
+    font-family: 'DM Mono', monospace; font-size: 0.8rem;
+    padding: 8px 12px; outline: none; resize: vertical;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    appearance: none; -webkit-appearance: none;
+  }
+  .field-row input:focus,
+  .field-row select:focus,
+  .field-row textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .field-row textarea { font-size: 0.75rem; line-height: 1.55; }
+
+  /* ── INPUT + COPY BUTTON ROW ── */
+  .input-copy-row { display: flex; gap: 6px; align-items: flex-start; }
+  .input-copy-row input,
+  .input-copy-row textarea { flex: 1; }
+  .copy-btn {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text-dim);
+    font-size: 0.82rem; padding: 7px 9px;
+    cursor: pointer; flex-shrink: 0; line-height: 1;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--text); }
+  .copy-btn.top { align-self: flex-start; }
+
+  /* ── SEND ROW ── */
+  .send-row { display: flex; align-items: center; gap: 14px; margin-top: 18px; }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border: none; border-radius: var(--radius-sm); color: #fff;
+    font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.85rem;
+    padding: 10px 24px; cursor: pointer;
+    transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
+    box-shadow: 0 4px 16px rgba(79,127,255,0.28);
+  }
+  .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.45; cursor: default; transform: none; }
+  .btn-secondary {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text-mid);
+    font-family: 'Syne', sans-serif; font-weight: 600; font-size: 0.78rem;
+    padding: 7px 14px; cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--text); }
+  .resp-time { font-size: 0.72rem; color: var(--text-dim); }
+
+  /* ── SPINNER ── */
+  .spinner {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.7s linear infinite;
+    vertical-align: middle; margin-right: 6px;
+  }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  /* ── RESPONSE PANEL ── */
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 200px; gap: 14px; color: var(--text-dim);
+  }
+  .empty-icon { font-size: 2.4rem; opacity: 0.35; }
+  .empty-text { font-size: 0.8rem; text-align: center; max-width: 32ch; line-height: 1.65; }
+
+  .resp-status-bar {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 0.72rem; color: var(--text-dim);
+    margin-bottom: 12px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .resp-status-code { font-weight: 600; color: var(--text-mid); }
+  .resp-status-code.ok  { color: var(--green); }
+  .resp-status-code.err { color: var(--red); }
+
+  .fault-card {
+    background: rgba(245,166,35,0.10); border: 1px solid rgba(245,166,35,0.35);
+    border-radius: var(--radius-sm); padding: 10px 14px;
+    font-size: 0.78rem; color: var(--amber);
+    margin-bottom: 12px; line-height: 1.5;
+  }
+  .error-card {
+    background: rgba(242,95,92,0.10); border: 1px solid rgba(242,95,92,0.35);
+    border-radius: var(--radius-sm); padding: 10px 14px;
+    font-size: 0.78rem; color: var(--red);
+    margin-bottom: 12px; line-height: 1.5;
+  }
+
+  .resp-actions { display: flex; gap: 8px; margin-bottom: 10px; }
+
+  .resp-pre {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 14px;
+    font-family: 'DM Mono', monospace; font-size: 0.72rem; line-height: 1.6;
+    overflow: auto; max-height: 560px;
+    color: var(--text-mid); white-space: pre; word-break: normal;
+  }
+
+  /* ── REQUEST HISTORY ── */
+  .history-divider { border: none; border-top: 1px solid var(--border); margin: 20px 0 16px; }
+  .history-header {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none;
+  }
+  .history-header-label {
+    font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.9rem; letter-spacing: -0.02em;
+  }
+  .history-toggle { color: var(--text-dim); font-size: 0.82rem; transition: transform 0.2s; }
+  .history-list { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .hist-entry {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px 14px;
+    display: flex; align-items: center; gap: 10px; font-size: 0.72rem;
+    flex-wrap: wrap;
+  }
+  .hist-time  { color: var(--text-dim); flex-shrink: 0; font-family: 'DM Mono', monospace; }
+  .hist-bank  { color: var(--accent); flex-shrink: 0; }
+  .hist-op    { flex: 1; color: var(--text-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .hist-ms    { color: var(--text-dim); flex-shrink: 0; }
+  .hist-status { flex-shrink: 0; font-weight: 600; }
+  .hist-status.ok  { color: var(--green); }
+  .hist-status.err { color: var(--red); }
+  .hist-replay { margin-left: auto; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <a class="logo" href="index.html">
+      <div class="logo-icon"><img src="origo.jpeg" alt="Origo"></div>
+      Origo BC Portal <span>/ IOBWS Proxy Tester</span>
+    </a>
+    <div class="header-right">
+      <a href="index.html" class="pill" data-t="Home">Home</a>
+      <a href="index.html" class="pill">
+        <span class="status-dot" id="top-conn-dot"></span>
+        <span id="top-conn-label" data-t="Not connected">Not connected</span>
+      </a>
+      <a href="api-key-settings.html" class="pill" data-t="API Key">API Key</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="breadcrumb">
+      <a href="index.html" data-t="Home">Home</a>
+      <span class="sep">/</span>
+      <span data-t="IOBWS Proxy Tester">IOBWS Proxy Tester</span>
+    </div>
+
+    <div class="tester-layout">
+
+      <!-- ── LEFT: Request Builder ── -->
+      <div class="panel">
+        <div class="panel-title" data-t="IOBWS Proxy Tester">IOBWS Proxy Tester</div>
+
+        <div class="field-row">
+          <label data-t="Select bank">Select bank</label>
+          <div class="bank-btns" id="bank-btns"></div>
+        </div>
+
+        <div class="field-row" id="env-row">
+          <label data-t="Environment">Environment</label>
+          <select id="env-sel" onchange="onEnvChange()"></select>
+        </div>
+
+        <div class="field-row" id="spar-row" style="display:none">
+          <label data-t="Savings Bank">Savings Bank</label>
+          <select id="spar-sel" onchange="onSparChange()"></select>
+        </div>
+
+        <div class="field-row">
+          <label data-t="Operation">Operation</label>
+          <select id="op-sel" onchange="onOpChange()"></select>
+        </div>
+
+        <div class="field-row">
+          <label data-t="API Key">API Key</label>
+          <input id="f-apikey" type="password" autocomplete="off" oninput="onApiKeyInput()" />
+        </div>
+
+        <div class="field-row">
+          <label data-t="Service URL">Service URL</label>
+          <div class="input-copy-row">
+            <input id="f-url" type="text" />
+            <button class="copy-btn" onclick="copyField('f-url')" title="Copy">⎘</button>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <label data-t="SOAP Action">SOAP Action</label>
+          <div class="input-copy-row">
+            <input id="f-action" type="text" />
+            <button class="copy-btn" onclick="copyField('f-action')" title="Copy">⎘</button>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <label data-t="Username">Username</label>
+          <input id="f-username" type="text" autocomplete="off" />
+        </div>
+
+        <div class="field-row">
+          <label data-t="Password">Password</label>
+          <input id="f-password" type="password" autocomplete="off" />
+        </div>
+
+        <div class="field-row">
+          <label data-t="SOAP Body">SOAP Body</label>
+          <div class="input-copy-row">
+            <textarea id="f-body" rows="9" spellcheck="false"></textarea>
+            <button class="copy-btn top" onclick="copyField('f-body')" title="Copy">⎘</button>
+          </div>
+        </div>
+
+        <div class="send-row">
+          <button id="send-btn" class="btn-primary" onclick="sendRequest()" data-t="Send">Send</button>
+          <span id="resp-time" class="resp-time"></span>
+        </div>
+      </div>
+
+      <!-- ── RIGHT: Response Viewer ── -->
+      <div class="panel" id="resp-panel">
+
+        <div id="empty-state" class="empty-state">
+          <div class="empty-icon">⚡</div>
+          <div class="empty-text" data-t="Select a bank, fill in the request fields, and click Send.">
+            Select a bank, fill in the request fields, and click Send.
+          </div>
+        </div>
+
+        <div id="resp-content" style="display:none">
+          <div class="resp-status-bar" id="resp-status-bar"></div>
+
+          <div id="fault-card" class="fault-card" style="display:none">
+            <strong data-t="SOAP Fault detected">SOAP Fault detected</strong>:
+            <span id="fault-msg"></span>
+          </div>
+
+          <div id="error-card" class="error-card" style="display:none">
+            <span id="error-msg"></span>
+          </div>
+
+          <div class="resp-actions">
+            <button class="btn-secondary" onclick="copyResponse()" data-t="Copy">Copy</button>
+            <button class="btn-secondary" onclick="downloadResponse()" data-t="Download as XML">Download as XML</button>
+          </div>
+
+          <pre id="resp-pre" class="resp-pre"></pre>
+        </div>
+
+        <div id="hist-section" style="display:none">
+          <hr class="history-divider">
+          <div class="history-header" id="hist-header" onclick="toggleHistory()">
+            <span class="history-header-label" data-t="Request History">Request History</span>
+            <span class="history-toggle" id="hist-toggle">▾</span>
+          </div>
+          <div id="hist-list" class="history-list"></div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+// ── UI STRINGS ────────────────────────────────────────────────────────────────
+const UI_STRINGS = [
+  'IOBWS Proxy Tester', 'Select bank', 'Environment', 'Savings Bank',
+  'Operation', 'API Key', 'Service URL', 'SOAP Action', 'Username', 'Password',
+  'SOAP Body', 'Send', 'Sending\u2026', 'Copy', 'Download as XML',
+  'SOAP Fault detected', 'Request History', 'Replay', 'Custom',
+  'Production', 'Test', 'Integration', 'Development',
+  'Landsbankinn Production', '\xCDslandsbanki Production',
+  'Select a bank, fill in the request fields, and click Send.',
+  'Home', 'Connected', 'Not connected', 'ms',
+];
+
+// ── BANK DATA ─────────────────────────────────────────────────────────────────
+const STD_ENVS = [
+  { label: 'Production',  host: 'ws.b2b.is' },
+  { label: 'Test',        host: 'ws-test.b2b.is' },
+  { label: 'Integration', host: 'ws-int.b2b.is' },
+  { label: 'Development', host: 'ws-dev.b2b.is' },
+];
+
+const BANKS = [
+  {
+    slug: 'landsbankinn',
+    label: 'Landsbankinn',
+    environments: [
+      ...STD_ENVS,
+      { label: 'Landsbankinn Production', host: 'netbanki.landsbankinn.is' },
+    ],
+    templates: [
+      {
+        name: 'GetAccountStatement',
+        mkUrl: h => `https://${h}/Statements/20131015/AccountService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/IAccountService/GetAccountStatement',
+        body: '<GetAccountStatement xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <AccountNumber><!-- REPLACE: account number --></AccountNumber>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</GetAccountStatement>',
+      },
+      {
+        name: 'QueryClaims',
+        mkUrl: h => `https://${h}/Claims/20131015/ClaimService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Claims/20131015/IClaimService/QueryClaims',
+        body: '<QueryClaims xmlns="http://schemas.b2b.is/Claims/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</QueryClaims>',
+      },
+      {
+        name: 'GetCurrencyRates',
+        mkUrl: h => `https://${h}/Statements/20131015/CurrencyRatesService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/ICurrencyRatesService/GetCurrencyRates',
+        body: '<GetCurrencyRates xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Date><!-- REPLACE: YYYY-MM-DD --></Date>\n</GetCurrencyRates>',
+      },
+      {
+        name: 'LI_Claim_get',
+        mkUrl: () => 'https://netbanki.landsbankinn.is/b2b.asmx',
+        mkAction: () => 'http://netbanki.landsbankinn.is/LI_Claim_get',
+        body: '<LI_Claim_get xmlns="http://netbanki.landsbankinn.is/">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <ClaimNumber><!-- REPLACE: claim number --></ClaimNumber>\n</LI_Claim_get>',
+      },
+      {
+        name: 'LI_Fyrirspurn_reikningsyfirlit',
+        mkUrl: () => 'https://netbanki.landsbankinn.is/b2b.asmx',
+        mkAction: () => 'http://netbanki.landsbankinn.is/LI_Fyrirspurn_reikningsyfirlit',
+        body: '<LI_Fyrirspurn_reikningsyfirlit xmlns="http://netbanki.landsbankinn.is/">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <AccountNumber><!-- REPLACE: account number --></AccountNumber>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</LI_Fyrirspurn_reikningsyfirlit>',
+      },
+      { name: t('Custom'), custom: true },
+    ],
+  },
+  {
+    slug: 'arionbanki',
+    label: 'Arionbanki',
+    environments: STD_ENVS,
+    templates: [
+      {
+        name: 'GetAccountStatement',
+        mkUrl: h => `https://${h}/Statements/20131015/AccountService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/IAccountService/GetAccountStatement',
+        body: '<GetAccountStatement xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <AccountNumber><!-- REPLACE: account number --></AccountNumber>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</GetAccountStatement>',
+      },
+      {
+        name: 'QueryClaims',
+        mkUrl: h => `https://${h}/Claims/20131015/ClaimService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Claims/20131015/IClaimService/QueryClaims',
+        body: '<QueryClaims xmlns="http://schemas.b2b.is/Claims/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</QueryClaims>',
+      },
+      {
+        name: 'GetCurrencyRates',
+        mkUrl: h => `https://${h}/Statements/20131015/CurrencyRatesService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/ICurrencyRatesService/GetCurrencyRates',
+        body: '<GetCurrencyRates xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Date><!-- REPLACE: YYYY-MM-DD --></Date>\n</GetCurrencyRates>',
+      },
+      {
+        name: 'GetBillStatement',
+        mkUrl: h => `https://${h}/Statements/20130201/BillService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Statements/20130201/IBillService/GetBillStatement',
+        body: '<GetBillStatement xmlns="http://schemas.b2b.is/Statements/20130201">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</GetBillStatement>',
+      },
+      { name: t('Custom'), custom: true },
+    ],
+  },
+  {
+    slug: 'islandsbanki',
+    label: '\xCDslandsbanki',
+    environments: [
+      ...STD_ENVS,
+      { label: '\xCDslandsbanki Production', host: 'netbanki.islandsbanki.is' },
+    ],
+    templates: [
+      {
+        name: 'GetAccountStatement',
+        mkUrl: h => `https://${h}/Statements/20131015/AccountService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/IAccountService/GetAccountStatement',
+        body: '<GetAccountStatement xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <AccountNumber><!-- REPLACE: account number --></AccountNumber>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</GetAccountStatement>',
+      },
+      {
+        name: 'QueryClaims',
+        mkUrl: h => `https://${h}/Claims/20131015/ClaimService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Claims/20131015/IClaimService/QueryClaims',
+        body: '<QueryClaims xmlns="http://schemas.b2b.is/Claims/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</QueryClaims>',
+      },
+      {
+        name: 'GetCurrencyRates',
+        mkUrl: h => `https://${h}/Statements/20131015/CurrencyRatesService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/ICurrencyRatesService/GetCurrencyRates',
+        body: '<GetCurrencyRates xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Date><!-- REPLACE: YYYY-MM-DD --></Date>\n</GetCurrencyRates>',
+      },
+      {
+        name: 'Account Balance (proprietary)',
+        mkUrl: () => 'https://netbanki.islandsbanki.is/b2b.asmx',
+        mkAction: () => 'http://netbanki.islandsbanki.is/GetAccountBalance',
+        body: '<GetAccountBalance xmlns="http://netbanki.islandsbanki.is/">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <AccountNumber><!-- REPLACE: account number --></AccountNumber>\n</GetAccountBalance>',
+      },
+      { name: t('Custom'), custom: true },
+    ],
+  },
+  {
+    slug: 'sparisjodur',
+    label: 'Sparisj\xF3\xF0ir',
+    environments: null,
+    sparBanks: [
+      { label: 'Sparisj\xF3\xF0ur Austurlands',    host: 'sparaust-iobs.heimabanki.is' },
+      { label: 'Sparisj\xF3\xF0ur \xFEingeyinga',  host: 'spthin-iobs.heimabanki.is' },
+      { label: 'Sm\xE1ri (f.h. H\xF6f\xF0hverfinga)', host: 'spsh-iobs.heimabanki.is' },
+      { label: 'Sm\xE1ri (f.h. Strandamanna)',      host: 'spstr-iobs.heimabanki.is' },
+    ],
+    templates: [
+      {
+        name: 'GetAccountStatement',
+        mkUrl: h => `https://${h}/IcelandicOnlineBankingStatementsService.svc`,
+        mkAction: () => 'http://schemas.iobs.is/Statements/IIcelandicOnlineBankingStatementsService/GetAccountStatement',
+        body: '<GetAccountStatement xmlns="http://schemas.iobs.is/Statements">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <AccountNumber><!-- REPLACE: account number --></AccountNumber>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</GetAccountStatement>',
+      },
+      {
+        name: 'QueryClaims',
+        mkUrl: h => `https://${h}/IcelandicOnlineBankingClaimsService.svc`,
+        mkAction: () => 'http://schemas.iobs.is/Claims/IIcelandicOnlineBankingClaimsService/QueryClaims',
+        body: '<QueryClaims xmlns="http://schemas.iobs.is/Claims">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</QueryClaims>',
+      },
+      { name: t('Custom'), custom: true },
+    ],
+  },
+  {
+    slug: 'kvika',
+    label: 'Kvika banki',
+    environments: STD_ENVS,
+    templates: [
+      {
+        name: 'GetAccountStatement',
+        mkUrl: h => `https://${h}/Statements/20131015/AccountService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/IAccountService/GetAccountStatement',
+        body: '<GetAccountStatement xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <AccountNumber><!-- REPLACE: account number --></AccountNumber>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</GetAccountStatement>',
+      },
+      {
+        name: 'QueryClaims',
+        mkUrl: h => `https://${h}/Claims/20131015/ClaimService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Claims/20131015/IClaimService/QueryClaims',
+        body: '<QueryClaims xmlns="http://schemas.b2b.is/Claims/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</QueryClaims>',
+      },
+      {
+        name: 'GetCurrencyRates',
+        mkUrl: h => `https://${h}/Statements/20131015/CurrencyRatesService.svc`,
+        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/ICurrencyRatesService/GetCurrencyRates',
+        body: '<GetCurrencyRates xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Date><!-- REPLACE: YYYY-MM-DD --></Date>\n</GetCurrencyRates>',
+      },
+      { name: t('Custom'), custom: true },
+    ],
+  },
+];
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let currentBankIdx = 0;
+let lastResponse   = '';
+let historyEntries = [];
+let historyCollapsed = false;
+
+function currentBank()     { return BANKS[currentBankIdx]; }
+function currentEnvHost()  {
+  const bank = currentBank();
+  if (bank.slug === 'sparisjodur') {
+    const sel = document.getElementById('spar-sel');
+    return sel && sel.value ? sel.value : bank.sparBanks[0].host;
+  }
+  const sel = document.getElementById('env-sel');
+  return sel && sel.value ? sel.value : bank.environments[0].host;
+}
+function currentTemplate() {
+  const bank = currentBank();
+  const sel  = document.getElementById('op-sel');
+  const idx  = sel ? parseInt(sel.value, 10) : 0;
+  return bank.templates[idx] || null;
+}
+
+// ── RENDER BANKS ──────────────────────────────────────────────────────────────
+function renderBankButtons() {
+  const container = document.getElementById('bank-btns');
+  container.innerHTML = BANKS.map((b, i) =>
+    `<button class="bank-btn${i === currentBankIdx ? ' active' : ''}" onclick="selectBank(${i})">${b.label}</button>`
+  ).join('');
+}
+
+function selectBank(idx) {
+  currentBankIdx = idx;
+  renderBankButtons();
+  renderEnvOrSpar();
+  renderOperations();
+  applyTemplate();
+}
+
+function renderEnvOrSpar() {
+  const bank   = currentBank();
+  const envRow  = document.getElementById('env-row');
+  const sparRow = document.getElementById('spar-row');
+
+  if (bank.slug === 'sparisjodur') {
+    envRow.style.display  = 'none';
+    sparRow.style.display = '';
+    const sel = document.getElementById('spar-sel');
+    sel.innerHTML = bank.sparBanks.map(b => `<option value="${b.host}">${b.label}</option>`).join('');
+  } else {
+    sparRow.style.display = 'none';
+    envRow.style.display  = '';
+    const sel = document.getElementById('env-sel');
+    sel.innerHTML = bank.environments.map(e =>
+      `<option value="${e.host}">${t(e.label)}</option>`
+    ).join('');
+  }
+}
+
+function renderOperations() {
+  const bank = currentBank();
+  const sel  = document.getElementById('op-sel');
+  sel.innerHTML = bank.templates.map((tmpl, i) =>
+    `<option value="${i}">${tmpl.custom ? t('Custom') : tmpl.name}</option>`
+  ).join('');
+}
+
+function onEnvChange()  { applyTemplate(); }
+function onSparChange() { applyTemplate(); }
+function onOpChange()   { applyTemplate(); }
+
+function applyTemplate() {
+  const tmpl = currentTemplate();
+  if (!tmpl) return;
+  const host = currentEnvHost();
+
+  if (tmpl.custom) {
+    document.getElementById('f-url').value    = '';
+    document.getElementById('f-action').value = '';
+    document.getElementById('f-body').value   = '';
+    return;
+  }
+
+  document.getElementById('f-url').value    = tmpl.mkUrl(host);
+  document.getElementById('f-action').value = tmpl.mkAction(host);
+  document.getElementById('f-body').value   = tmpl.body;
+}
+
+// ── API KEY STORAGE ───────────────────────────────────────────────────────────
+const API_KEY_STORE = 'iobws_api_key';
+function onApiKeyInput() {
+  const key = (document.getElementById('f-apikey').value || '').trim();
+  if (key) localStorage.setItem(API_KEY_STORE, key);
+}
+
+// ── SEND ──────────────────────────────────────────────────────────────────────
+async function sendRequest() {
+  const bank   = currentBank();
+  const apiKey = (document.getElementById('f-apikey').value  || '').trim();
+  const url    = (document.getElementById('f-url').value     || '').trim();
+  const action = (document.getElementById('f-action').value  || '').trim();
+  const user   = (document.getElementById('f-username').value || '').trim();
+  const pass   = document.getElementById('f-password').value || '';
+  const body   = (document.getElementById('f-body').value    || '').trim();
+
+  if (!apiKey) { showError('API Key is required.'); return; }
+  if (!url)    { showError('Service URL is required.'); return; }
+
+  localStorage.setItem(API_KEY_STORE, apiKey);
+
+  const endpoint = `/api/${bank.slug}?key=${encodeURIComponent(apiKey)}`;
+  const payload  = { serviceUrl: url, soapAction: action, username: user, password: pass, body };
+
+  const sendBtn = document.getElementById('send-btn');
+  sendBtn.disabled = true;
+  sendBtn.innerHTML = `<span class="spinner"></span>${t('Sending\u2026')}`;
+  document.getElementById('resp-time').textContent = '';
+
+  const startMs = Date.now();
+  let httpStatus = 0;
+  let rawText    = '';
+  let isOk       = false;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    httpStatus = res.status;
+    rawText    = await res.text();
+    isOk       = res.ok;
+  } catch (err) {
+    rawText    = err.message;
+    httpStatus = 0;
+  }
+
+  const elapsed = Date.now() - startMs;
+  sendBtn.disabled = false;
+  sendBtn.textContent = t('Send');
+  document.getElementById('resp-time').textContent = `${elapsed} ${t('ms')}`;
+
+  lastResponse = rawText;
+  showResponse(httpStatus, rawText, isOk, elapsed);
+
+  const opName = currentTemplate()?.custom ? t('Custom') : (currentTemplate()?.name || t('Custom'));
+  addHistory(bank.slug, opName, httpStatus, elapsed, { url, action, user, body });
+}
+
+function showError(msg) {
+  const sendBtn = document.getElementById('send-btn');
+  sendBtn.textContent = t('Send');
+  sendBtn.disabled    = false;
+  document.getElementById('empty-state').style.display  = 'none';
+  document.getElementById('resp-content').style.display = '';
+  document.getElementById('resp-status-bar').innerHTML  = '';
+  document.getElementById('fault-card').style.display   = 'none';
+  document.getElementById('error-card').style.display   = '';
+  document.getElementById('error-msg').textContent      = msg;
+  document.getElementById('resp-pre').textContent       = '';
+}
+
+function showResponse(status, raw, isOk, elapsedMs) {
+  document.getElementById('empty-state').style.display  = 'none';
+  document.getElementById('resp-content').style.display = '';
+
+  const codeClass = isOk ? 'ok' : 'err';
+  document.getElementById('resp-status-bar').innerHTML =
+    `<span class="resp-status-code ${codeClass}">HTTP ${status}</span>` +
+    `<span>${raw.length} bytes</span>` +
+    `<span>${elapsedMs} ${t('ms')}</span>`;
+
+  const faultCard  = document.getElementById('fault-card');
+  const faultMsg   = document.getElementById('fault-msg');
+  const faultMatch = raw.match(/<(?:s:|soap:)?(?:faultstring|Faultstring)>([^<]*)<\//i);
+  if (faultMatch) {
+    faultCard.style.display = '';
+    faultMsg.textContent    = faultMatch[1];
+  } else {
+    faultCard.style.display = 'none';
+  }
+
+  const errorCard = document.getElementById('error-card');
+  const errorMsg  = document.getElementById('error-msg');
+  if (!isOk) {
+    let msg = `HTTP ${status}`;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.error) msg = `HTTP ${status}: ${parsed.error}`;
+    } catch (_) {}
+    errorCard.style.display = '';
+    errorMsg.textContent    = msg;
+  } else {
+    errorCard.style.display = 'none';
+  }
+
+  document.getElementById('resp-pre').textContent = raw;
+}
+
+// ── RESPONSE ACTIONS ──────────────────────────────────────────────────────────
+function copyResponse() {
+  if (lastResponse) navigator.clipboard.writeText(lastResponse).catch(() => {});
+}
+
+function downloadResponse() {
+  if (!lastResponse) return;
+  const blob = new Blob([lastResponse], { type: 'text/xml;charset=utf-8' });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `iobws-response-${Date.now()}.xml`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function copyField(id) {
+  const el = document.getElementById(id);
+  if (el) navigator.clipboard.writeText(el.value).catch(() => {});
+}
+
+// ── REQUEST HISTORY ───────────────────────────────────────────────────────────
+function addHistory(bankSlug, opName, status, elapsedMs, inputs) {
+  const now  = new Date();
+  const time = now.toTimeString().slice(0, 8);
+  historyEntries.unshift({ time, bankSlug, opName, status, elapsedMs, inputs });
+  if (historyEntries.length > 10) historyEntries.length = 10;
+  renderHistory();
+}
+
+function renderHistory() {
+  const section = document.getElementById('hist-section');
+  const list    = document.getElementById('hist-list');
+  section.style.display = '';
+  list.style.display    = historyCollapsed ? 'none' : '';
+  list.innerHTML = historyEntries.map((h, i) => {
+    const isOk = h.status >= 200 && h.status < 300;
+    return `<div class="hist-entry">
+      <span class="hist-time">${h.time}</span>
+      <span class="hist-bank">${h.bankSlug}</span>
+      <span class="hist-op">${h.opName}</span>
+      <span class="hist-ms">${h.elapsedMs}${t('ms')}</span>
+      <span class="hist-status ${isOk ? 'ok' : 'err'}">HTTP ${h.status}</span>
+      <button class="btn-secondary hist-replay" onclick="replayHistory(${i})">${t('Replay')}</button>
+    </div>`;
+  }).join('');
+}
+
+function replayHistory(idx) {
+  const entry = historyEntries[idx];
+  if (!entry) return;
+  const bankIdx = BANKS.findIndex(b => b.slug === entry.bankSlug);
+  if (bankIdx === -1) return;
+  selectBank(bankIdx);
+  document.getElementById('f-url').value      = entry.inputs.url    || '';
+  document.getElementById('f-action').value   = entry.inputs.action || '';
+  document.getElementById('f-username').value = entry.inputs.user   || '';
+  document.getElementById('f-body').value     = entry.inputs.body   || '';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function toggleHistory() {
+  historyCollapsed = !historyCollapsed;
+  document.getElementById('hist-list').style.display    = historyCollapsed ? 'none' : '';
+  document.getElementById('hist-toggle').style.transform = historyCollapsed ? 'rotate(-90deg)' : '';
+}
+
+// ── TOP BAR ───────────────────────────────────────────────────────────────────
+function updateTopBar() {
+  const ready = bcSettingsReady();
+  const dot   = document.getElementById('top-conn-dot');
+  const label = document.getElementById('top-conn-label');
+  if (dot)   dot.className = 'status-dot ' + (ready ? 'connected' : 'error');
+  if (label) label.textContent = ready ? t('Connected') : t('Not connected');
+}
+
+// ── TRANSLATIONS ──────────────────────────────────────────────────────────────
+async function loadUiTranslations() {
+  const settings = bcSettingsLoad();
+  const headers  = bcSettingsHeaders();
+  if (settings.companyId && headers) {
+    await bcLoadTranslations(
+      settings.companyId,
+      parseInt(settings.lcid || '1033', 10),
+      UI_STRINGS,
+      headers
+    );
+  }
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+window.onload = async () => {
+  await loadUiTranslations();
+
+  // Rebuild BANKS.templates Custom labels with translated text now that translations are loaded
+  BANKS.forEach(bank => {
+    bank.templates.forEach(tmpl => {
+      if (tmpl.custom) tmpl.name = t('Custom');
+    });
+  });
+
+  renderBankButtons();
+  selectBank(0);
+
+  const savedKey = localStorage.getItem(API_KEY_STORE) || '';
+  if (savedKey) document.getElementById('f-apikey').value = savedKey;
+
+  applyUiTranslations();
+  updateTopBar();
+};
+</script>
+</body>
+</html>

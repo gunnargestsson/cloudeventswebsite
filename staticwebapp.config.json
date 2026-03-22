@@ -25,6 +25,10 @@
       "rewrite": "/claude-mcp-chat.html"
     },
     {
+      "route": "/iobws-proxy-tester",
+      "rewrite": "/iobws-proxy-tester.html"
+    },
+    {
       "route": "/api-key-settings",
       "rewrite": "/api-key-settings.html"
     }
