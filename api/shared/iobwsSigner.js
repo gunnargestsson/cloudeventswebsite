@@ -155,7 +155,19 @@ function buildEnvelope(params, soapVersion, certDer) {
 function signEnvelope(xmlString, certDer, keyPem) {
   // idMode:'wssecurity' makes ensureHasId() look up wsu:Id by its namespace URI
   // so that Reference/@URI="#Body-1" / "#TS-1" are preserved correctly.
-  const sig = new SignedXml({ privateKey: keyPem, idMode: 'wssecurity' });
+  //
+  // getKeyInfoContent replaces the v3/v4 keyInfoProvider API (removed in v6).
+  // It returns the wsse:SecurityTokenReference that points to BST-1.
+  const sig = new SignedXml({
+    privateKey: keyPem,
+    idMode: 'wssecurity',
+    getKeyInfoContent: () =>
+      '<wsse:SecurityTokenReference' +
+      ' xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">' +
+      '<wsse:Reference URI="#BST-1"' +
+      ' ValueType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3"/>' +
+      '</wsse:SecurityTokenReference>',
+  });
 
   sig.canonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#';
   sig.signatureAlgorithm        = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1';
@@ -172,16 +184,6 @@ function signEnvelope(xmlString, certDer, keyPem) {
     transforms: ['http://www.w3.org/2001/10/xml-exc-c14n#'],
     digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
   });
-
-  sig.keyInfoProvider = {
-    getKeyInfo() {
-      return '<wsse:SecurityTokenReference' +
-        ' xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">' +
-        '<wsse:Reference URI="#BST-1"' +
-        ' ValueType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3"/>' +
-        '</wsse:SecurityTokenReference>';
-    },
-  };
 
   sig.computeSignature(xmlString, {
     location: { reference: '//*[local-name()="Security"]', action: 'append' },
