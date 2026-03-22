@@ -153,19 +153,22 @@ function buildEnvelope(params, soapVersion, certDer) {
  * @returns {string} Signed XML envelope
  */
 function signEnvelope(xmlString, certDer, keyPem) {
-  const sig = new SignedXml({ privateKey: keyPem });
+  // idMode:'wssecurity' makes ensureHasId() look up wsu:Id by its namespace URI
+  // so that Reference/@URI="#Body-1" / "#TS-1" are preserved correctly.
+  const sig = new SignedXml({ privateKey: keyPem, idMode: 'wssecurity' });
 
   sig.canonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#';
   sig.signatureAlgorithm        = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1';
 
+  // Use local-name() element selectors — no namespace resolver needed.
   sig.addReference({
-    xpath: '//*[@*[local-name()="Id" and .="Body-1"]]',
+    xpath: '//*[local-name()="Body"]',
     transforms: ['http://www.w3.org/2001/10/xml-exc-c14n#'],
     digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
   });
 
   sig.addReference({
-    xpath: '//*[@*[local-name()="Id" and .="TS-1"]]',
+    xpath: '//*[local-name()="Timestamp"]',
     transforms: ['http://www.w3.org/2001/10/xml-exc-c14n#'],
     digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
   });
