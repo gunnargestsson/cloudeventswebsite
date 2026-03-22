@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Customer Statement Sender – Origo BC Portal</title>
+<script src="settings.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0d14;
+    --surface: #111520;
+    --surface2: #171d2e;
+    --border: #1e2640;
+    --border-bright: #2d3a5e;
+    --accent: #4f7fff;
+    --accent2: #7c5cfc;
+    --accent-glow: rgba(79,127,255,0.18);
+    --text: #e8ecf5;
+    --text-dim: #6b7799;
+    --text-mid: #9ba8c8;
+    --green: #27c08a;
+    --red: #f25f5c;
+    --amber: #f5a623;
+    --radius: 12px;
+    --radius-sm: 7px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(79,127,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79,127,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+  #app { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+  /* HEADER */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,13,20,0.85);
+    backdrop-filter: blur(12px);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.15rem; letter-spacing: -0.02em;
+    text-decoration: none; color: inherit;
+  }
+  .logo-icon { width: 34px; height: 34px; border-radius: 9px; overflow: hidden; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .logo-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .logo span { color: var(--text-dim); font-weight: 400; font-size: 0.78rem; }
+  .header-right { display: flex; align-items: center; gap: 14px; }
+  .status-pill { display: flex; align-items: center; gap: 7px; background: var(--surface); border: 1px solid var(--border); border-radius: 99px; padding: 5px 14px; font-size: 0.72rem; color: var(--text-dim); }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); transition: background 0.3s, box-shadow 0.3s; }
+  .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2.5s infinite; }
+  .status-dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
+  .pill { display: flex; align-items: center; gap: 6px; padding: 5px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 99px; font-size: 0.72rem; color: var(--text-mid); text-decoration: none; transition: border-color 0.2s, color 0.2s; }
+  .pill:hover { border-color: var(--accent); color: var(--text); }
+
+  main { flex: 1; padding: 32px; max-width: 1100px; margin: 0 auto; width: 100%; }
+
+  /* BREADCRUMB */
+  .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 0.72rem; color: var(--text-dim); margin-bottom: 28px; }
+  .breadcrumb .crumb { color: var(--text-mid); cursor: pointer; transition: color 0.2s; }
+  .breadcrumb .crumb:hover { color: var(--accent); }
+  .breadcrumb .sep { color: var(--border-bright); }
+
+  /* SECTION HEADER */
+  .section-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 24px; }
+  .section-title { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.6rem; letter-spacing: -0.03em; }
+  .section-title small { display: block; font-family: 'DM Mono', monospace; font-weight: 400; font-size: 0.72rem; color: var(--text-dim); letter-spacing: 0; margin-bottom: 4px; }
+  .badge { display: inline-flex; align-items: center; padding: 4px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 99px; font-size: 0.72rem; color: var(--text-dim); font-family: 'DM Mono', monospace; }
+
+  /* COMPANY GRID */
+  .company-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .company-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; cursor: pointer; transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s; position: relative; overflow: hidden; }
+  .company-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--accent), var(--accent2)); opacity: 0; transition: opacity 0.2s; }
+  .company-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(79,127,255,0.12); }
+  .company-card:hover::before { opacity: 1; }
+  .company-icon { width: 44px; height: 44px; border-radius: 11px; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 1.3rem; margin-bottom: 16px; }
+  .company-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1rem; margin-bottom: 6px; }
+  .company-meta { font-size: 0.72rem; color: var(--text-dim); line-height: 1.7; }
+  .company-meta span { display: block; }
+
+  /* DATE PANEL */
+  .date-panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 24px; margin-bottom: 18px; display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+  .date-panel-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 12px; font-weight: 600; }
+  .date-fields { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; }
+  .date-field { display: flex; flex-direction: column; gap: 5px; }
+  .date-field label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); }
+  .date-input { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-family: 'DM Mono', monospace; font-size: 0.82rem; padding: 8px 12px; outline: none; transition: border-color 0.2s; }
+  .date-input:focus { border-color: var(--accent); }
+
+  /* SEARCH */
+  .search-wrap { position: relative; margin-bottom: 14px; }
+  .search-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--text-dim); }
+  .search-input { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-family: 'DM Mono', monospace; font-size: 0.84rem; padding: 10px 14px 10px 38px; outline: none; transition: border-color 0.2s; }
+  .search-input:focus { border-color: var(--accent); }
+  .search-input::placeholder { color: var(--text-dim); }
+
+  /* TABLE */
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  thead tr { background: var(--surface2); border-bottom: 1px solid var(--border); }
+  th { padding: 12px 18px; text-align: left; font-size: 0.67rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; }
+  th:first-child { text-align: center; width: 44px; }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.15s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--surface2); }
+  td { padding: 13px 18px; font-size: 0.81rem; color: var(--text-mid); }
+  td:first-child { text-align: center; }
+  td strong { color: var(--text); font-weight: 500; }
+
+  /* CHECKBOX */
+  .cust-check { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+  #check-all { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+
+  /* ACTIONS BAR */
+  .actions-bar { display: flex; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .btn-ghost { background: none; border: 1px solid var(--border); color: var(--text-mid); padding: 9px 18px; border-radius: var(--radius-sm); cursor: pointer; font-family: 'DM Mono', monospace; font-size: 0.78rem; transition: all 0.2s; }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none; border-radius: var(--radius-sm); color: #fff; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.88rem; padding: 10px 24px; cursor: pointer; transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s; box-shadow: 0 4px 16px rgba(79,127,255,0.3); }
+  .btn-primary:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+  /* PAGINATION */
+  .pagination { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 0.76rem; color: var(--text-dim); justify-content: flex-end; flex-wrap: wrap; }
+  .page-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text-mid); padding: 5px 14px; border-radius: var(--radius-sm); cursor: pointer; font-family: 'DM Mono', monospace; font-size: 0.74rem; transition: all 0.15s; }
+  .page-btn:hover:not([disabled]) { border-color: var(--accent); color: var(--accent); }
+  .page-btn[disabled] { opacity: 0.3; cursor: not-allowed; }
+  .page-info { font-family: 'DM Mono', monospace; }
+
+  /* LOADER / EMPTY */
+  .loader-wrap { display: flex; align-items: center; justify-content: center; padding: 48px 20px; flex-direction: column; gap: 14px; }
+  .spinner { position: relative; display: inline-block; width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; }
+  .spinner::before { content: ''; position: absolute; inset: 0; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(1turn); } }
+  .loader-label { font-size: 0.76rem; color: var(--text-dim); }
+  .empty-state { text-align: center; padding: 48px 20px; color: var(--text-dim); font-size: 0.84rem; }
+  .empty-icon { font-size: 2.2rem; margin-bottom: 12px; opacity: 0.4; }
+
+  /* TOAST */
+  #toast { position: fixed; bottom: 28px; right: 28px; background: var(--surface); border: 1px solid var(--border-bright); border-radius: var(--radius); padding: 13px 18px; font-size: 0.8rem; color: var(--text); box-shadow: 0 8px 32px rgba(0,0,0,0.5); transform: translateY(16px); opacity: 0; transition: all 0.3s; z-index: 999; max-width: 360px; }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.error { border-color: var(--red); color: var(--red); }
+  #toast.success { border-color: var(--green); color: var(--green); }
+
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  #view-customers { animation: fadeIn 0.3s ease; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <a class="logo" href="index.html">
+      <div class="logo-icon"><img src="origo.jpeg" alt="Origo"></div>
+      Origo BC Portal <span>/ Business Central</span>
+    </a>
+    <div class="header-right">
+      <a href="index.html" class="pill">← Home</a>
+      <div class="status-pill">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-label" data-t="Authenticating...">Authenticating...</span>
+      </div>
+      <a href="api-key-settings.html" class="pill" data-t="API Key">API Key</a>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ── STEP 1: COMPANY SELECTION ─────────────────────────────────────── -->
+    <div id="view-companies">
+      <div class="breadcrumb">
+        <span style="color:var(--text)" data-t="Customer Statement Sender">Customer Statement Sender</span>
+      </div>
+      <div class="section-header">
+        <div class="section-title">
+          <small>Business Central</small>
+          <span data-t="Select Company">Select Company</span>
+        </div>
+        <span class="badge" id="company-count">—</span>
+      </div>
+      <div id="company-grid" class="company-grid">
+        <div class="loader-wrap">
+          <div class="spinner"></div>
+          <span class="loader-label" data-t="Authenticating...">Authenticating...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── STEP 2: CUSTOMERS + DATE RANGE ─────────────────────────────────── -->
+    <div id="view-customers" style="display:none">
+      <div class="breadcrumb">
+        <span class="crumb" onclick="showCompanies()" id="crumb-company">—</span>
+        <span class="sep">/</span>
+        <span style="color:var(--text)" data-t="Customer Statement Sender">Customer Statement Sender</span>
+      </div>
+      <div class="section-header">
+        <div class="section-title">
+          <small id="company-label">—</small>
+          <span data-t="Select Customers">Select Customers</span>
+        </div>
+        <span class="badge" id="customer-count">—</span>
+      </div>
+
+      <!-- Date range -->
+      <div class="date-panel">
+        <div>
+          <div class="date-panel-title" data-t="Statement Period">Statement Period</div>
+          <div class="date-fields">
+            <div class="date-field">
+              <label data-t="From">From</label>
+              <input type="date" id="date-from" class="date-input" />
+            </div>
+            <div class="date-field">
+              <label data-t="To">To</label>
+              <input type="date" id="date-to" class="date-input" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Search -->
+      <div class="search-wrap">
+        <span class="search-icon">⌕</span>
+        <input type="text" id="cust-search" class="search-input"
+          data-tp="Search by name or number..."
+          placeholder="Search by name or number..."
+          oninput="filterCustomers()" />
+      </div>
+
+      <!-- Customer table -->
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="check-all" onchange="toggleAll(this.checked)" /></th>
+              <th data-t="Customer No.">Customer No.</th>
+              <th data-t="Customer Name">Customer Name</th>
+              <th data-t="E-Mail">E-Mail</th>
+              <th data-t="Status">Status</th>
+            </tr>
+          </thead>
+          <tbody id="cust-tbody">
+            <tr><td colspan="5">
+              <div class="loader-wrap">
+                <div class="spinner"></div>
+                <span class="loader-label" data-t="Loading customers...">Loading customers...</span>
+              </div>
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="cust-pagination"></div>
+
+      <!-- Actions -->
+      <div class="actions-bar">
+        <button class="btn-ghost" onclick="selectAllVisible()" data-t="Select All">Select All</button>
+        <button class="btn-ghost" onclick="deselectAllVisible()" data-t="Deselect All">Deselect All</button>
+        <div style="flex:1"></div>
+        <button id="send-btn" class="btn-primary" onclick="sendStatements()" disabled data-t="Send to Selected">
+          Send to Selected
+        </button>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script src="emailService.js"></script>
+<script>
+"use strict";
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let companies      = [];
+let selectedCompany = null;
+let selectedLcid   = 1033;
+let customers      = [];   // current page of loaded customers
+let filteredList   = [];   // after client-side search filter
+let currentSkip    = 0;
+let totalCustomers = 0;
+let uiTranslations = {};
+let sending        = false;
+
+const PAGE_SIZE = 50;
+
+const UI_STRINGS = [
+  'Customer Statement Sender', 'Select Company', 'Select Customers',
+  'Statement Period', 'From', 'To',
+  'Customer No.', 'Customer Name', 'E-Mail', 'Status',
+  'Select All', 'Deselect All', 'Send to Selected',
+  'Sending...', 'Sent', 'No email address', 'Done', 'Failed',
+  'Customer Statement', 'Please find your account statement attached.',
+  'Loading companies...', 'Loading customers...', 'Fetching PDF...', 'Sending email...',
+  'No customers found', 'No companies found', 'Authenticating...',
+  'Search by name or number...', 'customers', 'companies',
+  'Prev', 'Next', 'Page', 'of', 'API Key',
+];
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+
+// bcGet: company list (standard v2.0 API, pre-company-selection)
+async function bcGet(path) {
+  const r = await fetch('/api/bc?path=' + encodeURIComponent(path));
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || 'API error ' + r.status);
+  }
+  return r.json();
+}
+
+// cePost: Cloud Events proxy — expects a JSON response
+async function cePost(companyId, event) {
+  const r = await fetch('/api/bc?companyId=' + encodeURIComponent(companyId), {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ ...event, lcid: selectedLcid }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || 'API error ' + r.status);
+  }
+  const result = await r.json();
+  if (result.status === 'Error') throw new Error(result.error || 'Cloud Events task failed');
+  return result;
+}
+
+// fetchStatementPdf: Customer.Statement.Pdf → base64 string
+// Uses raw fetch because the /api/bc function streams the PDF binary back directly
+// (Content-Type: application/pdf) when BC returns datacontenttype: application/pdf.
+async function fetchStatementPdf(customerNo, startDate, endDate) {
+  const r = await fetch('/api/bc?companyId=' + encodeURIComponent(selectedCompany.id), {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      specversion: '1.0',
+      type:        'Customer.Statement.Pdf',
+      source:      'customer-statement-sender',
+      subject:     customerNo,
+      lcid:        selectedLcid,
+      data:        JSON.stringify({ startDate, endDate }),
+    }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || 'HTTP ' + r.status);
+  }
+  const ct = r.headers.get('content-type') || '';
+  if (!ct.includes('pdf') && !ct.includes('octet-stream')) {
+    const result = await r.json().catch(() => ({}));
+    if (result.status === 'Error') throw new Error(result.error || 'PDF generation failed');
+    throw new Error(result.error || 'Unexpected response type: ' + ct);
+  }
+  const bytes = new Uint8Array(await r.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+// ── Translation helpers ───────────────────────────────────────────────────────
+
+function t(s) { return uiTranslations[s] || s; }
+
+function applyUiTranslations() {
+  document.querySelectorAll('[data-t]').forEach(el => { el.textContent = t(el.dataset.t); });
+  document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
+  updateSendButton(); // re-render with translated label
+}
+
+async function loadUiTranslations() {
+  uiTranslations = {};
+  if (selectedLcid === 1033) return; // English — no translation needed
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type:        'Data.Records.Get',
+      source:      'BC Portal',
+      subject:     'Cloud Event Translation',
+      data:        JSON.stringify({
+        tableView: `WHERE(Windows Language ID=CONST(${selectedLcid}),Source=CONST(BC Portal))`,
+        take:      UI_STRINGS.length + 50,
+      }),
+    });
+    const rows = res.result || [];
+    for (const rec of rows) {
+      const src = (rec.primaryKey || {}).SourceText;
+      const tgt = (rec.fields   || {}).TargetText;
+      if (src && tgt) uiTranslations[src] = tgt;
+    }
+  } catch (e) { /* silently fall back to English */ }
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+
+function setStatus(s) {
+  const dot = document.getElementById('status-dot');
+  const lbl = document.getElementById('status-label');
+  if (dot) dot.className = 'status-dot' + (s === 'connected' ? ' connected' : s === 'error' ? ' error' : '');
+  if (lbl) lbl.textContent = s === 'connected' ? 'BC' : s === 'error' ? 'Error' : t('Authenticating...');
+}
+
+function show(id) {
+  ['view-companies', 'view-customers'].forEach(v => {
+    const el = document.getElementById(v);
+    if (el) el.style.display = v === id ? '' : 'none';
+  });
+}
+
+function showCompanies() { show('view-companies'); }
+
+let toastTimer;
+function toast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'show' + (type === 'error' ? ' error' : type === 'success' ? ' success' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ''; }, type === 'error' ? 7000 : 3000);
+}
+
+// ── Companies ─────────────────────────────────────────────────────────────────
+
+async function loadCompanies() {
+  try {
+    const d = await bcGet('companies');
+    companies = d.value || [];
+    setStatus('connected');
+    document.getElementById('company-count').textContent = companies.length + ' ' + t('companies');
+    if (!companies.length) {
+      document.getElementById('company-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">🏢</div><p>${t('No companies found')}</p></div>`;
+      return;
+    }
+    const icons = ['🏢','🏗️','🏭','🏬','🏛️'];
+    document.getElementById('company-grid').innerHTML = companies.map((c, i) => `
+      <div class="company-card" onclick="selectCompany('${c.id}')">
+        <div class="company-icon">${icons[i % icons.length]}</div>
+        <div class="company-name">${c.displayName || c.name}</div>
+        <div class="company-meta">
+          <span>ID: ${c.id.substring(0, 8)}...</span>
+          ${c.systemVersion ? `<span>Version: ${c.systemVersion}</span>` : ''}
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    setStatus('error');
+    document.getElementById('company-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
+    toast(e.message, 'error');
+  }
+}
+
+async function selectCompany(id) {
+  selectedCompany = companies.find(c => c.id === id);
+  if (!selectedCompany) return;
+  const name = selectedCompany.displayName || selectedCompany.name;
+  document.getElementById('crumb-company').textContent = name;
+  document.getElementById('company-label').textContent = name;
+  show('view-customers');
+  await loadUiTranslations();
+  applyUiTranslations();
+  initDateRange();
+  await loadCustomers(0);
+}
+
+// ── Date range ────────────────────────────────────────────────────────────────
+
+function initDateRange() {
+  const now  = new Date();
+  const from = new Date(now.getFullYear(), 0, 1); // Jan 1 of current year
+  document.getElementById('date-from').value = from.toISOString().split('T')[0];
+  document.getElementById('date-to').value   = now.toISOString().split('T')[0];
+}
+
+// ── Customers ─────────────────────────────────────────────────────────────────
+
+async function loadCustomers(skip) {
+  currentSkip = skip;
+  document.getElementById('cust-tbody').innerHTML = `
+    <tr><td colspan="5"><div class="loader-wrap">
+      <div class="spinner"></div>
+      <span class="loader-label">${t('Loading customers...')}</span>
+    </div></td></tr>`;
+  document.getElementById('cust-pagination').innerHTML = '';
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type:        'Data.Records.Get',
+      source:      'customer-statement-sender',
+      data:        JSON.stringify({ tableName: 'Customer', fieldNumbers: [2, 102], skip, take: PAGE_SIZE }),
+    });
+    customers = (res.result || []).map(rec => ({
+      no:    (rec.primaryKey || {}).No_ || '',
+      name:  (rec.fields     || {}).Name   || '',
+      email: (rec.fields     || {}).EMail  || '',
+    }));
+    totalCustomers = res.noOfRecords || 0;
+    document.getElementById('customer-count').textContent = totalCustomers.toLocaleString() + ' ' + t('customers');
+    filteredList = customers;
+    renderCustomers(filteredList);
+    renderPagination(totalCustomers, skip);
+  } catch (e) {
+    document.getElementById('cust-tbody').innerHTML = `
+      <tr><td colspan="5"><div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div></td></tr>`;
+    toast(e.message, 'error');
+  }
+}
+
+function renderCustomers(list) {
+  const tbody = document.getElementById('cust-tbody');
+  if (!list.length) {
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">👥</div><p>${t('No customers found')}</p></div></td></tr>`;
+    updateSendButton();
+    return;
+  }
+  tbody.innerHTML = list.map(c => `
+    <tr id="row-${c.no}" data-no="${c.no}">
+      <td>
+        ${c.email
+          ? `<input type="checkbox" class="cust-check" data-no="${c.no}" onchange="onCheckChange()">`
+          : `<span title="${t('No email address')}" style="color:var(--amber);font-size:0.9rem">⚠</span>`}
+      </td>
+      <td><strong>${c.no || '—'}</strong></td>
+      <td>${c.name || '—'}</td>
+      <td style="color:${c.email ? 'var(--text-mid)' : 'var(--text-dim)'}">
+        ${c.email || `<em style="font-style:normal;font-size:0.72rem;color:var(--text-dim)">${t('No email address')}</em>`}
+      </td>
+      <td id="status-${c.no}" style="font-size:0.76rem">—</td>
+    </tr>`).join('');
+  updateSendButton();
+}
+
+function filterCustomers() {
+  const q = document.getElementById('cust-search').value.toLowerCase().trim();
+  filteredList = q
+    ? customers.filter(c => c.name.toLowerCase().includes(q) || c.no.toLowerCase().includes(q))
+    : customers;
+  renderCustomers(filteredList);
+}
+
+function renderPagination(total, skip) {
+  const el = document.getElementById('cust-pagination');
+  if (total <= PAGE_SIZE) { el.innerHTML = ''; return; }
+  const page  = Math.floor(skip / PAGE_SIZE);
+  const pages = Math.ceil(total / PAGE_SIZE);
+  el.innerHTML = `
+    <div class="pagination">
+      <button class="page-btn" onclick="loadCustomers(${Math.max(0, skip - PAGE_SIZE)})" ${skip === 0 ? 'disabled' : ''}>${t('Prev')}</button>
+      <span class="page-info">${t('Page')} ${page + 1} ${t('of')} ${pages}</span>
+      <button class="page-btn" onclick="loadCustomers(${skip + PAGE_SIZE})" ${skip + PAGE_SIZE >= total ? 'disabled' : ''}>${t('Next')}</button>
+    </div>`;
+}
+
+// ── Selection helpers ─────────────────────────────────────────────────────────
+
+function getCheckedNos() {
+  return Array.from(document.querySelectorAll('.cust-check:checked')).map(cb => cb.dataset.no);
+}
+
+function onCheckChange() {
+  const all   = document.querySelectorAll('.cust-check');
+  const checked = document.querySelectorAll('.cust-check:checked');
+  document.getElementById('check-all').indeterminate = checked.length > 0 && checked.length < all.length;
+  document.getElementById('check-all').checked = checked.length === all.length && all.length > 0;
+  updateSendButton();
+}
+
+function updateSendButton() {
+  const checked = getCheckedNos();
+  const btn     = document.getElementById('send-btn');
+  if (!btn) return;
+  const base = t('Send to Selected');
+  btn.textContent = checked.length ? `${base} (${checked.length})` : base;
+  btn.disabled    = checked.length === 0 || sending;
+}
+
+function selectAllVisible() {
+  document.querySelectorAll('.cust-check').forEach(cb => { cb.checked = true; });
+  const all = document.getElementById('check-all');
+  if (all) { all.checked = true; all.indeterminate = false; }
+  updateSendButton();
+}
+
+function deselectAllVisible() {
+  document.querySelectorAll('.cust-check').forEach(cb => { cb.checked = false; });
+  const all = document.getElementById('check-all');
+  if (all) { all.checked = false; all.indeterminate = false; }
+  updateSendButton();
+}
+
+function toggleAll(checked) {
+  document.querySelectorAll('.cust-check').forEach(cb => { cb.checked = checked; });
+  updateSendButton();
+}
+
+// ── Row status ────────────────────────────────────────────────────────────────
+
+function setRowStatus(no, html, dim = false) {
+  const cell = document.getElementById('status-' + no);
+  if (cell) cell.innerHTML = html;
+  const row = document.getElementById('row-' + no);
+  if (row) row.style.opacity = dim ? '0.55' : '1';
+}
+
+// ── Send statements ───────────────────────────────────────────────────────────
+
+async function sendStatements() {
+  const checkedNos = getCheckedNos();
+  if (!checkedNos.length) return;
+
+  const startDate = document.getElementById('date-from').value;
+  const endDate   = document.getElementById('date-to').value;
+  if (!startDate || !endDate) {
+    toast('Please select a date range', 'error');
+    return;
+  }
+  if (startDate > endDate) {
+    toast('From date cannot be after To date', 'error');
+    return;
+  }
+
+  sending = true;
+  const btn = document.getElementById('send-btn');
+  btn.disabled    = true;
+  btn.textContent = t('Sending...');
+
+  // Build a quick lookup map for the currently visible customers
+  const custMap = Object.fromEntries(customers.map(c => [c.no, c]));
+
+  for (const no of checkedNos) {
+    const cust = custMap[no];
+    if (!cust || !cust.email) {
+      setRowStatus(no, `<span style="color:var(--amber)">⚠ ${t('No email address')}</span>`);
+      continue;
+    }
+
+    try {
+      setRowStatus(no, `<span style="color:var(--accent)">⏳ ${t('Fetching PDF...')}</span>`);
+      const pdfBase64 = await fetchStatementPdf(no, startDate, endDate);
+
+      setRowStatus(no, `<span style="color:var(--accent)">⏳ ${t('Sending email...')}</span>`);
+      const result = await sendEmail({
+        to:          cust.email,
+        subject:     t('Customer Statement'),
+        body:        t('Please find your account statement attached.'),
+        isHtml:      false,
+        attachments: [{
+          filename:    'statement-' + no + '.pdf',
+          contentType: 'application/pdf',
+          base64:      pdfBase64,
+        }],
+      });
+
+      if (result.success) {
+        setRowStatus(no, `<span style="color:var(--green)">✓ ${t('Sent')}</span>`, true);
+      } else {
+        setRowStatus(no, `<span style="color:var(--red)">✗ ${result.error || t('Failed')}</span>`);
+      }
+    } catch (e) {
+      setRowStatus(no, `<span style="color:var(--red)" title="${e.message}">✗ ${e.message.slice(0, 80)}</span>`);
+    }
+  }
+
+  sending = false;
+  btn.textContent = t('Done');
+  btn.disabled    = false;
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async function init() {
+  const settings = bcSettingsLoad();
+  selectedLcid = parseInt(settings.lcid || '1033', 10);
+  await loadCompanies();
+}());
+</script>
+</body>
+</html>
