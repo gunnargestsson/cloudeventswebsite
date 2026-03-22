@@ -115,9 +115,9 @@ function buildEnvelope(params, soapVersion, certDer) {
     xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"
     xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
   <s:Header>
-    <wsa:Action s:mustUnderstand="1">${escXml(soapAction)}</wsa:Action>
-    <wsa:MessageID>urn:uuid:${msgId}</wsa:MessageID>
-    <wsa:ReplyTo>
+    <wsa:Action s:mustUnderstand="1" wsu:Id="Id-Action">${escXml(soapAction)}</wsa:Action>
+    <wsa:MessageID wsu:Id="Id-MsgId">urn:uuid:${msgId}</wsa:MessageID>
+    <wsa:ReplyTo wsu:Id="Id-ReplyTo">
       <wsa:Address>http://www.w3.org/2005/08/addressing/anonymous</wsa:Address>
     </wsa:ReplyTo>
     <wsa:To s:mustUnderstand="1" wsu:Id="Id-To">${escXml(serviceUrl)}</wsa:To>
@@ -172,18 +172,19 @@ function signEnvelope(xmlString, certDer, keyPem) {
   sig.canonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#';
   sig.signatureAlgorithm        = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1';
 
+  // WCF AsymmetricBinding policy (sp:SignedParts) requires Body, Timestamp,
+  // and all WS-Addressing headers: To, Action, MessageID, ReplyTo.
   // Use local-name() element selectors — no namespace resolver needed.
-  sig.addReference({
-    xpath: '//*[local-name()="Body"]',
-    transforms: ['http://www.w3.org/2001/10/xml-exc-c14n#'],
-    digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
-  });
+  const C14N = 'http://www.w3.org/2001/10/xml-exc-c14n#';
+  const SHA1 = 'http://www.w3.org/2000/09/xmldsig#sha1';
+  const ref  = xpath => ({ xpath, transforms: [C14N], digestAlgorithm: SHA1 });
 
-  sig.addReference({
-    xpath: '//*[local-name()="Timestamp"]',
-    transforms: ['http://www.w3.org/2001/10/xml-exc-c14n#'],
-    digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
-  });
+  sig.addReference(ref('//*[local-name()="Body"]'));
+  sig.addReference(ref('//*[local-name()="Timestamp"]'));
+  sig.addReference(ref('//*[local-name()="To"]'));
+  sig.addReference(ref('//*[local-name()="Action"]'));
+  sig.addReference(ref('//*[local-name()="MessageID"]'));
+  sig.addReference(ref('//*[local-name()="ReplyTo"]'));
 
   sig.computeSignature(xmlString, {
     location: { reference: '//*[local-name()="Security"]', action: 'append' },
