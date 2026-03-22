@@ -13,6 +13,7 @@ const _KEYS = {
   companyName:  'company_name',
   lcid:         'lcid',
   claudeApiKey: 'claude_api_key',
+  iobwsApiKey:  'iobws_api_key',
 };
 
 function bcSettingsLoad() {
@@ -54,6 +55,27 @@ function bcClaudeApiKeySave(value) {
   localStorage.removeItem(_PFX + _KEYS.claudeApiKey);
   localStorage.removeItem('sa_claude_key');
   localStorage.removeItem('claude_mcp_api_key');
+}
+
+function bcIobwsApiKeyLoad() {
+  // Backward compatibility — legacy key was stored without the bc_portal_ prefix.
+  return (
+    localStorage.getItem(_PFX + _KEYS.iobwsApiKey) ||
+    localStorage.getItem('iobws_api_key') ||
+    ''
+  );
+}
+
+function bcIobwsApiKeySave(value) {
+  const key = String(value || '').trim();
+  if (key) {
+    localStorage.setItem(_PFX + _KEYS.iobwsApiKey, key);
+    // Keep legacy key in sync during migration.
+    localStorage.setItem('iobws_api_key', key);
+    return;
+  }
+  localStorage.removeItem(_PFX + _KEYS.iobwsApiKey);
+  localStorage.removeItem('iobws_api_key');
 }
 
 function bcSettingsReady() {

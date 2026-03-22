@@ -77,6 +77,21 @@
       <div id="status" class="status"></div>
       <div class="hint" data-t="Stored in localStorage and reused across sessions.">Stored in localStorage and reused across sessions.</div>
     </div>
+
+    <div class="card" style="margin-top:20px">
+      <div class="title" data-t="IOBWS API Key">IOBWS API Key</div>
+      <div class="subtitle" data-t="Manage the shared IOBWS key used by all bank proxy functions.">Manage the shared IOBWS key used by all bank proxy functions.</div>
+      <div class="field">
+        <label for="iobws-key" data-t="API Key">API Key</label>
+        <input id="iobws-key" type="password" placeholder="key-..." autocomplete="off" />
+      </div>
+      <div class="actions">
+        <button class="btn primary" onclick="saveIobwsKey()" data-t="Save Key">Save Key</button>
+        <button class="btn secondary" onclick="clearIobwsKey()" data-t="Clear Key">Clear Key</button>
+      </div>
+      <div id="iobws-status" class="status"></div>
+      <div class="hint" data-t="Stored in localStorage and reused across sessions.">Stored in localStorage and reused across sessions.</div>
+    </div>
   </main>
 </div>
 
@@ -88,6 +103,8 @@ const UI_STRINGS = [
   'Connected',
   'Claude API Key',
   'Manage the shared Claude key used by AI Sales Assistant and Claude MCP Chat.',
+  'IOBWS API Key',
+  'Manage the shared IOBWS key used by all bank proxy functions.',
   'Save Key',
   'Clear Key',
   'Stored in localStorage and reused across sessions.',
@@ -121,6 +138,24 @@ function clearKey() {
   showStatus(t('Key cleared.'), true);
 }
 
+function saveIobwsKey() {
+  const key = document.getElementById('iobws-key').value.trim();
+  bcIobwsApiKeySave(key);
+  showIobwsStatus(t('Key saved.'), true);
+}
+
+function clearIobwsKey() {
+  bcIobwsApiKeySave('');
+  document.getElementById('iobws-key').value = '';
+  showIobwsStatus(t('Key cleared.'), true);
+}
+
+function showIobwsStatus(message, ok) {
+  const el = document.getElementById('iobws-status');
+  el.textContent = message;
+  el.className = 'status ' + (ok ? 'ok' : 'error');
+}
+
 async function loadUiTranslations() {
   const settings = bcSettingsLoad();
   const headers = bcSettingsHeaders();
@@ -135,6 +170,7 @@ function applyUiTranslationsLocal() {
 
 window.onload = async () => {
   document.getElementById('claude-key').value = bcClaudeApiKeyLoad();
+  document.getElementById('iobws-key').value  = bcIobwsApiKeyLoad();
   await loadUiTranslations();
   applyUiTranslationsLocal();
   updateConnectionPill();

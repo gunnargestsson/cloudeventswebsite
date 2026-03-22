@@ -666,10 +666,9 @@ function applyTemplate() {
 }
 
 // ── API KEY STORAGE ───────────────────────────────────────────────────────────
-const API_KEY_STORE = 'iobws_api_key';
 function onApiKeyInput() {
   const key = (document.getElementById('f-apikey').value || '').trim();
-  if (key) localStorage.setItem(API_KEY_STORE, key);
+  if (key) bcIobwsApiKeySave(key);
 }
 
 // ── SEND ──────────────────────────────────────────────────────────────────────
@@ -685,7 +684,7 @@ async function sendRequest() {
   if (!apiKey) { showError('API Key is required.'); return; }
   if (!url)    { showError('Service URL is required.'); return; }
 
-  localStorage.setItem(API_KEY_STORE, apiKey);
+  bcIobwsApiKeySave(apiKey);
 
   const endpoint = `/api/${bank.slug}?key=${encodeURIComponent(apiKey)}`;
   const payload  = { serviceUrl: url, soapAction: action, username: user, password: pass, body };
@@ -879,7 +878,7 @@ window.onload = async () => {
   renderBankButtons();
   selectBank(0);
 
-  const savedKey = localStorage.getItem(API_KEY_STORE) || '';
+  const savedKey = bcIobwsApiKeyLoad();
   if (savedKey) document.getElementById('f-apikey').value = savedKey;
 
   applyUiTranslations();
