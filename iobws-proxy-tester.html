@@ -473,8 +473,8 @@ const BANKS = [
       {
         name: 'GetAccountStatement',
         mkUrl: h => `https://${h}/Statements/20131015/AccountService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/IAccountService/GetAccountStatement',
-        body: '<GetAccountStatement xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <AccountNumber><!-- REPLACE: account number --></AccountNumber>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</GetAccountStatement>',
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/GetAccountStatement',
+        body: '<GetAccountStatement xmlns="http://IcelandicOnlineBanking/2013/10/15/Accounts">\n  <Query xmlns:at="http://IcelandicOnlineBanking/2013/10/15/AccountTypes">\n    <at:Account><!-- REPLACE: account number --></at:Account>\n    <at:DateFrom><!-- REPLACE: YYYY-MM-DD --></at:DateFrom>\n    <at:DateTo><!-- REPLACE: YYYY-MM-DD --></at:DateTo>\n  </Query>\n</GetAccountStatement>',
       },
       {
         name: 'QueryClaims',
@@ -491,8 +491,8 @@ const BANKS = [
       {
         name: 'GetCurrencyRates',
         mkUrl: h => `https://${h}/Statements/20131015/CurrencyRatesService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/ICurrencyRatesService/GetCurrencyRates',
-        body: '<GetCurrencyRates xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Date><!-- REPLACE: YYYY-MM-DD --></Date>\n</GetCurrencyRates>',
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/GetCurrencyRates',
+        body: '<GetCurrencyRates xmlns="http://IcelandicOnlineBanking/2013/10/15/CurrencyRates">\n  <Query xmlns:crt="http://IcelandicOnlineBanking/2013/10/15/CurrencyRateTypes">\n    <crt:CurrencyType>NoteRate</crt:CurrencyType>\n    <crt:Date><!-- REPLACE: YYYY-MM-DDTHH:mm:ssZ --></crt:Date>\n  </Query>\n</GetCurrencyRates>',
       },
       {
         name: 'LI_Claim_get',
@@ -517,8 +517,8 @@ const BANKS = [
       {
         name: 'GetAccountStatement',
         mkUrl: h => `https://${h}/Statements/20131015/AccountService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/IAccountService/GetAccountStatement',
-        body: '<GetAccountStatement xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <AccountNumber><!-- REPLACE: account number --></AccountNumber>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</GetAccountStatement>',
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/GetAccountStatement',
+        body: '<GetAccountStatement xmlns="http://IcelandicOnlineBanking/2013/10/15/Accounts">\n  <Query xmlns:at="http://IcelandicOnlineBanking/2013/10/15/AccountTypes">\n    <at:Account><!-- REPLACE: account number --></at:Account>\n    <at:DateFrom><!-- REPLACE: YYYY-MM-DD --></at:DateFrom>\n    <at:DateTo><!-- REPLACE: YYYY-MM-DD --></at:DateTo>\n  </Query>\n</GetAccountStatement>',
       },
       {
         name: 'QueryClaims',
@@ -535,14 +535,14 @@ const BANKS = [
       {
         name: 'GetCurrencyRates',
         mkUrl: h => `https://${h}/Statements/20131015/CurrencyRatesService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/ICurrencyRatesService/GetCurrencyRates',
-        body: '<GetCurrencyRates xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Date><!-- REPLACE: YYYY-MM-DD --></Date>\n</GetCurrencyRates>',
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/GetCurrencyRates',
+        body: '<GetCurrencyRates xmlns="http://IcelandicOnlineBanking/2013/10/15/CurrencyRates">\n  <Query xmlns:crt="http://IcelandicOnlineBanking/2013/10/15/CurrencyRateTypes">\n    <crt:CurrencyType>NoteRate</crt:CurrencyType>\n    <crt:Date><!-- REPLACE: YYYY-MM-DDTHH:mm:ssZ --></crt:Date>\n  </Query>\n</GetCurrencyRates>',
       },
       {
-        name: 'GetBillStatement',
+        name: 'GetBills',
         mkUrl: h => `https://${h}/Statements/20130201/BillService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Statements/20130201/IBillService/GetBillStatement',
-        body: '<GetBillStatement xmlns="http://schemas.b2b.is/Statements/20130201">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</GetBillStatement>',
+        mkAction: () => 'http://schemas.b2b.is/Bills/2013/02/01/BillService/IBillService/GetBills',
+        body: '<GetBills xmlns="http://schemas.b2b.is/Bills/2013/02/01/BillService"></GetBills>',
       },
       { name: t('Custom'), custom: true },
     ],
@@ -558,8 +558,8 @@ const BANKS = [
       {
         name: 'GetAccountStatement',
         mkUrl: h => `https://${h}/Statements/20131015/AccountService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/IAccountService/GetAccountStatement',
-        body: '<GetAccountStatement xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <AccountNumber><!-- REPLACE: account number --></AccountNumber>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</GetAccountStatement>',
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/GetAccountStatement',
+        body: '<GetAccountStatement xmlns="http://IcelandicOnlineBanking/2013/10/15/Accounts">\n  <Query xmlns:at="http://IcelandicOnlineBanking/2013/10/15/AccountTypes">\n    <at:Account><!-- REPLACE: account number --></at:Account>\n    <at:DateFrom><!-- REPLACE: YYYY-MM-DD --></at:DateFrom>\n    <at:DateTo><!-- REPLACE: YYYY-MM-DD --></at:DateTo>\n  </Query>\n</GetAccountStatement>',
       },
       {
         name: 'QueryClaims',
@@ -576,8 +576,8 @@ const BANKS = [
       {
         name: 'GetCurrencyRates',
         mkUrl: h => `https://${h}/Statements/20131015/CurrencyRatesService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/ICurrencyRatesService/GetCurrencyRates',
-        body: '<GetCurrencyRates xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Date><!-- REPLACE: YYYY-MM-DD --></Date>\n</GetCurrencyRates>',
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/GetCurrencyRates',
+        body: '<GetCurrencyRates xmlns="http://IcelandicOnlineBanking/2013/10/15/CurrencyRates">\n  <Query xmlns:crt="http://IcelandicOnlineBanking/2013/10/15/CurrencyRateTypes">\n    <crt:CurrencyType>NoteRate</crt:CurrencyType>\n    <crt:Date><!-- REPLACE: YYYY-MM-DDTHH:mm:ssZ --></crt:Date>\n  </Query>\n</GetCurrencyRates>',
       },
       {
         name: 'Account Balance (proprietary)',
@@ -622,8 +622,8 @@ const BANKS = [
       {
         name: 'GetAccountStatement',
         mkUrl: h => `https://${h}/Statements/20131015/AccountService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/IAccountService/GetAccountStatement',
-        body: '<GetAccountStatement xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Kennitala><!-- REPLACE: company kennitala --></Kennitala>\n  <AccountNumber><!-- REPLACE: account number --></AccountNumber>\n  <DateFrom><!-- REPLACE: YYYY-MM-DD --></DateFrom>\n  <DateTo><!-- REPLACE: YYYY-MM-DD --></DateTo>\n</GetAccountStatement>',
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/GetAccountStatement',
+        body: '<GetAccountStatement xmlns="http://IcelandicOnlineBanking/2013/10/15/Accounts">\n  <Query xmlns:at="http://IcelandicOnlineBanking/2013/10/15/AccountTypes">\n    <at:Account><!-- REPLACE: account number --></at:Account>\n    <at:DateFrom><!-- REPLACE: YYYY-MM-DD --></at:DateFrom>\n    <at:DateTo><!-- REPLACE: YYYY-MM-DD --></at:DateTo>\n  </Query>\n</GetAccountStatement>',
       },
       {
         name: 'QueryClaims',
@@ -640,8 +640,8 @@ const BANKS = [
       {
         name: 'GetCurrencyRates',
         mkUrl: h => `https://${h}/Statements/20131015/CurrencyRatesService.svc`,
-        mkAction: () => 'http://schemas.b2b.is/Statements/20131015/ICurrencyRatesService/GetCurrencyRates',
-        body: '<GetCurrencyRates xmlns="http://schemas.b2b.is/Statements/20131015">\n  <Date><!-- REPLACE: YYYY-MM-DD --></Date>\n</GetCurrencyRates>',
+        mkAction: () => 'http://IcelandicOnlineBanking/2013/10/15/GetCurrencyRates',
+        body: '<GetCurrencyRates xmlns="http://IcelandicOnlineBanking/2013/10/15/CurrencyRates">\n  <Query xmlns:crt="http://IcelandicOnlineBanking/2013/10/15/CurrencyRateTypes">\n    <crt:CurrencyType>NoteRate</crt:CurrencyType>\n    <crt:Date><!-- REPLACE: YYYY-MM-DDTHH:mm:ssZ --></crt:Date>\n  </Query>\n</GetCurrencyRates>',
       },
       { name: t('Custom'), custom: true },
     ],
