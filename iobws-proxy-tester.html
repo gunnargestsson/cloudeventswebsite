@@ -251,6 +251,31 @@
   .hist-status.ok  { color: var(--green); }
   .hist-status.err { color: var(--red); }
   .hist-replay { margin-left: auto; flex-shrink: 0; }
+
+  /* ── CERT PANEL ── */
+  .cert-panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 10px; margin-bottom: 16px;
+  }
+  .cert-header-right { display: flex; align-items: center; gap: 10px; }
+  .cert-badge {
+    display: inline-flex; align-items: center;
+    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.03em;
+    padding: 4px 10px; border-radius: 99px;
+  }
+  .cert-badge.valid    { background: rgba(39,192,138,0.12); color: var(--green); border: 1px solid rgba(39,192,138,0.35); }
+  .cert-badge.expiring { background: rgba(245,166,35,0.12); color: var(--amber); border: 1px solid rgba(245,166,35,0.35); }
+  .cert-badge.expired  { background: rgba(242,95,92,0.12);  color: var(--red);   border: 1px solid rgba(242,95,92,0.35); }
+  .cert-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+  .cert-table tr { border-bottom: 1px solid var(--border); }
+  .cert-table tr:last-child { border-bottom: none; }
+  .cert-table td { padding: 9px 10px; vertical-align: top; }
+  .cert-table td:first-child {
+    color: var(--text-dim); white-space: nowrap; width: 180px;
+    font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.08em;
+    padding-right: 20px;
+  }
+  .cert-table td:last-child { color: var(--text-mid); word-break: break-all; }
 </style>
 </head>
 <body>
@@ -390,6 +415,23 @@
 
       </div>
     </div>
+
+    <!-- ── CERT INFO ── -->
+    <div class="panel" id="cert-panel" style="margin-top:20px">
+      <div class="cert-panel-header">
+        <div class="panel-title" style="margin-bottom:0" data-t="Certificate">Certificate</div>
+        <div class="cert-header-right">
+          <span id="cert-badge" class="cert-badge" style="display:none"></span>
+          <button class="btn-secondary" id="cert-btn" onclick="checkCertificate()" data-t="Check Certificate">Check Certificate</button>
+        </div>
+      </div>
+      <div id="cert-hint" style="font-size:0.78rem;color:var(--text-dim)" data-t="Click 'Check Certificate' to load the properties of the PFX certificate configured for the selected bank.">Click 'Check Certificate' to load the properties of the PFX certificate configured for the selected bank.</div>
+      <div id="cert-error" class="error-card" style="display:none;margin-top:12px"></div>
+      <div id="cert-info-wrap" style="display:none;margin-top:14px;overflow-x:auto">
+        <table class="cert-table" id="cert-table"></table>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -404,6 +446,11 @@ const UI_STRINGS = [
   'Landsbankinn Production', '\xCDslandsbanki Production',
   'Select a bank, fill in the request fields, and click Send.',
   'Home', 'Connected', 'Not connected', 'ms',
+  'Certificate', 'Check Certificate', 'Checking\u2026',
+  'Subject', 'Issuer', 'Serial Number', 'Valid From', 'Valid To',
+  'SHA1 Fingerprint', 'Key', 'Subject Alt Names',
+  'Certificate has expired', 'Expiring in {0} days', 'Valid \u2013 {0} days remaining',
+  "Click 'Check Certificate' to load the properties of the PFX certificate configured for the selected bank.",
 ];
 
 // ── BANK DATA ─────────────────────────────────────────────────────────────────
@@ -840,7 +887,79 @@ function toggleHistory() {
   document.getElementById('hist-list').style.display    = historyCollapsed ? 'none' : '';
   document.getElementById('hist-toggle').style.transform = historyCollapsed ? 'rotate(-90deg)' : '';
 }
+// ── CERTIFICATE INFO ────────────────────────────────────────────────────────
+async function checkCertificate() {
+  const bank   = currentBank();
+  const apiKey = (document.getElementById('f-apikey').value || '').trim();
+  if (!apiKey) { showCertError('API Key is required.'); return; }
 
+  const btn = document.getElementById('cert-btn');
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>${t('Checking\u2026')}`;
+  document.getElementById('cert-hint').style.display      = 'none';
+  document.getElementById('cert-error').style.display     = 'none';
+  document.getElementById('cert-info-wrap').style.display = 'none';
+  document.getElementById('cert-badge').style.display     = 'none';
+
+  try {
+    const resp = await fetch(`/api/cert?bank=${encodeURIComponent(bank.slug)}&key=${encodeURIComponent(apiKey)}`);
+    const data = await resp.json();
+    if (!resp.ok) { showCertError(data.error || `HTTP ${resp.status}`); return; }
+    renderCertProps(data);
+  } catch (err) {
+    showCertError(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t('Check Certificate');
+  }
+}
+
+function showCertError(msg) {
+  const el = document.getElementById('cert-error');
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+function renderCertProps(info) {
+  const rows = [
+    [t('Subject'),           info.subject      || '\u2014'],
+    [t('Issuer'),            info.issuer       || '\u2014'],
+    [t('Serial Number'),     info.serialNumber || '\u2014'],
+    [t('Valid From'),        fmtCertDate(info.notBefore)],
+    [t('Valid To'),          fmtCertDate(info.notAfter)],
+    [t('SHA1 Fingerprint'),  info.thumbprint   || '\u2014'],
+    [t('Key'),               info.keyAlgorithm + (info.keyBits ? ` ${info.keyBits} bit` : '')],
+    [t('Subject Alt Names'), info.subjectAltNames && info.subjectAltNames.length ? info.subjectAltNames.join(', ') : '\u2014'],
+  ];
+  document.getElementById('cert-table').innerHTML =
+    rows.map(([l, v]) => `<tr><td>${safeText(l)}</td><td>${safeText(String(v))}</td></tr>`).join('');
+  document.getElementById('cert-info-wrap').style.display = '';
+
+  const badge = document.getElementById('cert-badge');
+  if (info.isExpired) {
+    badge.className   = 'cert-badge expired';
+    badge.textContent = t('Certificate has expired');
+  } else if (info.daysUntilExpiry <= 30) {
+    badge.className   = 'cert-badge expiring';
+    badge.textContent = t('Expiring in {0} days').replace('{0}', info.daysUntilExpiry);
+  } else {
+    badge.className   = 'cert-badge valid';
+    badge.textContent = t('Valid \u2013 {0} days remaining').replace('{0}', info.daysUntilExpiry);
+  }
+  badge.style.display = '';
+}
+
+function fmtCertDate(iso) {
+  if (!iso) return '\u2014';
+  return new Date(iso).toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+function safeText(v) {
+  return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 // ── TOP BAR ───────────────────────────────────────────────────────────────────
 function updateTopBar() {
   const ready = bcSettingsReady();
