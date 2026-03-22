@@ -184,15 +184,20 @@ function signEnvelope(xmlString, certDer, keyPem) {
   sig.canonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#';
   // WCF CustomMutualCertificateBinding uses MessageSecurityVersion
   // WSSecurity11WSTrust13WSSecureConversation13WSSecurityPolicy12 which
-  // defaults to the Basic256 algorithm suite → RSA-SHA256 signatures, SHA-256 digests.
-  sig.signatureAlgorithm        = 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256';
+  // defaults to the Basic256 algorithm suite.
+  // Basic256 asymmetric: SignatureMethod = RSA-SHA1, DigestMethod = SHA-256.
+  // (Source: CustomMutualCertificateBinding.cs — no explicit DefaultAlgorithmSuite,
+  //  so WCF uses SecurityAlgorithmSuite.Default = Basic256.)
+  sig.signatureAlgorithm        = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1';
 
   // WCF AsymmetricBinding policy (sp:SignedParts) requires Body, Timestamp,
   // and all WS-Addressing headers: To, Action, MessageID, ReplyTo.
   // Use local-name() element selectors — no namespace resolver needed.
-  const C14N   = 'http://www.w3.org/2001/10/xml-exc-c14n#';
-  const SHA256 = 'http://www.w3.org/2001/04/xmlenc#sha256';
-  const ref    = xpath => ({ xpath, transforms: [C14N], digestAlgorithm: SHA256 });
+  const C14N  = 'http://www.w3.org/2001/10/xml-exc-c14n#';
+  // WCF SecurityAlgorithmSuite.Default = Basic256:
+  //   DefaultDigestAlgorithm = SHA-1, DefaultAsymmetricSignatureAlgorithm = RSA-SHA1.
+  const SHA1  = 'http://www.w3.org/2000/09/xmldsig#sha1';
+  const ref   = xpath => ({ xpath, transforms: [C14N], digestAlgorithm: SHA1 });
 
   sig.addReference(ref('//*[local-name()="Body"]'));
   sig.addReference(ref('//*[local-name()="Timestamp"]'));
