@@ -50,9 +50,10 @@ module.exports = async function (context, req) {
     return;
   }
 
-  const tenantId     = process.env.EMAIL_TENANT_ID;
-  const clientId     = process.env.EMAIL_CLIENT_ID;
-  const clientSecret = process.env.EMAIL_CLIENT_SECRET;
+  // Use dedicated email app-registration env vars; fall back to the shared BC app registration.
+  const tenantId     = process.env.EMAIL_TENANT_ID     || process.env.BC_TENANT_ID;
+  const clientId     = process.env.EMAIL_CLIENT_ID     || process.env.BC_CLIENT_ID;
+  const clientSecret = process.env.EMAIL_CLIENT_SECRET || process.env.BC_CLIENT_SECRET;
   const senderMailbox = process.env.EMAIL_SENDER || "uat@dynamics.is";
 
   if (!tenantId || !clientId || !clientSecret) {
