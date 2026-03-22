@@ -145,7 +145,7 @@ function buildEnvelope(params, soapVersion, certDer) {
 
 /**
  * Apply a WS-Security XML digital signature to the envelope.
- * Signs Body, Timestamp, and all WS-Addressing headers using RSA-SHA256 with Exclusive C14N.
+ * Signs Body, Timestamp, and all WS-Addressing headers using RSA-SHA1 with Exclusive C14N (WCF Basic256).
  * KeyInfo references BinarySecurityToken BST-1 via SHA-1 thumbprint (matching WCF Basic256 initiator token parameters).
  *
  * @param {string} xmlString   Unsigned SOAP envelope
@@ -185,7 +185,7 @@ function signEnvelope(xmlString, certDer, keyPem) {
   // WCF CustomMutualCertificateBinding uses MessageSecurityVersion
   // WSSecurity11WSTrust13WSSecureConversation13WSSecurityPolicy12 which
   // defaults to the Basic256 algorithm suite.
-  // Basic256 asymmetric: SignatureMethod = RSA-SHA1, DigestMethod = SHA-256.
+  // Basic256 asymmetric: SignatureMethod = RSA-SHA1, DigestMethod = SHA-1.
   // (Source: CustomMutualCertificateBinding.cs — no explicit DefaultAlgorithmSuite,
   //  so WCF uses SecurityAlgorithmSuite.Default = Basic256.)
   sig.signatureAlgorithm        = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1';
