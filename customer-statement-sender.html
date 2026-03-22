@@ -181,30 +181,12 @@
 
   <main>
 
-    <!-- ── STEP 1: COMPANY SELECTION ─────────────────────────────────────── -->
-    <div id="view-companies">
+    <!-- ── CUSTOMERS + DATE RANGE ───────────────────────────────────────── -->
+    <div id="view-customers">
       <div class="breadcrumb">
-        <span style="color:var(--text)" data-t="Customer Statement Sender">Customer Statement Sender</span>
-      </div>
-      <div class="section-header">
-        <div class="section-title">
-          <small>Business Central</small>
-          <span data-t="Select Company">Select Company</span>
-        </div>
-        <span class="badge" id="company-count">—</span>
-      </div>
-      <div id="company-grid" class="company-grid">
-        <div class="loader-wrap">
-          <div class="spinner"></div>
-          <span class="loader-label" data-t="Authenticating...">Authenticating...</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── STEP 2: CUSTOMERS + DATE RANGE ─────────────────────────────────── -->
-    <div id="view-customers" style="display:none">
-      <div class="breadcrumb">
-        <span class="crumb" onclick="showCompanies()" id="crumb-company">—</span>
+        <a href="index.html" class="crumb">← Home</a>
+        <span class="sep">/</span>
+        <span id="crumb-company" style="color:var(--text-mid)">—</span>
         <span class="sep">/</span>
         <span style="color:var(--text)" data-t="Customer Statement Sender">Customer Statement Sender</span>
       </div>
@@ -287,8 +269,7 @@
 "use strict";
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let companies      = [];
-let selectedCompany = null;
+let selectedCompany = null;   // { id, name } read from bcSettingsLoad()
 let selectedLcid   = 1033;
 let customers      = [];   // current page of loaded customers
 let filteredList   = [];   // after client-side search filter
@@ -313,16 +294,6 @@ const UI_STRINGS = [
 ];
 
 // ── API helpers ───────────────────────────────────────────────────────────────
-
-// bcGet: company list (standard v2.0 API, pre-company-selection)
-async function bcGet(path) {
-  const r = await fetch('/api/bc?path=' + encodeURIComponent(path));
-  if (!r.ok) {
-    const e = await r.json().catch(() => ({}));
-    throw new Error(e.error || 'API error ' + r.status);
-  }
-  return r.json();
-}
 
 // cePost: Cloud Events proxy — expects a JSON response
 async function cePost(companyId, event) {
@@ -414,15 +385,6 @@ function setStatus(s) {
   if (lbl) lbl.textContent = s === 'connected' ? 'BC' : s === 'error' ? 'Error' : t('Authenticating...');
 }
 
-function show(id) {
-  ['view-companies', 'view-customers'].forEach(v => {
-    const el = document.getElementById(v);
-    if (el) el.style.display = v === id ? '' : 'none';
-  });
-}
-
-function showCompanies() { show('view-companies'); }
-
 let toastTimer;
 function toast(msg, type = 'info') {
   const el = document.getElementById('toast');
@@ -431,48 +393,6 @@ function toast(msg, type = 'info') {
   el.className = 'show' + (type === 'error' ? ' error' : type === 'success' ? ' success' : '');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.className = ''; }, type === 'error' ? 7000 : 3000);
-}
-
-// ── Companies ─────────────────────────────────────────────────────────────────
-
-async function loadCompanies() {
-  try {
-    const d = await bcGet('companies');
-    companies = d.value || [];
-    setStatus('connected');
-    document.getElementById('company-count').textContent = companies.length + ' ' + t('companies');
-    if (!companies.length) {
-      document.getElementById('company-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">🏢</div><p>${t('No companies found')}</p></div>`;
-      return;
-    }
-    const icons = ['🏢','🏗️','🏭','🏬','🏛️'];
-    document.getElementById('company-grid').innerHTML = companies.map((c, i) => `
-      <div class="company-card" onclick="selectCompany('${c.id}')">
-        <div class="company-icon">${icons[i % icons.length]}</div>
-        <div class="company-name">${c.displayName || c.name}</div>
-        <div class="company-meta">
-          <span>ID: ${c.id.substring(0, 8)}...</span>
-          ${c.systemVersion ? `<span>Version: ${c.systemVersion}</span>` : ''}
-        </div>
-      </div>`).join('');
-  } catch (e) {
-    setStatus('error');
-    document.getElementById('company-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p>${e.message}</p></div>`;
-    toast(e.message, 'error');
-  }
-}
-
-async function selectCompany(id) {
-  selectedCompany = companies.find(c => c.id === id);
-  if (!selectedCompany) return;
-  const name = selectedCompany.displayName || selectedCompany.name;
-  document.getElementById('crumb-company').textContent = name;
-  document.getElementById('company-label').textContent = name;
-  show('view-customers');
-  await loadUiTranslations();
-  applyUiTranslations();
-  initDateRange();
-  await loadCustomers(0);
 }
 
 // ── Date range ────────────────────────────────────────────────────────────────
@@ -681,8 +601,22 @@ async function sendStatements() {
 // ── Init ──────────────────────────────────────────────────────────────────────
 (async function init() {
   const settings = bcSettingsLoad();
-  selectedLcid = parseInt(settings.lcid || '1033', 10);
-  await loadCompanies();
+  if (!settings.companyId) {
+    // No company selected — send user back to the home page to pick one
+    location.href = 'index.html';
+    return;
+  }
+  selectedCompany = { id: settings.companyId, name: settings.companyName || settings.companyId };
+  selectedLcid    = parseInt(settings.lcid || '1033', 10);
+
+  document.getElementById('crumb-company').textContent   = selectedCompany.name;
+  document.getElementById('company-label').textContent   = selectedCompany.name;
+
+  await loadUiTranslations();
+  applyUiTranslations();
+  setStatus('connected');
+  initDateRange();
+  await loadCustomers(0);
 }());
 </script>
 </body>
