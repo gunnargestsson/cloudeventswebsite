@@ -18,21 +18,7 @@ const CI_TABLE = "Cloud Events Integration";
 const CONFIG_CONN_ID = "11111111-1111-1111-1111-000000000001";
 const CONFIG_TABLES_ID = "11111111-1111-1111-1111-000000000002";
 
-const SUPPORTED_TYPES = new Set([
-  "BigInteger",
-  "Boolean",
-  "Code",
-  "Date",
-  "DateFormula",
-  "DateTime",
-  "Decimal",
-  "Duration",
-  "Guid",
-  "Integer",
-  "Option",
-  "Text",
-  "Time",
-]);
+
 
 const _tokenCache = new Map();
 
@@ -666,33 +652,29 @@ function washName(name) {
   return String(name || "").replace(/[^a-zA-Z0-9%]/g, "");
 }
 
-function mapDdlType(fieldType, fieldLength) {
-  switch (fieldType) {
+function mapFabricType(fieldType) {
+  switch (String(fieldType)) {
     case "Text":
     case "Code":
-      return { columnDataType: "varchar", columnLength: Number(fieldLength || 250) };
-    case "Integer":
-      return { columnDataType: "int" };
-    case "BigInteger":
-      return { columnDataType: "bigint" };
-    case "Decimal":
-      return { columnDataType: "decimal" };
-    case "Boolean":
-      return { columnDataType: "bit" };
-    case "Date":
-      return { columnDataType: "date" };
-    case "Time":
-      return { columnDataType: "time" };
-    case "DateTime":
-      return { columnDataType: "datetime2" };
-    case "DateFormula":
-      return { columnDataType: "varchar", columnLength: 250 };
-    case "Duration":
-      return { columnDataType: "bigint" };
-    case "Guid":
-      return { columnDataType: "uniqueidentifier" };
     case "Option":
-      return { columnDataType: "varchar", columnLength: 250 };
+    case "DateFormula":
+    case "Guid":
+      return "String";
+    case "Integer":
+      return "Int32";
+    case "BigInteger":
+    case "Duration":
+      return "Int64";
+    case "Decimal":
+      return "Double";
+    case "Boolean":
+      return "Boolean";
+    case "Date":
+      return "IDate";
+    case "Time":
+      return "ITime";
+    case "DateTime":
+      return "DateTime";
     default:
       return null;
   }
@@ -707,50 +689,50 @@ function buildDdl(tableCfg, fields) {
   const selectedFieldSet = new Set((tableCfg.fieldNumbers || []).map(Number));
   const useSelection = selectedFieldSet.size > 0;
 
-  const userFields = fields.filter((f) => {
-    const no = Number(f.number || f.fieldNo || f.no || f.id);
-    const fieldType = String(f.type || "");
-    const fieldClass = String(f.class || "Normal");
-    if (!(no >= 1 && no <= 1999999999)) return false;
-    if (fieldClass !== "Normal") return false;
-    if (!SUPPORTED_TYPES.has(fieldType)) return false;
-    if (useSelection && !selectedFieldSet.has(no)) return false;
-    return true;
-  });
+  const userColumns = fields
+    .filter((f) => {
+      const no = Number(f.number || f.fieldNo || f.no || f.id);
+      const fieldType = String(f.type || "");
+      const fieldClass = String(f.class || "Normal");
+      if (!(no >= 1 && no <= 1999999999)) return false;
+      if (fieldClass !== "Normal") return false;
+      if (!mapFabricType(fieldType)) return false;
+      if (useSelection && !selectedFieldSet.has(no)) return false;
+      return true;
+    })
+    .map((f) => {
+      const name = String(f.name || f.caption || `Field${f.number || f.id}`);
+      return {
+        Name: washName(name),
+        DataType: mapFabricType(String(f.type || "")),
+        IsNullable: true,
+      };
+    });
 
-  const columns = userFields.map((f) => {
-    const no = Number(f.number || f.fieldNo || f.no || f.id);
-    const name = String(f.name || f.caption || `Field${no}`);
-    const mapped = mapDdlType(String(f.type || ""), f.len || f.length);
-    const base = {
-      columnName: `${washName(name)}-${no}`,
-      isNullable: true,
-      isPrimaryKey: false,
-      ...mapped,
-    };
-    return base;
-  });
-
-  columns.push(
-    { columnName: "Timestamp-0", columnDataType: "bigint", isNullable: true, isPrimaryKey: false },
-    { columnName: "SystemId-2000000000", columnDataType: "uniqueidentifier", isNullable: false, isPrimaryKey: true },
-    { columnName: "SystemCreatedAt-2000000001", columnDataType: "datetime2", isNullable: true, isPrimaryKey: false },
-    { columnName: "SystemCreatedBy-2000000002", columnDataType: "uniqueidentifier", isNullable: true, isPrimaryKey: false },
-    { columnName: "SystemModifiedAt-2000000003", columnDataType: "datetime2", isNullable: true, isPrimaryKey: false },
-    { columnName: "SystemModifiedBy-2000000004", columnDataType: "uniqueidentifier", isNullable: true, isPrimaryKey: false }
-  );
+  const systemColumns = [
+    { Name: "timestamp",        DataType: "Int64",    IsNullable: true },
+    { Name: "systemId",         DataType: "String" },
+    { Name: "SystemCreatedAt",  DataType: "DateTime", IsNullable: true },
+    { Name: "SystemCreatedBy",  DataType: "String",   IsNullable: true },
+    { Name: "SystemModifiedAt", DataType: "DateTime", IsNullable: true },
+    { Name: "SystemModifiedBy", DataType: "String",   IsNullable: true },
+  ];
 
   if (tableCfg.dataPerCompany) {
-    columns.push({ columnName: "$Company", columnDataType: "varchar", columnLength: 250, isNullable: true, isPrimaryKey: false });
+    systemColumns.push({ Name: "$Company", DataType: "String" });
   }
 
+  const keyColumns = tableCfg.dataPerCompany
+    ? ["systemId", "$Company"]
+    : ["systemId"];
+
   return {
-    type: "FullInitialLoad",
-    schema: "dbo",
-    tableName: washName(tableCfg.tableName),
-    columns,
-    primaryKey: ["SystemId-2000000000"],
-    watermarkColumn: "SystemModifiedAt-2000000003",
+    keyColumns,
+    fileDetectionStrategy: "LastUpdateTimeFileDetection",
+    SchemaDefinition: {
+      Columns: [...userColumns, ...systemColumns],
+    },
+    fileFormat: "csv",
   };
 }
 
@@ -780,8 +762,40 @@ async function uploadDdl(conn, token, companyId, connection, tableCfg) {
   const resolvedTableName = resolveTableName(tableCfg, fields);
   const safeTableName = washName(resolvedTableName);
   const ddl = buildDdl({ ...tableCfg, tableName: resolvedTableName }, fields);
-  const ddlPath = pathJoin("Tables", safeTableName, "_metadata", "DDL.json");
+  const ddlPath = pathJoin("Tables", safeTableName, "_metadata.json");
   await uploadTextToMirror(connection, ddlPath, JSON.stringify(ddl, null, 2));
+}
+
+async function getDeletedRecordCount(conn, token, companyId, tableCfg, startIso, endIso) {
+  const tableSelector = tableCfg.tableName
+    ? { tableName: tableCfg.tableName }
+    : { tableNumber: tableCfg.tableId };
+
+  const payload = {
+    ...tableSelector,
+    endDateTime: endIso,
+    skip: 0,
+    take: 1,
+  };
+  if (startIso) payload.startDateTime = startIso;
+
+  const result = await bcTask(conn, token, companyId, "Deleted.RecordIds.Get", null, payload);
+  return Number(result.noOfRecords || 0);
+}
+
+async function getCsvDeletedRecords(conn, token, companyId, tableCfg, startIso, endIso) {
+  const tableSelector = tableCfg.tableName
+    ? { tableName: tableCfg.tableName }
+    : { tableNumber: tableCfg.tableId };
+
+  const payload = {
+    ...tableSelector,
+    toDate: endIso,
+  };
+  if (startIso) payload.fromDate = startIso;
+
+  const result = await bcTask(conn, token, companyId, "CSV.DeletedRecords.Get", null, payload, true);
+  return extractCsvPayload(result);
 }
 
 function extractCsvPayload(result) {
@@ -798,10 +812,13 @@ async function runMirror(conn, token, companyId, tableId) {
   if (!tableId) throw new Error("tableId is required");
 
   const connection = await getMirrorConnection(conn, token, companyId);
-  if (!connection || connection.status !== "verified") throw new Error("Verified mirror connection is required");
+  if (!connection || connection.status !== "verified")
+    throw new Error("Verified mirror connection is required");
 
   const tables = await getStoredTables(conn, token, companyId);
-  const tableCfg = tables.map(normalizeTableConfig).find((t) => Number(t.tableId) === Number(tableId));
+  const tableCfg = tables
+    .map(normalizeTableConfig)
+    .find((t) => Number(t.tableId) === Number(tableId));
   if (!tableCfg) throw new Error(`Table ${tableId} is not configured`);
   if (!tableCfg.active) throw new Error(`Table ${tableCfg.tableName} is inactive`);
 
@@ -810,8 +827,13 @@ async function runMirror(conn, token, companyId, tableId) {
   const endIso = isoNoMs(endDt);
   const runTableView = buildRunTableView(tableCfg, previousTs, endIso);
 
-  // Count first — only proceed if there are records to mirror.
-  const runResult = await withTableRefFallback(tableCfg, async (tableRef) => {
+  // ── Step 1: Count and fetch modified records ─────────────────────────────────
+  let noOfRecords = 0;
+  let csv = "";
+  let confirmedDt = endDt;
+  let confirmedIso = endIso;
+
+  await withTableRefFallback(tableCfg, async (tableRef) => {
     const tableSelector = parseTableRef(tableRef);
     const countResult = await dataRecordsGet(conn, token, companyId, {
       ...tableSelector,
@@ -821,24 +843,39 @@ async function runMirror(conn, token, companyId, tableId) {
       fieldNumbers: [1],
     });
 
-    const noOfRecords = Number(countResult.noOfRecords || 0);
-    if (noOfRecords === 0) {
-      return { noOfRecords, csv: "" };
-    }
+    noOfRecords = Number(countResult.noOfRecords || 0);
+    if (noOfRecords === 0) return;
 
     const csvResult = await bcTask(conn, token, companyId, "CSV.Records.Get", null, {
       ...tableSelector,
       tableView: runTableView,
-      fieldNumbers: tableCfg.fieldNumbers && tableCfg.fieldNumbers.length ? tableCfg.fieldNumbers : undefined,
+      fieldNumbers:
+        tableCfg.fieldNumbers && tableCfg.fieldNumbers.length
+          ? tableCfg.fieldNumbers
+          : undefined,
     }, true);
 
-    return { noOfRecords, csv: extractCsvPayload(csvResult), bcTime: csvResult.time || null };
+    csv = extractCsvPayload(csvResult);
+    if (csvResult.time) {
+      confirmedDt = new Date(csvResult.time);
+      confirmedIso = isoNoMs(confirmedDt);
+    }
   });
 
-  const noOfRecords = Number(runResult.noOfRecords || 0);
+  // ── Step 2: Count deleted records (Deleted.RecordIds.Get) then fetch CSV ─────
+  const noOfDeleted = await getDeletedRecordCount(
+    conn, token, companyId, tableCfg, previousTs, confirmedIso
+  );
 
-  // Nothing changed — skip without writing any timestamp or file.
-  if (noOfRecords === 0) {
+  let deletedCsv = "";
+  if (noOfDeleted > 0) {
+    deletedCsv = await getCsvDeletedRecords(
+      conn, token, companyId, tableCfg, previousTs, confirmedIso
+    );
+  }
+
+  // ── Step 3: Skip if nothing to mirror ────────────────────────────────────────
+  if (noOfRecords === 0 && noOfDeleted === 0) {
     return {
       tableId: tableCfg.tableId,
       tableName: tableCfg.tableName,
@@ -848,32 +885,41 @@ async function runMirror(conn, token, companyId, tableId) {
     };
   }
 
-  const csv = runResult.csv;
-  if (!csv) throw new Error("CSV.Records.Get returned no CSV payload");
+  if (noOfRecords > 0 && !csv)
+    throw new Error("CSV.Records.Get returned no CSV payload");
 
-  // Use the BC queue 'time' as the confirmed integration timestamp; fall back to local clock.
-  const tsDt = runResult.bcTime ? new Date(runResult.bcTime) : endDt;
-  const tsIso = isoNoMs(tsDt);
-
-  // Records exist — now write the timestamp and upload the file.
-  await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableId, tsIso);
+  // ── Step 4: Confirm timestamp and upload ─────────────────────────────────────
+  await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableId, confirmedIso);
 
   try {
-    const yyyy = format(tsDt, "yyyy");
-    const mm = format(tsDt, "MM");
-    const dd = format(tsDt, "dd");
-    const stamp = formatMirrorFileStamp(tsDt);
-    const csvPath = pathJoin("Tables", washName(tableCfg.tableName), yyyy, mm, dd, `${stamp}.csv`);
+    const yyyy = format(confirmedDt, "yyyy");
+    const mm   = format(confirmedDt, "MM");
+    const dd   = format(confirmedDt, "dd");
+    const stamp = formatMirrorFileStamp(confirmedDt);
+    const safeTableName = washName(tableCfg.tableName);
 
-    await uploadTextToMirror(connection, csvPath, csv);
+    let csvPath = null;
+    let deletedFilePath = null;
+
+    if (noOfRecords > 0) {
+      csvPath = pathJoin("Tables", safeTableName, yyyy, mm, dd, `${stamp}.csv`);
+      await uploadTextToMirror(connection, csvPath, csv);
+    }
+
+    if (noOfDeleted > 0) {
+      deletedFilePath = pathJoin("Tables", safeTableName, yyyy, mm, dd, `${stamp}_deleted.csv`);
+      await uploadTextToMirror(connection, deletedFilePath, deletedCsv);
+    }
 
     return {
       tableId: tableCfg.tableId,
       tableName: tableCfg.tableName,
       skipped: false,
       mirroredRecords: noOfRecords,
-      endDateTime: tsIso,
+      deletedRecords: noOfDeleted,
+      endDateTime: confirmedIso,
       filePath: csvPath,
+      deletedFilePath,
     };
   } catch (error) {
     await reverseIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
