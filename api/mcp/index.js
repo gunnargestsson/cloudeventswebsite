@@ -44,6 +44,8 @@
  *   release_purchase_order      — Purchase.Order.Release — release a purchase order
  *   reopen_purchase_order       — Purchase.Order.Reopen — reopen a released purchase order
  *   post_purchase_order         — Purchase.Order.Post — post a purchase order, returns posted invoice no.
+ *   check_general_journal       — Finance.GeneralJournal.Check — validate a general journal batch without posting
+ *   post_general_journal        — Finance.GeneralJournal.Post — post a general journal batch and return G/L register details
  *   call_message_type  — any Cloud Event type — generic caller: send any message type with subject + data; use get_message_type_help first to understand the schema
  *   get_integration_timestamp   — Cloud Events Integration — latest non-reversed DateTime for source+tableId
  *   set_integration_timestamp   — Cloud Events Integration — insert a DateTime entry for source+tableId
@@ -1492,6 +1494,40 @@ async function toolPostPurchaseOrder({ orderNo, companyId, tenantId, clientId, c
     type:        "Purchase.Order.Post",
     source:      "BC Metadata MCP v1.0",
     subject:     String(orderNo),
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolCheckGeneralJournal({ subject, templateName, batchName, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  const resolvedSubject = subject || (templateName && batchName ? `${templateName}|${batchName}` : null);
+  if (!resolvedSubject) throw new Error("Provide 'subject' (e.g. 'GENERAL|DEFAULT') or both 'templateName' and 'batchName'");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Finance.GeneralJournal.Check",
+    source:      "BC Metadata MCP v1.0",
+    subject:     resolvedSubject,
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolPostGeneralJournal({ subject, templateName, batchName, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  const resolvedSubject = subject || (templateName && batchName ? `${templateName}|${batchName}` : null);
+  if (!resolvedSubject) throw new Error("Provide 'subject' (e.g. 'GENERAL|BATCH001') or both 'templateName' and 'batchName'");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Finance.GeneralJournal.Post",
+    source:      "BC Metadata MCP v1.0",
+    subject:     resolvedSubject,
   });
 
   return { company: company.name, ...result };
@@ -3199,6 +3235,30 @@ const TOOLS = [
     },
   },
   {
+    name:        "check_general_journal",
+    description: "Validates a general journal batch in Business Central without posting (Finance.GeneralJournal.Check). Returns a validationResult ('Ready', 'ReadyWithWarnings', or 'NotReady') along with full error and warning details. Always run this before post_general_journal.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        subject:      { type: "string", description: "Journal batch identifier as 'TEMPLATE|BATCH' (pipe-separated), e.g. 'GENERAL|DEFAULT'. Can also be a SystemId GUID. If omitted, supply templateName and batchName separately." },
+        templateName: { type: "string", description: "Journal template name (e.g. 'GENERAL'). Used together with batchName when subject is not provided." },
+        batchName:    { type: "string", description: "Journal batch name (e.g. 'DEFAULT'). Used together with templateName when subject is not provided." },
+      },
+    },
+  },
+  {
+    name:        "post_general_journal",
+    description: "Posts a general journal batch in Business Central (Finance.GeneralJournal.Post). All journal lines are cleared from the batch after successful posting. Returns G/L register details including entry number ranges for the audit trail. Always validate with check_general_journal first.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        subject:      { type: "string", description: "Journal batch identifier as 'TEMPLATE|BATCH' (pipe-separated), e.g. 'GENERAL|BATCH001'. Can also be a SystemId GUID. If omitted, supply templateName and batchName separately." },
+        templateName: { type: "string", description: "Journal template name (e.g. 'GENERAL'). Used together with batchName when subject is not provided." },
+        batchName:    { type: "string", description: "Journal batch name (e.g. 'BATCH001'). Used together with templateName when subject is not provided." },
+      },
+    },
+  },
+  {
     name:        "prepare_for_pull_request",
     description: "Prepares a Business Central AL extension project for a pull request. Reads app.json, saves or verifies the app ID range in Cloud Events Storage, checks for range conflicts with other registered apps, validates the test app ID range follows the +30000 convention, reads skill files from both project-local (.claude/skills) and global skills directories, reads copilot-instructions.md and CLAUDE.md from project .github/ and .claude/ folders, performs static AL code analysis (WITH statements, CalcFields in loops, Count() vs IsEmpty(), file naming, object name length) against loaded rules, and validates documentation completeness in repository root (README.md with required sections, CHANGELOG.md following Keep a Changelog format, help/ folder, permission sets). Returns a full PR readiness report with required actions. Does NOT perform git operations — commit and push are the developer's responsibility.",
     inputSchema: {
@@ -3434,6 +3494,8 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "release_purchase_order":      content = await toolReleasePurchaseOrder(args);       break;
           case "reopen_purchase_order":       content = await toolReopenPurchaseOrder(args);        break;
           case "post_purchase_order":         content = await toolPostPurchaseOrder(args);          break;
+          case "check_general_journal":        content = await toolCheckGeneralJournal(args);       break;
+          case "post_general_journal":         content = await toolPostGeneralJournal(args);        break;
           case "get_records":           content = await toolGetRecords(args);              break;
           case "set_records":           content = await toolSetRecords(args);              break;
           case "search_customers":   content = await toolSearchCustomers(args);   break;
