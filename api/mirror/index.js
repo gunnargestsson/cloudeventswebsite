@@ -236,6 +236,53 @@ async function bcTask(conn, token, companyId, type, subject, data, asText = fals
   return result;
 }
 
+async function bcQueue(conn, token, companyId, type, subject, data) {
+  const { tenantId, environment } = conn;
+  const queueId = crypto.randomUUID();
+  const envelope = { specversion: "1.0", id: queueId, type, source: SOURCE };
+  if (subject !== undefined && subject !== null) envelope.subject = String(subject);
+  if (data !== undefined && data !== null) envelope.data = JSON.stringify(data);
+
+  const queuePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues`;
+  await httpsJson(BC_HOST, queuePath, "POST", { Authorization: `Bearer ${token}` }, envelope);
+
+  // Poll for status until completed
+  const queueRecordPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})`;
+  const maxAttempts = 120; // 60 minutes max with 30-second intervals
+  const pollIntervalMs = 30000;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+
+    const queueRecord = await httpsJson(BC_HOST, queueRecordPath, "GET", { Authorization: `Bearer ${token}` }, null);
+
+    if (queueRecord.status === "Error") {
+      throw new Error(queueRecord.error || "BC queue task failed");
+    }
+
+    if (queueRecord.status === "Completed") {
+      // Extract the data URL and fetch the CSV
+      const dataUrl = queueRecord.data;
+      if (!dataUrl || !String(dataUrl).startsWith("https://")) {
+        throw new Error("Queue completed but no valid data URL returned");
+      }
+
+      const url = new URL(dataUrl);
+      const csvData = await httpsText(url.hostname, url.pathname + url.search, { Authorization: `Bearer ${token}` });
+
+      // Return both the CSV data and the BC timestamp from the queue record
+      return {
+        data: csvData,
+        time: queueRecord.time || null,
+      };
+    }
+
+    // Status is "Pending" or "Processing", continue polling
+  }
+
+  throw new Error(`Queue task timed out after ${maxAttempts} attempts`);
+}
+
 async function dataRecordsGet(conn, token, companyId, payload) {
   return bcTask(conn, token, companyId, "Data.Records.Get", null, payload);
 }
@@ -800,7 +847,7 @@ async function getCsvDeletedRecords(conn, token, companyId, tableCfg, startIso, 
   if (startIso) payload.fromDate = startIso;
   if (lcid !== undefined && lcid !== 1033) payload.lcid = Number(lcid);
 
-  const result = await bcTask(conn, token, companyId, "CSV.DeletedRecords.Get", null, payload, true);
+  const result = await bcQueue(conn, token, companyId, "CSV.DeletedRecords.Get", null, payload);
   return extractCsvPayload(result);
 }
 
@@ -862,7 +909,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
     };
     if (lcid !== undefined && lcid !== 1033) csvPayload.lcid = Number(lcid);
 
-    const csvResult = await bcTask(conn, token, companyId, "CSV.Records.Get", null, csvPayload, true);
+    const csvResult = await bcQueue(conn, token, companyId, "CSV.Records.Get", null, csvPayload);
 
     csv = extractCsvPayload(csvResult);
     if (csvResult.time) {
