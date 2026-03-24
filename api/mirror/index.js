@@ -251,7 +251,8 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
   await httpsJson(BC_HOST, queuePath, "POST", { Authorization: `Bearer ${token}` }, envelope);
   console.log(`[bcQueue] Queue request posted successfully`);
 
-  // Poll for status until completed
+  // Poll for status using Microsoft.NAV.GetStatus
+  const getStatusPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})/Microsoft.NAV.GetStatus`;
   const queueRecordPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})`;
   const maxAttempts = 120; // 60 minutes max with 30-second intervals
   const pollIntervalMs = 30000;
@@ -260,24 +261,34 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
 
     console.log(`[bcQueue] Poll attempt ${attempt + 1}/${maxAttempts} for queue ${queueId}`);
-    const queueRecord = await httpsJson(BC_HOST, queueRecordPath, "GET", { Authorization: `Bearer ${token}` }, null);
-    console.log(`[bcQueue] Poll result - Status: ${queueRecord.status}, Time: ${queueRecord.time || 'null'}`);
+    
+    // Call GetStatus action to check if task is complete
+    const statusResult = await httpsJson(BC_HOST, getStatusPath, "POST", { Authorization: `Bearer ${token}` }, null);
+    const statusValue = statusResult?.value;
+    console.log(`[bcQueue] GetStatus returned: ${statusValue}`);
 
-    if (queueRecord.status === "Error") {
-      const errorMsg = queueRecord.error || "BC queue task failed";
-      console.error(`[bcQueue] Queue failed with error: ${errorMsg}`);
-      throw new Error(errorMsg);
+    if (statusValue === "Deleted") {
+      console.error(`[bcQueue] Queue entry was deleted`);
+      throw new Error("Queue entry deleted");
     }
 
-    if (queueRecord.status === "Completed") {
-      // Extract the data URL and fetch the CSV
+    if (statusValue === "None") {
+      console.error(`[bcQueue] Queue entry not found`);
+      throw new Error("Queue entry not found");
+    }
+
+    if (statusValue === "Updated") {
+      // Queue task is complete - now GET the queue record to retrieve timestamp and data URL
+      console.log(`[bcQueue] Queue completed, retrieving queue record`);
+      const queueRecord = await httpsJson(BC_HOST, queueRecordPath, "GET", { Authorization: `Bearer ${token}` }, null);
+      
       const dataUrl = queueRecord.data;
       if (!dataUrl || !String(dataUrl).startsWith("https://")) {
         console.error(`[bcQueue] Queue completed but no valid data URL: ${dataUrl}`);
         throw new Error("Queue completed but no valid data URL returned");
       }
 
-      console.log(`[bcQueue] Queue completed, fetching CSV from URL: ${dataUrl}`);
+      console.log(`[bcQueue] Fetching CSV from URL: ${dataUrl}`);
       const url = new URL(dataUrl);
       const csvData = await httpsText(url.hostname, url.pathname + url.search, { Authorization: `Bearer ${token}` });
       
@@ -292,8 +303,8 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
       };
     }
 
-    // Status is "Pending" or "Processing", continue polling
-    console.log(`[bcQueue] Status is ${queueRecord.status}, waiting ${pollIntervalMs}ms before next poll`);
+    // Status is "Created" (still running), continue polling
+    console.log(`[bcQueue] Status is ${statusValue} (still running), waiting ${pollIntervalMs}ms before next poll`);
   }
 
   console.error(`[bcQueue] Queue task timed out after ${maxAttempts} attempts (${maxAttempts * pollIntervalMs / 1000 / 60} minutes)`);
