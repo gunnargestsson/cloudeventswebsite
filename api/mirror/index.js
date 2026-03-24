@@ -942,13 +942,9 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
   if (!tableCfg.active) throw new Error(`Table ${tableCfg.tableName} is inactive`);
 
   const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
-  // Add 1 second to avoid re-exporting the last record from the previous batch
-  const adjustedStartTs = previousTs 
-    ? isoNoMs(new Date(new Date(previousTs).getTime() + 1000))
-    : previousTs;
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
-  const runTableView = buildRunTableView(tableCfg, adjustedStartTs, endIso);
+  const runTableView = buildRunTableView(tableCfg, previousTs, endIso);
 
   // ── Step 1: Count and fetch modified records ─────────────────────────────────
   let noOfRecords = 0;
@@ -990,13 +986,13 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
 
   // ── Step 2: Count deleted records (Deleted.RecordIds.Get) then fetch CSV ─────
   const noOfDeleted = await getDeletedRecordCount(
-    conn, token, companyId, tableCfg, adjustedStartTs, confirmedIso
+    conn, token, companyId, tableCfg, previousTs, confirmedIso
   );
 
   let deletedCsv = "";
   if (noOfDeleted > 0) {
     deletedCsv = await getCsvDeletedRecords(
-      conn, token, companyId, tableCfg, adjustedStartTs, confirmedIso, lcid
+      conn, token, companyId, tableCfg, previousTs, confirmedIso, lcid
     );
   }
 
