@@ -865,6 +865,9 @@ function normalizeTableEntry(table) {
 async function api(action, payload = {}) {
   const headers = bcSettingsHeaders();
   if (!headers) throw new Error('Missing Business Central configuration. Reconnect on the start page.');
+  
+  console.log(`[API] Calling action: ${action}`, payload);
+  
   const response = await fetch('/api/mirror', {
     method: 'POST',
     headers: {
@@ -874,22 +877,39 @@ async function api(action, payload = {}) {
     body: JSON.stringify({ action, companyId: state.companyId, ...payload })
   });
   
+  console.log(`[API] Response status: ${response.status} ${response.statusText}`);
+  console.log(`[API] Content-Type: ${response.headers.get('content-type')}`);
+  
   const contentType = response.headers.get('content-type');
   let data;
+  let rawText;
   
   try {
+    rawText = await response.text();
+    console.log(`[API] Raw response body (${rawText.length} bytes):`, rawText.substring(0, 500));
+    
     if (contentType && contentType.includes('application/json')) {
-      data = await response.json();
+      data = JSON.parse(rawText);
     } else {
-      const text = await response.text();
-      data = { error: text };
+      console.warn(`[API] Non-JSON response received`);
+      data = { error: rawText };
     }
   } catch (e) {
-    const text = await response.text();
-    data = { error: text || 'Failed to parse response' };
+    console.error(`[API] Failed to parse response:`, e);
+    console.error(`[API] Raw text was:`, rawText);
+    data = { 
+      error: `Failed to parse server response: ${e.message}. Raw response: ${rawText?.substring(0, 200)}` 
+    };
   }
   
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  if (!response.ok) {
+    const errorMsg = data.error || `Request failed (${response.status} ${response.statusText})`;
+    console.error(`[API] Request failed:`, errorMsg);
+    console.error(`[API] Full response data:`, data);
+    throw new Error(errorMsg);
+  }
+  
+  console.log(`[API] Success:`, data);
   return data;
 }
 
@@ -1303,16 +1323,26 @@ function mergeLastRunAt(newTables, prevTables) {
 
 async function saveTable() {
   const config = collectTableConfig();
+  console.log('[saveTable] Collected config:', config);
+  
   const tables = [...state.tables];
   const existingIndex = tables.findIndex((row) => Number(row.tableId) === config.tableId);
+  
   if (existingIndex >= 0 && tables[existingIndex].active) {
     throw new Error(t('Config Locked While Active'));
   }
+  
   if (existingIndex >= 0) {
+    console.log('[saveTable] Updating existing table at index', existingIndex);
     tables.splice(existingIndex, 1, { ...tables[existingIndex], ...config, active: tables[existingIndex].active });
   } else {
+    console.log('[saveTable] Adding new table');
     tables.push(config);
   }
+  
+  console.log('[saveTable] Final tables array:', tables);
+  addLog(`${t('Saving table')}: ${config.tableName}`, 'info');
+  
   const result = await api('saveTableConfigs', { tables });
   state.tables = mergeLastRunAt(result.mirrors || tables, state.tables);
   setBanner('table-banner', t('Table configuration saved'), 'ok');
