@@ -873,7 +873,22 @@ async function api(action, payload = {}) {
     },
     body: JSON.stringify({ action, companyId: state.companyId, ...payload })
   });
-  const data = await response.json();
+  
+  const contentType = response.headers.get('content-type');
+  let data;
+  
+  try {
+    if (contentType && contentType.includes('application/json')) {
+      data = await response.json();
+    } else {
+      const text = await response.text();
+      data = { error: text };
+    }
+  } catch (e) {
+    const text = await response.text();
+    data = { error: text || 'Failed to parse response' };
+  }
+  
   if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
   return data;
 }
