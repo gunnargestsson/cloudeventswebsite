@@ -201,6 +201,7 @@ Washing rule: retain only `[a-zA-Z0-9%]`, strip everything else. This is the sam
 | `SystemCreatedBy` | |
 | `SystemModifiedAt` | |
 | `SystemModifiedBy` | |
+| `ClosingDate` | **Table 17 (G/L Entry) only** — inserted before `$Company` |
 
 > Note: system field names use plain camelCase/PascalCase — **no** `-{fieldNo}` suffix.
 
@@ -208,6 +209,12 @@ Washing rule: retain only `[a-zA-Z0-9%]`, strip everything else. This is the sam
 
 Appended as the very last column only when `dataPerCompany: true`. The literal string
 `"$Company"` — no washing applied.
+
+### Table-specific extra columns
+
+| Table ID | Table Name | Extra column | Position |
+|---|---|---|---|
+| 17 | G/L Entry | `ClosingDate` (Boolean, IsNullable: true) | Immediately before `$Company` (or last, if not per-company) |
 
 ---
 
@@ -222,6 +229,7 @@ Appended as the very last column only when `dataPerCompany: true`. The literal s
 | `SystemCreatedBy` | `true` |
 | `SystemModifiedAt` | `true` |
 | `SystemModifiedBy` | `true` |
+| `ClosingDate` (table 17 only) | `true` |
 | `$Company` | omitted (always required — no `IsNullable` property) |
 
 ---
@@ -335,6 +343,10 @@ function buildDdl(tableCfg, fields) {
     { Name: "SystemModifiedAt", DataType: "DateTime", IsNullable: true },
     { Name: "SystemModifiedBy", DataType: "String",   IsNullable: true },
   ];
+
+  if (Number(tableCfg.tableId) === 17) {
+    systemColumns.push({ Name: "ClosingDate", DataType: "Boolean", IsNullable: true });
+  }
 
   if (tableCfg.dataPerCompany) {
     systemColumns.push({ Name: "$Company", DataType: "String" });

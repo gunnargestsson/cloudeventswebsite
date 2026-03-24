@@ -718,6 +718,10 @@ function buildDdl(tableCfg, fields) {
     { Name: "SystemModifiedBy", DataType: "String",   IsNullable: true },
   ];
 
+  if (Number(tableCfg.tableId) === 17) {
+    systemColumns.push({ Name: "ClosingDate", DataType: "Boolean", IsNullable: true });
+  }
+
   if (tableCfg.dataPerCompany) {
     systemColumns.push({ Name: "$Company", DataType: "String" });
   }
