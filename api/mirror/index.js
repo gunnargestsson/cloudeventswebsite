@@ -766,7 +766,7 @@ async function uploadDdl(conn, token, companyId, connection, tableCfg) {
   const resolvedTableName = resolveTableName(tableCfg, fields);
   const safeTableName = washName(resolvedTableName);
   const ddl = buildDdl({ ...tableCfg, tableName: resolvedTableName }, fields);
-  const ddlPath = pathJoin("Tables", safeTableName, "_metadata.json");
+  const ddlPath = pathJoin(safeTableName, "_metadata.json");
   await uploadTextToMirror(connection, ddlPath, JSON.stringify(ddl, null, 2));
 }
 
@@ -906,12 +906,12 @@ async function runMirror(conn, token, companyId, tableId) {
     let deletedFilePath = null;
 
     if (noOfRecords > 0) {
-      csvPath = pathJoin("Tables", safeTableName, yyyy, mm, dd, `${stamp}.csv`);
+      csvPath = pathJoin(safeTableName, yyyy, mm, dd, `${stamp}.csv`);
       await uploadTextToMirror(connection, csvPath, csv);
     }
 
     if (noOfDeleted > 0) {
-      deletedFilePath = pathJoin("Tables", safeTableName, yyyy, mm, dd, `${stamp}_deleted.csv`);
+      deletedFilePath = pathJoin(safeTableName, yyyy, mm, dd, `${stamp}_deleted.csv`);
       await uploadTextToMirror(connection, deletedFilePath, deletedCsv);
     }
 
