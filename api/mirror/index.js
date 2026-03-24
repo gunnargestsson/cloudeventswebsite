@@ -896,9 +896,6 @@ async function runMirror(conn, token, companyId, tableId) {
   await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableId, confirmedIso);
 
   try {
-    const yyyy = format(confirmedDt, "yyyy");
-    const mm   = format(confirmedDt, "MM");
-    const dd   = format(confirmedDt, "dd");
     const stamp = formatMirrorFileStamp(confirmedDt);
     const safeTableName = washName(tableCfg.tableName);
 
@@ -906,12 +903,12 @@ async function runMirror(conn, token, companyId, tableId) {
     let deletedFilePath = null;
 
     if (noOfRecords > 0) {
-      csvPath = pathJoin(safeTableName, yyyy, mm, dd, `${stamp}.csv`);
+      csvPath = pathJoin(safeTableName, `${stamp}.csv`);
       await uploadTextToMirror(connection, csvPath, csv);
     }
 
     if (noOfDeleted > 0) {
-      deletedFilePath = pathJoin(safeTableName, yyyy, mm, dd, `${stamp}_deleted.csv`);
+      deletedFilePath = pathJoin(safeTableName, `${stamp}_deleted.csv`);
       await uploadTextToMirror(connection, deletedFilePath, deletedCsv);
     }
 
