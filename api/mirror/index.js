@@ -180,6 +180,46 @@ function httpsJson(hostname, path, method, headers, bodyObj) {
   });
 }
 
+function httpsJsonWithStatus(hostname, path, method, headers, bodyObj) {
+  return new Promise((resolve, reject) => {
+    const body = bodyObj == null ? null : Buffer.from(JSON.stringify(bodyObj), "utf8");
+    const req = https.request(
+      {
+        hostname,
+        path,
+        method,
+        headers: {
+          Accept: "application/json",
+          ...headers,
+          ...(body
+            ? {
+                "Content-Type": "application/json",
+                "Content-Length": body.length,
+              }
+            : {}),
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          const raw = Buffer.concat(chunks).toString("utf8");
+          if (res.statusCode >= 400) {
+            reject(new Error(`HTTP ${res.statusCode}: ${raw.slice(0, 400)}`));
+            return;
+          }
+          // Return both status code and parsed body (or null for 204 No Content)
+          const data = raw ? ((() => { try { return JSON.parse(raw); } catch { return null; } })()) : null;
+          resolve({ statusCode: res.statusCode, data });
+        });
+      }
+    );
+    req.on("error", reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 function httpsText(hostname, path, headers) {
   return new Promise((resolve, reject) => {
     const req = https.request(
@@ -262,25 +302,22 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
 
     console.log(`[bcQueue] Poll attempt ${attempt + 1}/${maxAttempts} for queue ${queueId}`);
     
-    // Call GetStatus action to check if task is complete
-    const statusResult = await httpsJson(BC_HOST, getStatusPath, "POST", { Authorization: `Bearer ${token}` }, null);
-    console.log(`[bcQueue] GetStatus full response:`, JSON.stringify(statusResult));
-    const statusValue = statusResult?.value;
-    console.log(`[bcQueue] GetStatus value extracted: ${statusValue}`);
+    // Call GetStatus action - returns HTTP status code indicating queue state
+    const statusResponse = await httpsJsonWithStatus(BC_HOST, getStatusPath, "POST", { Authorization: `Bearer ${token}` }, null);
+    console.log(`[bcQueue] GetStatus HTTP ${statusResponse.statusCode}`);
 
-    if (statusValue === "Deleted") {
-      console.error(`[bcQueue] Queue entry was deleted`);
-      throw new Error("Queue entry deleted");
+    // BC returns status as HTTP status codes:
+    // 201 Created = still running
+    // 200 OK = completed (Updated)
+    // 204 No Content = deleted or not found
+    if (statusResponse.statusCode === 204) {
+      console.error(`[bcQueue] Queue entry deleted or not found (HTTP 204)`);
+      throw new Error("Queue entry deleted or not found");
     }
 
-    if (statusValue === "None") {
-      console.error(`[bcQueue] Queue entry not found`);
-      throw new Error("Queue entry not found");
-    }
-
-    if (statusValue === "Updated") {
+    if (statusResponse.statusCode === 200) {
       // Queue task is complete - now GET the queue record to retrieve timestamp and data URL
-      console.log(`[bcQueue] Queue completed, retrieving queue record`);
+      console.log(`[bcQueue] Queue completed (HTTP 200), retrieving queue record`);
       const queueRecord = await httpsJson(BC_HOST, queueRecordPath, "GET", { Authorization: `Bearer ${token}` }, null);
       
       const dataUrl = queueRecord.data;
@@ -304,8 +341,8 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
       };
     }
 
-    // Status is "Created" (still running), continue polling
-    console.log(`[bcQueue] Status is ${statusValue} (still running), waiting ${pollIntervalMs}ms before next poll`);
+    // Status 201 Created = still running, continue polling
+    console.log(`[bcQueue] Queue still running (HTTP ${statusResponse.statusCode}), waiting ${pollIntervalMs}ms before next poll`);
   }
 
   console.error(`[bcQueue] Queue task timed out after ${maxAttempts} attempts (${maxAttempts * pollIntervalMs / 1000 / 60} minutes)`);
