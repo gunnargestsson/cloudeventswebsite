@@ -108,6 +108,27 @@ function bcSettingsHeaders() {
   };
 }
 
+/**
+ * Returns BC connection parameters as an object suitable for passing as MCP tool arguments.
+ * In server mode: returns only companyId (credentials come from server env vars).
+ * In custom mode: returns tenantId, clientId, clientSecret, environment, companyId.
+ */
+function bcSettingsAsToolArgs() {
+  const s = bcSettingsLoad();
+  const mode = localStorage.getItem('bc_portal_mode') || 'server';
+  if (mode === 'server') {
+    return s.companyId ? { companyId: s.companyId } : {};
+  }
+  if (!s.tenant || !s.env || !s.clientId || !s.clientSecret || !s.companyId) return {};
+  return {
+    tenantId:     s.tenant,
+    clientId:     s.clientId,
+    clientSecret: s.clientSecret,
+    environment:  s.env,
+    companyId:    s.companyId,
+  };
+}
+
 // ── Translation ───────────────────────────────────────────────────────────────
 let _uiTranslations = {};
 

@@ -3733,7 +3733,7 @@ module.exports = async function (context, req) {
       headers: {
         "Access-Control-Allow-Origin":  "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, x-encrypted-conn, x-company-id, x-github-token, x-standards-repo, x-claude-dir",
+        "Access-Control-Allow-Headers": "Content-Type, x-encrypted-conn, x-company-id, x-bc-tenant, x-bc-client-id, x-bc-client-secret, x-bc-environment, x-bc-company, x-github-token, x-standards-repo, x-claude-dir",
       },
     };
     return;

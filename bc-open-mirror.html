@@ -914,17 +914,20 @@ async function api(action, payload = {}) {
 }
 
 async function callMcpTool(name, args) {
+  // Merge BC connection parameters into tool arguments
+  const connParams = bcSettingsAsToolArgs();
+  const mergedArgs = { ...connParams, ...args };
+  
   const response = await fetch('/api/mcp', {
     method: 'POST',
     headers: {
-      ...(bcSettingsHeaders() || {}),
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
       jsonrpc: '2.0',
       id: 1,
       method: 'tools/call',
-      params: { name, arguments: args }
+      params: { name, arguments: mergedArgs }
     })
   });
   const rpc = await response.json();
