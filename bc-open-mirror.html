@@ -737,6 +737,9 @@ const UI_STRINGS = [
   'Table configuration saved',
   'Table activated',
   'Table deactivated',
+  'Starting mirror run for',
+  'Requesting CSV data from Business Central...',
+  'More records available, will run again in 5 seconds',
   'Mirror run completed',
   'Mirror run skipped',
   'Mirror run failed',
@@ -1483,7 +1486,14 @@ window.toggleActivation = async function toggleActivation(tableId, currentlyActi
 
 window.runTableNow = async function runTableNow(tableId) {
   try {
+    const table = state.tables.find((t) => Number(t.tableId) === Number(tableId));
+    const tableName = table ? table.tableName : `Table ${tableId}`;
+    
+    addLog(`${t('Starting mirror run for')}: ${tableName}`, 'info');
+    addLog(`${t('Requesting CSV data from Business Central...')}`, 'info');
+    
     const result = await api('runNow', { tableId });
+    
     if (result.endDateTime) {
       const idx = state.tables.findIndex((row) => Number(row.tableId) === Number(tableId));
       if (idx >= 0) state.tables[idx].lastRunAt = result.endDateTime;
@@ -1491,9 +1501,26 @@ window.runTableNow = async function runTableNow(tableId) {
     }
     renderTables();
     refreshMetrics();
-    addLog(result.skipped ? `${t('Mirror run skipped')}: ${result.tableName}` : `${t('Mirror run completed')}: ${result.tableName}`, result.skipped ? 'warn' : 'ok');
+    
+    if (result.skipped) {
+      addLog(`${t('Mirror run skipped')}: ${result.tableName} - ${result.reason || 'No records to mirror'}`, 'warn');
+    } else {
+      let details = `${result.tableName}`;
+      if (result.mirroredRecords !== undefined) details += ` - ${result.mirroredRecords} records`;
+      if (result.deletedRecords) details += `, ${result.deletedRecords} deleted`;
+      if (result.filePath) details += ` → ${result.filePath}`;
+      addLog(`${t('Mirror run completed')}: ${details}`, 'ok');
+      
+      if (result.hasMoreRecords) {
+        addLog(`${t('More records available, will run again in 5 seconds')}`, 'info');
+      }
+    }
+    
     return result;
   } catch (error) {
+    const table = state.tables.find((t) => Number(t.tableId) === Number(tableId));
+    const tableName = table ? table.tableName : `Table ${tableId}`;
+    addLog(`${t('Mirror run failed')}: ${tableName} - ${error.message}`, 'error');
     handleUiError(error);
     throw error;
   }
