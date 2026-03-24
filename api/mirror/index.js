@@ -264,8 +264,9 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
     
     // Call GetStatus action to check if task is complete
     const statusResult = await httpsJson(BC_HOST, getStatusPath, "POST", { Authorization: `Bearer ${token}` }, null);
+    console.log(`[bcQueue] GetStatus full response:`, JSON.stringify(statusResult));
     const statusValue = statusResult?.value;
-    console.log(`[bcQueue] GetStatus returned: ${statusValue}`);
+    console.log(`[bcQueue] GetStatus value extracted: ${statusValue}`);
 
     if (statusValue === "Deleted") {
       console.error(`[bcQueue] Queue entry was deleted`);
