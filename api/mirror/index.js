@@ -244,7 +244,12 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
   if (data !== undefined && data !== null) envelope.data = JSON.stringify(data);
 
   const queuePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues`;
+  
+  console.log(`[bcQueue] Requesting CSV file - Type: ${type}, Queue ID: ${queueId}`);
+  console.log(`[bcQueue] Payload:`, JSON.stringify(data, null, 2));
+  
   await httpsJson(BC_HOST, queuePath, "POST", { Authorization: `Bearer ${token}` }, envelope);
+  console.log(`[bcQueue] Queue request posted successfully`);
 
   // Poll for status until completed
   const queueRecordPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})`;
@@ -254,21 +259,31 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
 
+    console.log(`[bcQueue] Poll attempt ${attempt + 1}/${maxAttempts} for queue ${queueId}`);
     const queueRecord = await httpsJson(BC_HOST, queueRecordPath, "GET", { Authorization: `Bearer ${token}` }, null);
+    console.log(`[bcQueue] Poll result - Status: ${queueRecord.status}, Time: ${queueRecord.time || 'null'}`);
 
     if (queueRecord.status === "Error") {
-      throw new Error(queueRecord.error || "BC queue task failed");
+      const errorMsg = queueRecord.error || "BC queue task failed";
+      console.error(`[bcQueue] Queue failed with error: ${errorMsg}`);
+      throw new Error(errorMsg);
     }
 
     if (queueRecord.status === "Completed") {
       // Extract the data URL and fetch the CSV
       const dataUrl = queueRecord.data;
       if (!dataUrl || !String(dataUrl).startsWith("https://")) {
+        console.error(`[bcQueue] Queue completed but no valid data URL: ${dataUrl}`);
         throw new Error("Queue completed but no valid data URL returned");
       }
 
+      console.log(`[bcQueue] Queue completed, fetching CSV from URL: ${dataUrl}`);
       const url = new URL(dataUrl);
       const csvData = await httpsText(url.hostname, url.pathname + url.search, { Authorization: `Bearer ${token}` });
+      
+      const csvSize = csvData ? csvData.length : 0;
+      const csvLines = csvData ? csvData.split('\n').length : 0;
+      console.log(`[bcQueue] CSV received - Size: ${csvSize} bytes, Lines: ${csvLines}, BC Time: ${queueRecord.time || 'null'}`);
 
       // Return both the CSV data and the BC timestamp from the queue record
       return {
@@ -278,8 +293,10 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
     }
 
     // Status is "Pending" or "Processing", continue polling
+    console.log(`[bcQueue] Status is ${queueRecord.status}, waiting ${pollIntervalMs}ms before next poll`);
   }
 
+  console.error(`[bcQueue] Queue task timed out after ${maxAttempts} attempts (${maxAttempts * pollIntervalMs / 1000 / 60} minutes)`);
   throw new Error(`Queue task timed out after ${maxAttempts} attempts`);
 }
 
