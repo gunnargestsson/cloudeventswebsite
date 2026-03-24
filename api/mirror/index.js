@@ -26,6 +26,7 @@ module.exports = async function (context, req) {
   try {
     const action = req.body?.action;
     const companyId = req.body?.companyId || req.headers?.["x-bc-company"] || req.headers?.["x-company-id"];
+    const lcid = Number(req.body?.lcid) || 1033;
 
     if (!companyId) return json(400, { error: "companyId is required" });
     if (!action) return json(400, { error: "action is required" });
@@ -62,10 +63,10 @@ module.exports = async function (context, req) {
         break;
       case "runMirror":
       case "runNow":
-        result = await runMirror(conn, token, companyId, Number(req.body?.tableId));
+        result = await runMirror(conn, token, companyId, Number(req.body?.tableId), lcid);
         break;
       case "runAllActive":
-        result = await runAllActive(conn, token, companyId);
+        result = await runAllActive(conn, token, companyId, lcid);
         break;
       case "upload-ddl":
         result = await uploadDdlOnly(conn, token, companyId, Number(req.body?.tableId));
@@ -787,7 +788,7 @@ async function getDeletedRecordCount(conn, token, companyId, tableCfg, startIso,
   return Number(result.noOfRecords || 0);
 }
 
-async function getCsvDeletedRecords(conn, token, companyId, tableCfg, startIso, endIso) {
+async function getCsvDeletedRecords(conn, token, companyId, tableCfg, startIso, endIso, lcid) {
   const tableSelector = tableCfg.tableName
     ? { tableName: tableCfg.tableName }
     : { tableNumber: tableCfg.tableId };
@@ -797,6 +798,7 @@ async function getCsvDeletedRecords(conn, token, companyId, tableCfg, startIso, 
     toDate: endIso,
   };
   if (startIso) payload.fromDate = startIso;
+  if (lcid !== undefined && lcid !== 1033) payload.lcid = Number(lcid);
 
   const result = await bcTask(conn, token, companyId, "CSV.DeletedRecords.Get", null, payload, true);
   return extractCsvPayload(result);
@@ -812,7 +814,7 @@ function extractCsvPayload(result) {
   return "";
 }
 
-async function runMirror(conn, token, companyId, tableId) {
+async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
   if (!tableId) throw new Error("tableId is required");
 
   const connection = await getMirrorConnection(conn, token, companyId);
@@ -850,14 +852,17 @@ async function runMirror(conn, token, companyId, tableId) {
     noOfRecords = Number(countResult.noOfRecords || 0);
     if (noOfRecords === 0) return;
 
-    const csvResult = await bcTask(conn, token, companyId, "CSV.Records.Get", null, {
+    const csvPayload = {
       ...tableSelector,
       tableView: runTableView,
       fieldNumbers:
         tableCfg.fieldNumbers && tableCfg.fieldNumbers.length
           ? tableCfg.fieldNumbers
           : undefined,
-    }, true);
+    };
+    if (lcid !== undefined && lcid !== 1033) csvPayload.lcid = Number(lcid);
+
+    const csvResult = await bcTask(conn, token, companyId, "CSV.Records.Get", null, csvPayload, true);
 
     csv = extractCsvPayload(csvResult);
     if (csvResult.time) {
@@ -874,7 +879,7 @@ async function runMirror(conn, token, companyId, tableId) {
   let deletedCsv = "";
   if (noOfDeleted > 0) {
     deletedCsv = await getCsvDeletedRecords(
-      conn, token, companyId, tableCfg, previousTs, confirmedIso
+      conn, token, companyId, tableCfg, previousTs, confirmedIso, lcid
     );
   }
 
@@ -951,12 +956,12 @@ async function runMirror(conn, token, companyId, tableId) {
   }
 }
 
-async function runAllActive(conn, token, companyId) {
+async function runAllActive(conn, token, companyId, lcid = 1033) {
   const tables = (await getStoredTables(conn, token, companyId)).map(normalizeTableConfig).filter((t) => t.active);
   const results = [];
   for (const table of tables) {
     try {
-      const run = await runMirror(conn, token, companyId, table.tableId);
+      const run = await runMirror(conn, token, companyId, table.tableId, lcid);
       results.push({ tableId: table.tableId, ok: true, ...run });
     } catch (error) {
       results.push({ tableId: table.tableId, ok: false, error: error.message });

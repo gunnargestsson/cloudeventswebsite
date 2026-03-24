@@ -874,7 +874,7 @@ async function api(action, payload = {}) {
       ...headers,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ action, companyId: state.companyId, ...payload })
+    body: JSON.stringify({ action, companyId: state.companyId, lcid: state.lcid, ...payload })
   });
   
   console.log(`[API] Response status: ${response.status} ${response.statusText}`);
