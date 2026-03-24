@@ -742,6 +742,8 @@ const UI_STRINGS = [
   'Mirror run failed',
   'Scheduler started',
   'Scheduler stopped',
+  'Backlog detected for',
+  'scheduling immediate follow-up',
   'Unsupported field type',
   'Primary key',
   'Loading fields...',
@@ -1442,8 +1444,10 @@ window.runTableNow = async function runTableNow(tableId) {
     renderTables();
     refreshMetrics();
     addLog(result.skipped ? `${t('Mirror run skipped')}: ${result.tableName}` : `${t('Mirror run completed')}: ${result.tableName}`, result.skipped ? 'warn' : 'ok');
+    return result;
   } catch (error) {
     handleUiError(error);
+    throw error;
   }
 };
 
@@ -1522,20 +1526,29 @@ function startSchedulerForTable(table) {
   const delayMs = lastMs ? Math.max(0, lastMs + intervalMs - Date.now()) : 0;
 
   const runAndSchedule = async () => {
+    let result = null;
     try {
-      await window.runTableNow(table.tableId);
+      result = await window.runTableNow(table.tableId);
     } catch (error) {
       addLog(`${t('Mirror run failed')}: ${table.tableName} — ${error.message}`, 'error');
     }
-    // After the first run, set up the recurring interval.
-    const recurringTimer = setInterval(async () => {
-      try {
-        await window.runTableNow(table.tableId);
-      } catch (error) {
-        addLog(`${t('Mirror run failed')}: ${table.tableName} — ${error.message}`, 'error');
-      }
-    }, intervalMs);
-    state.schedulerTimers.set(table.tableId, recurringTimer);
+
+    // Determine next run delay based on whether there are more records
+    let nextDelayMs;
+    if (result && result.hasMoreRecords) {
+      // More records exist - run again in 5 seconds to process backlog
+      nextDelayMs = 5000;
+      addLog(`${t('Backlog detected for')} ${table.tableName}, ${t('scheduling immediate follow-up')}`, 'info');
+    } else {
+      // No more records - schedule next run after full interval from lastRunAt
+      const updatedTable = state.tables.find((t) => Number(t.tableId) === Number(table.tableId));
+      const lastRunMs = updatedTable?.lastRunAt ? new Date(updatedTable.lastRunAt).getTime() : Date.now();
+      nextDelayMs = Math.max(0, lastRunMs + intervalMs - Date.now());
+    }
+
+    // Schedule the next run
+    const nextTimer = setTimeout(runAndSchedule, nextDelayMs);
+    state.schedulerTimers.set(table.tableId, nextTimer);
   };
 
   const initialTimer = setTimeout(runAndSchedule, delayMs);

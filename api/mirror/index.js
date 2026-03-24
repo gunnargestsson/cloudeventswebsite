@@ -915,6 +915,28 @@ async function runMirror(conn, token, companyId, tableId) {
       await uploadTextToMirror(connection, deletedFilePath, deletedCsv);
     }
 
+    // ── Step 5: Check if there are more records to mirror ────────────────────
+    let hasMoreRecords = false;
+    try {
+      const nextEndIso = isoNoMs(new Date());
+      const nextTableView = buildRunTableView(tableCfg, confirmedIso, nextEndIso);
+      await withTableRefFallback(tableCfg, async (tableRef) => {
+        const tableSelector = parseTableRef(tableRef);
+        const nextCountResult = await dataRecordsGet(conn, token, companyId, {
+          ...tableSelector,
+          tableView: nextTableView,
+          skip: 0,
+          take: 1,
+          fieldNumbers: [1],
+        });
+        const nextCount = Number(nextCountResult.noOfRecords || 0);
+        hasMoreRecords = nextCount > 0;
+      });
+    } catch (error) {
+      // If check fails, default to false and continue with normal interval
+      hasMoreRecords = false;
+    }
+
     return {
       tableId: tableCfg.tableId,
       tableName: tableCfg.tableName,
@@ -924,6 +946,7 @@ async function runMirror(conn, token, companyId, tableId) {
       endDateTime: confirmedIso,
       filePath: csvPath,
       deletedFilePath,
+      hasMoreRecords,
     };
   } catch (error) {
     await reverseIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
