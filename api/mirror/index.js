@@ -989,9 +989,11 @@ async function startQueueMirror(conn, token, companyId, tableId, lcid = 1033) {
   const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
 
   // Count records to mirror
+  const endDt = new Date();
+  const endIso = isoNoMs(endDt);
   const countPayload = {
     tableName: tableCfg.tableName,
-    tableView: buildCountTableView(previousTs),
+    tableView: buildCountTableView(tableCfg, previousTs, endIso),
   };
   const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
   const noOfRecords = countResult.noOfRecords || 0;
@@ -1013,7 +1015,7 @@ async function startQueueMirror(conn, token, companyId, tableId, lcid = 1033) {
   
   const csvPayload = {
     tableName: tableCfg.tableName,
-    tableView: buildRunTableView(previousTs),
+    tableView: buildRunTableView(tableCfg, previousTs, endIso),
     fieldNumbers: tableCfg.fieldNumbers && tableCfg.fieldNumbers.length ? tableCfg.fieldNumbers : undefined,
   };
   if (lcid !== undefined && lcid !== 1033) csvPayload.lcid = Number(lcid);
@@ -1121,13 +1123,24 @@ async function fetchQueueData(conn, token, companyId, queueId, tableId, lcid = 1
   }
 
   // Upload to Open Mirror
-  const { filePath, mirroredRecords, deletedRecords } = await uploadCsvToOpenMirror(
-    connection,
-    tableCfg,
-    csv,
-    deletedCsv
-  );
+  const stamp = formatMirrorFileStamp(confirmedDt || new Date());
+  const safeTableName = washName(tableCfg.tableName);
+  let csvPath = null;
+  let deletedFilePath = null;
+  const mirroredRecords = csv ? csv.split('\n').length - 1 : 0; // -1 for header
+  const deletedRecords = noOfDeleted;
 
+  if (csv) {
+    csvPath = pathJoin(safeTableName, `${stamp}.csv`);
+    await uploadTextToMirror(connection, csvPath, csv);
+  }
+
+  if (deletedCsv) {
+    deletedFilePath = pathJoin(safeTableName, `${stamp}_deleted.csv`);
+    await uploadTextToMirror(connection, deletedFilePath, deletedCsv);
+  }
+
+  const filePath = csvPath || deletedFilePath;
   logs.push(`Uploaded to Open Mirror: ${filePath}`);
   logs.push(`${mirroredRecords} records mirrored, ${deletedRecords} deleted`);
 
@@ -1135,9 +1148,10 @@ async function fetchQueueData(conn, token, companyId, queueId, tableId, lcid = 1
   await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableId, confirmedIso || previousTs);
 
   // Check for remaining records
+  const nextEndIso = isoNoMs(new Date());
   const remainingPayload = {
     tableName: tableCfg.tableName,
-    tableView: buildCountTableView(confirmedIso || previousTs),
+    tableView: buildCountTableView(tableCfg, confirmedIso || previousTs, nextEndIso),
   };
   const remainingResult = await dataRecordsGetAsync(conn, token, companyId, remainingPayload);
   const remainingRecords = remainingResult.noOfRecords || 0;
