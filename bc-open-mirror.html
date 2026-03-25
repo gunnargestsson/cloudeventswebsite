@@ -589,6 +589,10 @@
           <label id="label-client-secret" for="mirror-client-secret">Client Secret</label>
           <input id="mirror-client-secret" type="password" placeholder="service-principal-secret" />
         </div>
+        <div class="field-row">
+          <label id="label-max-concurrent" for="mirror-max-concurrent">Max Concurrent Mirrors</label>
+          <input id="mirror-max-concurrent" type="number" min="1" max="20" value="3" />
+        </div>
       </div>
       <div class="actions">
         <button class="btn" id="btn-save-connection">Save Connection</button>
@@ -691,6 +695,7 @@ const UI_STRINGS = [
   'Tenant',
   'Client ID',
   'Client Secret',
+  'Max Concurrent Mirrors',
   'Save Connection',
   'Verify Connection',
   'Table Configuration',
@@ -806,8 +811,11 @@ const state = {
   editingConfigId: null,
   logEntries: [],
   schedulerTimers: new Map(),
+  schedulerAbort: new Map(),   // configId → AbortController — aborts in-flight runTableNow
   schedulerRunning: false,
   lastRunAt: null,
+  maxConcurrentMirrors: 3,     // max simultaneous mirror tasks
+  activeMirrorCount: 0,        // currently running mirror tasks
 };
 
 function t(key) {
@@ -981,6 +989,7 @@ function applyTranslations() {
   document.getElementById('label-tenant').textContent = t('Tenant');
   document.getElementById('label-client-id').textContent = t('Client ID');
   document.getElementById('label-client-secret').textContent = t('Client Secret');
+  document.getElementById('label-max-concurrent').textContent = t('Max Concurrent Mirrors');
   document.getElementById('btn-save-connection').textContent = t('Save Connection');
   document.getElementById('btn-verify-connection').textContent = t('Verify Connection');
   document.getElementById('tables-title').textContent = t('Table Configuration');
@@ -1030,6 +1039,8 @@ function populateConnectionForm() {
   document.getElementById('mirror-tenant').value = conn.tenant || '';
   document.getElementById('mirror-client-id').value = conn.clientId || '';
   document.getElementById('mirror-client-secret').value = conn.clientSecret || '';
+  document.getElementById('mirror-max-concurrent').value = conn.maxConcurrentMirrors || state.maxConcurrentMirrors;
+  state.maxConcurrentMirrors = Number(conn.maxConcurrentMirrors) || state.maxConcurrentMirrors;
   refreshConnectionIndicators();
 }
 
@@ -1553,7 +1564,8 @@ window.toggleActivation = async function toggleActivation(configId, currentlyAct
   }
 };
 
-window.runTableNow = async function runTableNow(configId) {
+window.runTableNow = async function runTableNow(configId, { signal } = {}) {
+  state.activeMirrorCount++;
   try {
     const table = state.tables.find((t) => t.configId === configId);
     const tableName = table ? table.tableName : `Config ${configId}`;
@@ -1574,6 +1586,12 @@ window.runTableNow = async function runTableNow(configId) {
       return startResult;
     }
     
+    // Abort check — scheduler may have stopped while we were starting the queue
+    if (signal && signal.aborted) {
+      addLog(`Mirror run aborted for: ${tableName}`, 'warn');
+      return null;
+    }
+    
     // Step 2: Poll for completion (frontend polling - no timeout limit)
     const queueId = startResult.queueId;
     const maxAttempts = 360; // 1 hour max (360 × 10 sec)
@@ -1584,7 +1602,22 @@ window.runTableNow = async function runTableNow(configId) {
     addLog(`${t('Polling for completion every 10 seconds')}...`, 'info');
     
     while (attempt < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+      // Check if we were told to stop (scheduler stopped, abort signal fired)
+      if (signal && signal.aborted) {
+        addLog(`Mirror run aborted for: ${tableName}`, 'warn');
+        return null;
+      }
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, pollIntervalMs);
+        if (signal) {
+          const onAbort = () => { clearTimeout(timer); resolve(); };
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+      });
+      if (signal && signal.aborted) {
+        addLog(`Mirror run aborted for: ${tableName}`, 'warn');
+        return null;
+      }
       attempt++;
       
       const statusResult = await api('checkQueueStatus', { queueId });
@@ -1603,6 +1636,8 @@ window.runTableNow = async function runTableNow(configId) {
         addLog(`${t('Still generating CSV')}... (${Math.floor(attempt * pollIntervalMs / 1000)}s elapsed)`, 'info');
       }
     }
+    
+    if (signal && signal.aborted) return null;
     
     if (attempt >= maxAttempts) {
       throw new Error(`CSV generation timed out after ${maxAttempts * pollIntervalMs / 1000} seconds`);
@@ -1637,11 +1672,14 @@ window.runTableNow = async function runTableNow(configId) {
     
     return result;
   } catch (error) {
+    if (signal && signal.aborted) return null;
     const table = state.tables.find((t) => t.configId === configId);
     const tableName = table ? table.tableName : `Config ${configId}`;
     addLog(`${t('Mirror run failed')}: ${tableName} - ${error.message}`, 'error');
     handleUiError(error);
     throw error;
+  } finally {
+    state.activeMirrorCount = Math.max(0, state.activeMirrorCount - 1);
   }
 };
 
@@ -1663,11 +1701,14 @@ async function loadSettings() {
 }
 
 function getConnectionForm() {
+  const maxConcurrent = Math.max(1, Number(document.getElementById('mirror-max-concurrent').value) || 3);
+  state.maxConcurrentMirrors = maxConcurrent;
   return {
     mirrorUrl: document.getElementById('mirror-url').value.trim(),
     tenant: document.getElementById('mirror-tenant').value.trim(),
     clientId: document.getElementById('mirror-client-id').value.trim(),
     clientSecret: document.getElementById('mirror-client-secret').value.trim(),
+    maxConcurrentMirrors: maxConcurrent,
     status: state.connection?.status || 'unverified'
   };
 }
@@ -1707,6 +1748,24 @@ function stopSchedulerForTable(configId) {
     clearInterval(timer);
     state.schedulerTimers.delete(configId);
   }
+  // Abort any in-flight runTableNow polling for this table
+  const ac = state.schedulerAbort.get(configId);
+  if (ac) {
+    ac.abort();
+    state.schedulerAbort.delete(configId);
+  }
+}
+
+// Wait until a concurrency slot is available
+function waitForConcurrencySlot(signal) {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (signal && signal.aborted) { resolve(false); return; }
+      if (state.activeMirrorCount < state.maxConcurrentMirrors) { resolve(true); return; }
+      setTimeout(check, 1000);
+    };
+    check();
+  });
 }
 
 function startSchedulerForTable(table) {
@@ -1720,12 +1779,31 @@ function startSchedulerForTable(table) {
   const delayMs = lastMs ? Math.max(0, lastMs + intervalMs - Date.now()) : 0;
 
   const runAndSchedule = async () => {
+    // Stop if scheduler was turned off while we were waiting
+    if (!state.schedulerRunning) return;
+
+    // Create an AbortController for this run
+    const ac = new AbortController();
+    state.schedulerAbort.set(table.configId, ac);
+
+    // Wait for a concurrency slot before starting
+    const slotOk = await waitForConcurrencySlot(ac.signal);
+    if (!slotOk || ac.signal.aborted || !state.schedulerRunning) return;
+
     let result = null;
     try {
-      result = await window.runTableNow(table.configId);
+      result = await window.runTableNow(table.configId, { signal: ac.signal });
     } catch (error) {
-      addLog(`${t('Mirror run failed')}: ${table.tableName} — ${error.message}`, 'error');
+      if (!ac.signal.aborted) {
+        addLog(`${t('Mirror run failed')}: ${table.tableName} — ${error.message}`, 'error');
+      }
     }
+
+    // Clean up the abort controller
+    state.schedulerAbort.delete(table.configId);
+
+    // Do NOT reschedule if the scheduler was stopped while we were running
+    if (!state.schedulerRunning) return;
 
     // Determine next run delay based on whether there are more records
     let nextDelayMs;
@@ -1750,17 +1828,21 @@ function startSchedulerForTable(table) {
 }
 
 function startScheduler() {
-  stopScheduler();
+  stopScheduler(true); // silent stop to avoid double "stopped" log
   state.schedulerRunning = true;
   state.tables.filter((table) => table.active).forEach(startSchedulerForTable);
   addLog(t('Scheduler started'), 'ok');
 }
 
-function stopScheduler() {
+function stopScheduler(silent = false) {
+  state.schedulerRunning = false;
+  // Abort all in-flight polling loops
+  state.schedulerAbort.forEach((ac) => ac.abort());
+  state.schedulerAbort.clear();
+  // Clear all pending timers
   state.schedulerTimers.forEach((timer) => { clearTimeout(timer); clearInterval(timer); });
   state.schedulerTimers.clear();
-  state.schedulerRunning = false;
-  addLog(t('Scheduler stopped'), 'warn');
+  if (!silent) addLog(t('Scheduler stopped'), 'warn');
 }
 
 async function runActiveTables() {
