@@ -295,7 +295,7 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
   const getStatusPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})/Microsoft.NAV.GetStatus`;
   const queueRecordPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})`;
   const maxAttempts = 120; // 60 minutes max with 30-second intervals
-  const pollIntervalMs = 30000;
+  const pollIntervalMs = 5000;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
@@ -351,6 +351,10 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
 
 async function dataRecordsGet(conn, token, companyId, payload) {
   return bcTask(conn, token, companyId, "Data.Records.Get", null, payload);
+}
+
+async function dataRecordsGetAsync(conn, token, companyId, payload) {
+  return bcQueue(conn, token, companyId, "Data.Records.Get", null, payload);
 }
 
 async function dataRecordsSet(conn, token, companyId, tableName, payload) {
@@ -962,7 +966,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
 
   await withTableRefFallback(tableCfg, async (tableRef) => {
     const tableSelector = parseTableRef(tableRef);
-    const countResult = await dataRecordsGet(conn, token, companyId, {
+    const countResult = await dataRecordsGetAsync(conn, token, companyId, {
       ...tableSelector,
       tableView: countTableView,
       skip: 0,
@@ -1042,10 +1046,10 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
     let hasMoreRecords = false;
     try {
       const nextEndIso = isoNoMs(new Date());
-      const nextTableView = buildRunTableView(tableCfg, confirmedIso, nextEndIso);
+      const nextTableView = buildCountTableView(tableCfg, confirmedIso, nextEndIso);
       await withTableRefFallback(tableCfg, async (tableRef) => {
         const tableSelector = parseTableRef(tableRef);
-        const nextCountResult = await dataRecordsGet(conn, token, companyId, {
+        const nextCountResult = await dataRecordsGetAsync(conn, token, companyId, {
           ...tableSelector,
           tableView: nextTableView,
           skip: 0,
