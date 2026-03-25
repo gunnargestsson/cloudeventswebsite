@@ -632,7 +632,7 @@ async function getTableConfigs(conn, token, companyId) {
     normalized.map(async (t) => {
       let lastRunAt = t.syncTimestamp;
       if (!lastRunAt) {
-        lastRunAt = await getIntegrationTimestamp(conn, token, companyId, t.tableId).catch(() => null);
+        lastRunAt = await getIntegrationTimestamp(conn, token, companyId, t.tableName, t.configId).catch(() => null);
       }
       return { ...t, lastRunAt };
     })
@@ -696,14 +696,19 @@ async function uploadDdlOnly(conn, token, companyId, configId) {
   return { uploaded: true, configId };
 }
 
-function ciTableView(tableId) {
-  return `SORTING(Source,Table Id,Date & Time) ORDER(Descending) WHERE(Source=CONST(${SOURCE}),Table Id=CONST(${tableId}),Reversed=CONST(false))`;
+function integrationSource(tableName, configId) {
+  return `${tableName}-${configId}`;
 }
 
-async function getIntegrationTimestamp(conn, token, companyId, tableId) {
+function ciTableView(tableName, configId) {
+  const source = integrationSource(tableName, configId);
+  return `SORTING(Source,Table Id,Date & Time) ORDER(Descending) WHERE(Source=CONST(${source}),Reversed=CONST(false))`;
+}
+
+async function getIntegrationTimestamp(conn, token, companyId, tableName, configId) {
   const result = await dataRecordsGet(conn, token, companyId, {
     tableName: CI_TABLE,
-    tableView: ciTableView(tableId),
+    tableView: ciTableView(tableName, configId),
     skip: 0,
     take: 1,
   });
@@ -712,12 +717,13 @@ async function getIntegrationTimestamp(conn, token, companyId, tableId) {
   return records[0]?.primaryKey?.DateTime || null;
 }
 
-async function setIntegrationTimestamp(conn, token, companyId, tableId, dateTime) {
+async function setIntegrationTimestamp(conn, token, companyId, tableName, configId, dateTime) {
+  const source = integrationSource(tableName, configId);
   await dataRecordsSet(conn, token, companyId, CI_TABLE, {
     data: [{
       primaryKey: {
-        Source: SOURCE,
-        TableId: Number(tableId),
+        Source: source,
+        TableId: 0,
         DateTime: String(dateTime),
       },
       fields: { Reversed: "false" },
@@ -725,10 +731,10 @@ async function setIntegrationTimestamp(conn, token, companyId, tableId, dateTime
   });
 }
 
-async function reverseIntegrationTimestamp(conn, token, companyId, tableId) {
+async function reverseIntegrationTimestamp(conn, token, companyId, tableName, configId) {
   const result = await dataRecordsGet(conn, token, companyId, {
     tableName: CI_TABLE,
-    tableView: ciTableView(tableId),
+    tableView: ciTableView(tableName, configId),
     skip: 0,
     take: 1,
   });
@@ -737,12 +743,13 @@ async function reverseIntegrationTimestamp(conn, token, companyId, tableId) {
   const dateTime = records[0]?.primaryKey?.DateTime;
   if (!dateTime) return;
 
+  const source = integrationSource(tableName, configId);
   await dataRecordsSet(conn, token, companyId, CI_TABLE, {
     mode: "modify",
     data: [{
       primaryKey: {
-        Source: SOURCE,
-        TableId: Number(tableId),
+        Source: source,
+        TableId: 0,
         DateTime: String(dateTime),
       },
       fields: { Reversed: "true" },
@@ -1036,7 +1043,7 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
 
   // Get last sync timestamp (per-config, with legacy fallback)
   const previousTs = tableCfg.syncTimestamp
-    || await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId).catch(() => null);
+    || await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableName, tableCfg.configId).catch(() => null);
 
   // Start the CSV export queue immediately — skip the synchronous record count
   // to avoid Azure Function timeouts on large tables like G/L Entry.
@@ -1175,7 +1182,7 @@ async function fetchQueueData(conn, token, companyId, queueId, configId, lcid = 
 
   // Get previous timestamp for deleted records check (per-config, with legacy fallback)
   const previousTs = tableCfg.syncTimestamp
-    || await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId).catch(() => null);
+    || await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableName, tableCfg.configId).catch(() => null);
 
   // Count and fetch deleted records
   const noOfDeleted = await getDeletedRecordCount(conn, token, companyId, tableCfg, previousTs, confirmedIso);
@@ -1246,7 +1253,7 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
 
   // Per-config sync timestamp with legacy fallback
   const previousTs = tableCfg.syncTimestamp
-    || await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId).catch(() => null);
+    || await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableName, tableCfg.configId).catch(() => null);
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
   const runTableView = buildRunTableView(tableCfg, previousTs, endIso);
