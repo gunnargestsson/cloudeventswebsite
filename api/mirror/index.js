@@ -741,11 +741,18 @@ function buildWhereClause(storedWhere, extraClause) {
   return storedWhere.replace(/\)\s*$/i, `,${extraClause})`);
 }
 
-function buildCountTableView(tableCfg, startIso, endIso) {
-  // For count queries, we only need the WHERE clause without sorting
-  const rangeClause = startIso ? `SystemModifiedAt=FILTER(${startIso}..${endIso})` : null;
-  const where = buildWhereClause(tableCfg.tableView || "", rangeClause);
-  return where || null;
+function buildCountPayload(tableCfg, startIso, endIso) {
+  // Count queries use startDateTime/endDateTime — never tableView for date filtering
+  const payload = {
+    tableName: tableCfg.tableName,
+    skip: 0,
+    take: 1,
+  };
+  if (startIso) payload.startDateTime = startIso;
+  if (endIso) payload.endDateTime = endIso;
+  // Include user-configured static WHERE filter if present
+  if (tableCfg.tableView) payload.tableView = tableCfg.tableView;
+  return payload;
 }
 
 function buildRunTableView(tableCfg, startIso, endIso) {
@@ -991,10 +998,7 @@ async function startQueueMirror(conn, token, companyId, tableId, lcid = 1033) {
   // Count records to mirror
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
-  const countPayload = {
-    tableName: tableCfg.tableName,
-    tableView: buildCountTableView(tableCfg, previousTs, endIso),
-  };
+  const countPayload = buildCountPayload(tableCfg, previousTs, endIso);
   const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
   const noOfRecords = countResult.noOfRecords || 0;
   logs.push(`Found ${noOfRecords} record(s) to mirror`);
@@ -1149,10 +1153,7 @@ async function fetchQueueData(conn, token, companyId, queueId, tableId, lcid = 1
 
   // Check for remaining records
   const nextEndIso = isoNoMs(new Date());
-  const remainingPayload = {
-    tableName: tableCfg.tableName,
-    tableView: buildCountTableView(tableCfg, confirmedIso || previousTs, nextEndIso),
-  };
+  const remainingPayload = buildCountPayload(tableCfg, confirmedIso || previousTs, nextEndIso);
   const remainingResult = await dataRecordsGetAsync(conn, token, companyId, remainingPayload);
   const remainingRecords = remainingResult.noOfRecords || 0;
   logs.push(`Checking for remaining records: ${remainingRecords} remaining in backlog`);
@@ -1186,7 +1187,6 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
   const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
-  const countTableView = buildCountTableView(tableCfg, previousTs, endIso);
   const runTableView = buildRunTableView(tableCfg, previousTs, endIso);
 
   // ── Step 1: Count and fetch modified records ─────────────────────────────────
@@ -1201,11 +1201,12 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
     logs.push(`Checking for new records in ${tableCfg.tableName}...`);
     const countPayload = {
       ...tableSelector,
-      ...(countTableView ? { tableView: countTableView } : {}),
       skip: 0,
       take: 1,
-      fieldNumbers: [1],
     };
+    if (previousTs) countPayload.startDateTime = previousTs;
+    if (endIso) countPayload.endDateTime = endIso;
+    if (tableCfg.tableView) countPayload.tableView = tableCfg.tableView;
     const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
 
     noOfRecords = Number(countResult.noOfRecords || 0);
@@ -1282,17 +1283,17 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
     let hasMoreRecords = false;
     try {
       const nextEndIso = isoNoMs(new Date());
-      const nextTableView = buildCountTableView(tableCfg, confirmedIso, nextEndIso);
       logs.push(`Checking for remaining records...`);
       await withTableRefFallback(tableCfg, async (tableRef) => {
         const tableSelector = parseTableRef(tableRef);
         const nextCountPayload = {
           ...tableSelector,
-          ...(nextTableView ? { tableView: nextTableView } : {}),
           skip: 0,
           take: 1,
-          fieldNumbers: [1],
         };
+        if (confirmedIso) nextCountPayload.startDateTime = confirmedIso;
+        if (nextEndIso) nextCountPayload.endDateTime = nextEndIso;
+        if (tableCfg.tableView) nextCountPayload.tableView = tableCfg.tableView;
         const nextCountResult = await dataRecordsGetAsync(conn, token, companyId, nextCountPayload);
         const nextCount = Number(nextCountResult.noOfRecords || 0);
         hasMoreRecords = nextCount > 0;
