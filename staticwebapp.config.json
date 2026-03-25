@@ -31,6 +31,10 @@
     {
       "route": "/api-key-settings",
       "rewrite": "/api-key-settings.html"
+    },
+    {
+      "route": "/employee-phonebook",
+      "rewrite": "/employee-phonebook.html"
     }
   ],
   "navigationFallback": {

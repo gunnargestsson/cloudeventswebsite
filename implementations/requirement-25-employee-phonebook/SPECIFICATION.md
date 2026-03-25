@@ -38,14 +38,14 @@ start page (`index.html`) via a new navigation card.
 | D4 | Fields to fetch | No. (1), First Name (2), Middle Name (3), Last Name (4), Job Title (5920), Phone No. (6), Mobile Phone No. (7), Company E-Mail (65), E-Mail (18), Global Dimension 1 Code (10), Image (19) |
 | D5 | Display name | Composed from `First Name` + `Middle Name` + `Last Name` |
 | D6 | Contact fields shown | Mobile Phone No. (primary), Phone No. (secondary), E-Mail or Company E-Mail (whichever is non-empty, Company E-Mail preferred) |
-| D7 | Department source | Global Dimension 1 Code (field 10) — displayed with its localized caption from `Help.Fields.Get` enum values if available |
+| D7 | Department source | Global Dimension 1 Code (field 10) — resolved to display name via a separate `Data.Records.Get` on the **Dimension Value** table (349), filtered by `WHERE(Global Dimension No.=CONST(1))`, loading Code (1) and Name (2). Cached as a `dimensionValueMap` lookup (`code → name`). |
 | D8 | Default view mode | Tiles (card grid) |
 | D9 | View mode persistence | `localStorage` key `bc_portal_employee_view` (`'tiles'` or `'list'`) |
 | D10 | Search scope | Client-side filter on all loaded records; searches across name, phone, email, job title, department |
 | D11 | Pagination | Same skip/take pattern as other pages; default `take: 50` |
 | D12 | Employee photo | Media field (field 19 "Image"); displayed as circular avatar in tiles, small thumbnail in list |
 | D13 | Photo fallback | Generic person silhouette SVG placeholder when no image is available |
-| D14 | Sorting | Server-side `SORTING(Last Name,First Name) ORDER(Ascending)` |
+| D14 | Sorting | Server-side `SORTING(First Name,Last Name,Middle Name) ORDER(Ascending)` |
 | D15 | Filter — active only | Only show employees with `Status = Active` — `WHERE(Status=CONST(Active))` |
 | D16 | Page URL route | `/employee-phonebook` → `/employee-phonebook.html` in `staticwebapp.config.json` |
 | D17 | Navigation card | Added to `index.html` nav-cards grid with 📞 icon |
@@ -71,6 +71,26 @@ start page (`index.html`) via a new navigation card.
 
 > **Note:** Field numbers and jsonNames above follow standard BC 24+ schema.
 > Always verify against the live instance using `Help.Fields.Get` with `tableName: "Employee"` on first load and cache the metadata.
+
+### Dimension Value Table — Department Lookup (Table 349)
+
+To display the department **name** (not just the code), fetch Dimension Values filtered to Global Dimension 1:
+
+| Field No. | BC Field Name | jsonName | Type | Purpose |
+|-----------|---------------|----------|------|---------|
+| 1 | Dimension Code | DimensionCode | Code[20] | PK — Dimension code |
+| 2 | Code | Code | Code[20] | PK — Dimension value code (matches Employee.Global Dimension 1 Code) |
+| 3 | Name | Name | Text[50] | Display name for the dimension value |
+| 10 | Global Dimension No. | GlobalDimensionNo_ | Integer | 1 = Global Dimension 1 |
+
+```javascript
+const DIMENSION_VALUE_FIELDS = [1, 2, 3, 10];
+// tableView: 'WHERE(Global Dimension No.=CONST(1))'
+```
+
+The result is cached as a map: `{ [code]: name }`. When rendering employee department,
+look up `dimensionValueMap[employee.department]` to show the full name (e.g. "Framleiðslusvið")
+instead of the raw code (e.g. "FRAML").
 
 ---
 
@@ -114,7 +134,7 @@ async function loadEmployees(skip = 0, take = 50) {
       data: JSON.stringify({
         tableName: 'Employee',
         fieldNumbers: EMPLOYEE_LIST_FIELDS,
-        tableView: 'SORTING(Last Name,First Name) ORDER(Ascending) WHERE(Status=CONST(Active))',
+        tableView: 'SORTING(First Name,Last Name,Middle Name) ORDER(Ascending) WHERE(Status=CONST(Active))',
         skip,
         take
       })
@@ -122,6 +142,43 @@ async function loadEmployees(skip = 0, take = 50) {
   });
   
   return await res.json();
+}
+```
+
+### Loading Department Names (Dimension Values)
+
+```javascript
+let dimensionValueMap = {};
+
+async function loadDimensionValues() {
+  const headers = bcSettingsHeaders();
+  const settings = bcSettingsLoad();
+  
+  const res = await fetch('/api/bc?companyId=' + settings.companyId, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      specversion: '1.0',
+      type: 'Data.Records.Get',
+      source: 'BC Portal',
+      subject: 'Dimension Value',
+      lcid: parseInt(settings.lcid || '1033', 10),
+      data: JSON.stringify({
+        tableName: 'Dimension Value',
+        fieldNumbers: [1, 2, 3, 10],
+        tableView: 'WHERE(Global Dimension No.=CONST(1))',
+        take: 500
+      })
+    })
+  });
+  
+  const data = await res.json();
+  dimensionValueMap = {};
+  for (const rec of (data.result || [])) {
+    const code = rec.fields.Code || rec.primaryKey.Code || '';
+    const name = rec.fields.Name || '';
+    if (code) dimensionValueMap[code] = name;
+  }
 }
 ```
 
@@ -153,7 +210,8 @@ function mapEmployee(rec) {
     phone: f.PhoneNo_ || '',
     mobile: f.MobilePhoneNo_ || '',
     email,
-    department: f.GlobalDimension1Code || '',
+    departmentCode: f.GlobalDimension1Code || '',
+    department: dimensionValueMap[f.GlobalDimension1Code] || f.GlobalDimension1Code || '',
     photoUrl,
     status: f.Status || ''
   };

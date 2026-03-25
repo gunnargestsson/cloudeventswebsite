@@ -281,6 +281,11 @@
           <div class="nav-card-title" id="nav-stmt-title">Statement Sender</div>
           <div class="nav-card-desc" id="nav-stmt-desc">Email customer account statements as PDF</div>
         </a>
+        <a href="employee-phonebook.html" class="nav-card">
+          <div class="nav-card-icon">📞</div>
+          <div class="nav-card-title" id="nav-phonebook-title">Employee Phonebook</div>
+          <div class="nav-card-desc" id="nav-phonebook-desc">Employee directory from Business Central</div>
+        </a>
       </div>
     </div>
   </main>
@@ -288,7 +293,7 @@
 
 <script>
 const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',1036:'French',1034:'Spanish',1043:'Dutch',1053:'Swedish',1044:'Norwegian'};
-const UI_STRINGS = ['Home', 'API Key', 'Connected', 'Not connected', 'Open Mirror', 'Mirror Business Central tables', 'Claude Chat', 'Chat with Claude using Business Central MCP tools', 'IOBWS Proxy Tester', 'Test Icelandic bank proxy endpoints', 'Statement Sender', 'Email customer account statements as PDF'];
+const UI_STRINGS = ['Home', 'API Key', 'Connected', 'Not connected', 'Open Mirror', 'Mirror Business Central tables', 'Claude Chat', 'Chat with Claude using Business Central MCP tools', 'IOBWS Proxy Tester', 'Test Icelandic bank proxy endpoints', 'Statement Sender', 'Email customer account statements as PDF', 'Employee Phonebook', 'Employee directory from Business Central'];
 
 async function loadUiTranslations() {
   const settings = bcSettingsLoad();
@@ -316,6 +321,10 @@ function applyUiTranslations() {
   const stmtDesc  = document.getElementById('nav-stmt-desc');
   if (stmtTitle) stmtTitle.textContent = t('Statement Sender');
   if (stmtDesc)  stmtDesc.textContent  = t('Email customer account statements as PDF');
+  const phonebookTitle = document.getElementById('nav-phonebook-title');
+  const phonebookDesc  = document.getElementById('nav-phonebook-desc');
+  if (phonebookTitle) phonebookTitle.textContent = t('Employee Phonebook');
+  if (phonebookDesc)  phonebookDesc.textContent  = t('Employee directory from Business Central');
 }
 
 function updateTopBarConnection() {

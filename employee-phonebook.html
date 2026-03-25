@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Employee Phonebook – Origo BC Portal</title>
+<script src="settings.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0d14;
+    --surface: #111520;
+    --surface2: #171d2e;
+    --surface3: #0f1320;
+    --border: #1e2640;
+    --border-bright: #2d3a5e;
+    --accent: #4f7fff;
+    --accent2: #7c5cfc;
+    --accent-glow: rgba(79,127,255,0.18);
+    --text: #e8ecf5;
+    --text-dim: #6b7799;
+    --text-mid: #9ba8c8;
+    --green: #27c08a;
+    --red: #f25f5c;
+    --amber: #f5a623;
+    --radius: 12px;
+    --radius-sm: 7px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(79,127,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79,127,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+  #app { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+  /* HEADER */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,13,20,0.85);
+    backdrop-filter: blur(12px);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.15rem; letter-spacing: -0.02em;
+    text-decoration: none; color: inherit;
+  }
+  .logo-icon { width: 34px; height: 34px; border-radius: 9px; overflow: hidden; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .logo-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .logo span { color: var(--text-dim); font-weight: 400; font-size: 0.78rem; }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .pill {
+    display: flex; align-items: center; gap: 7px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 99px;
+    padding: 5px 14px; font-size: 0.72rem; color: var(--text-dim);
+    text-decoration: none; transition: border-color 0.2s, color 0.2s;
+  }
+  .pill:hover { border-color: var(--accent); color: var(--text); }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); transition: background 0.3s, box-shadow 0.3s; }
+  .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2.5s infinite; }
+  .status-dot.error { background: var(--red); box-shadow: 0 0 8px var(--red); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
+
+  main { flex: 1; padding: 32px; max-width: 1400px; margin: 0 auto; width: 100%; }
+
+  /* BREADCRUMB */
+  .breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 0.72rem; color: var(--text-dim); margin-bottom: 28px; }
+  .breadcrumb a { color: var(--text-mid); text-decoration: none; transition: color 0.2s; }
+  .breadcrumb a:hover { color: var(--accent); }
+  .breadcrumb .sep { color: var(--border-bright); }
+
+  /* TOOLBAR */
+  .toolbar {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 24px; flex-wrap: wrap;
+  }
+  .toolbar-title {
+    font-family: 'Syne', sans-serif; font-weight: 800; font-size: 1.55rem; letter-spacing: -0.03em;
+    flex: 0 0 auto;
+  }
+  .toolbar-title small { display: block; font-family: 'DM Mono', monospace; font-weight: 400; font-size: 0.7rem; color: var(--text-dim); letter-spacing: 0; margin-bottom: 2px; }
+  .toolbar-spacer { flex: 1; min-width: 0; }
+  .search-wrap { position: relative; flex: 0 0 280px; }
+  .search-wrap input {
+    width: 100%;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    color: var(--text); font-family: 'DM Mono', monospace; font-size: 0.82rem;
+    padding: 9px 14px 9px 38px; outline: none; transition: border-color 0.2s;
+  }
+  .search-wrap input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .search-wrap input::placeholder { color: var(--text-dim); }
+  .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-dim); font-size: 0.9rem; pointer-events: none; }
+  .view-toggle { display: flex; gap: 6px; }
+  .view-btn {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    color: var(--text-dim); font-size: 1rem; padding: 7px 12px; cursor: pointer;
+    transition: border-color 0.2s, color 0.2s, background 0.2s; line-height: 1;
+  }
+  .view-btn:hover { border-color: var(--border-bright); color: var(--text-mid); }
+  .view-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(79,127,255,0.08); }
+
+  /* EMPLOYEE TILES */
+  .employee-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .emp-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; display: flex; flex-direction: column; gap: 14px;
+    transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
+    position: relative; overflow: hidden;
+  }
+  .emp-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    opacity: 0; transition: opacity 0.2s;
+  }
+  .emp-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(79,127,255,0.12); }
+  .emp-card:hover::before { opacity: 1; }
+  .emp-card-top { display: flex; align-items: center; gap: 14px; }
+  .emp-avatar {
+    width: 60px; height: 60px; border-radius: 50%; flex-shrink: 0;
+    object-fit: cover; background: var(--surface2); border: 2px solid var(--border);
+  }
+  .emp-avatar-placeholder {
+    width: 60px; height: 60px; border-radius: 50%; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--surface2), var(--border));
+    border: 2px solid var(--border);
+    display: flex; align-items: center; justify-content: center; color: var(--text-dim);
+    font-size: 1.4rem;
+  }
+  .emp-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.95rem; line-height: 1.3; }
+  .emp-title { font-size: 0.74rem; color: var(--text-mid); margin-top: 3px; line-height: 1.4; }
+  .emp-contacts { display: grid; gap: 7px; }
+  .emp-contact-row { display: flex; align-items: center; gap: 8px; font-size: 0.76rem; color: var(--text-mid); min-width: 0; }
+  .emp-contact-icon { font-size: 0.78rem; flex-shrink: 0; width: 18px; text-align: center; }
+  .emp-contact-row a { color: var(--text-mid); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 0.15s; }
+  .emp-contact-row a:hover { color: var(--accent); }
+  .emp-department {
+    display: inline-flex; align-items: center;
+    font-size: 0.67rem; padding: 3px 10px; border-radius: 99px;
+    border: 1px solid var(--border); background: var(--surface2); color: var(--text-dim);
+    align-self: flex-start; margin-top: auto;
+  }
+
+  /* EMPLOYEE LIST TABLE */
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 640px; }
+  thead tr { background: var(--surface2); border-bottom: 1px solid var(--border); }
+  th {
+    padding: 12px 16px; text-align: left; font-size: 0.66rem; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.08em; font-weight: 500; white-space: nowrap;
+    cursor: pointer; user-select: none; transition: color 0.15s;
+  }
+  th:first-child { width: 52px; text-align: center; cursor: default; }
+  th:hover:not(:first-child) { color: var(--text-mid); }
+  th.sorted { color: var(--accent); }
+  th.sorted::after { content: ' ↑'; font-size: 0.6rem; }
+  th.sorted.desc::after { content: ' ↓'; }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.12s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--surface2); }
+  td { padding: 11px 16px; font-size: 0.79rem; color: var(--text-mid); }
+  td:first-child { text-align: center; }
+  td a { color: var(--text-mid); text-decoration: none; transition: color 0.15s; }
+  td a:hover { color: var(--accent); }
+  td strong { color: var(--text); font-weight: 500; }
+  .list-avatar {
+    width: 32px; height: 32px; border-radius: 50%; object-fit: cover;
+    background: var(--surface2); border: 1.5px solid var(--border); vertical-align: middle;
+  }
+  .list-avatar-placeholder {
+    width: 32px; height: 32px; border-radius: 50%; background: var(--surface2);
+    border: 1.5px solid var(--border); display: inline-flex; align-items: center; justify-content: center;
+    font-size: 0.85rem; color: var(--text-dim); vertical-align: middle;
+  }
+  .dept-badge {
+    display: inline-flex; align-items: center;
+    font-size: 0.66rem; padding: 2px 9px; border-radius: 99px;
+    border: 1px solid var(--border); background: var(--surface2); color: var(--text-dim);
+  }
+
+  /* PAGINATION */
+  .pagination { display: flex; align-items: center; gap: 10px; margin-top: 18px; font-size: 0.76rem; color: var(--text-dim); justify-content: flex-end; flex-wrap: wrap; }
+  .page-btn {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text-mid);
+    padding: 6px 14px; border-radius: var(--radius-sm); cursor: pointer;
+    font-family: 'DM Mono', monospace; font-size: 0.74rem; transition: all 0.15s;
+  }
+  .page-btn:hover:not([disabled]) { border-color: var(--accent); color: var(--accent); }
+  .page-btn[disabled] { opacity: 0.3; cursor: not-allowed; }
+
+  /* LOADER / EMPTY */
+  .loader-wrap { display: flex; align-items: center; justify-content: center; padding: 64px 20px; flex-direction: column; gap: 14px; }
+  .spinner { position: relative; display: inline-block; width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; }
+  .spinner::before { content: ''; position: absolute; inset: 0; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(1turn); } }
+  .loader-label { font-size: 0.76rem; color: var(--text-dim); }
+  .empty-state { text-align: center; padding: 64px 20px; color: var(--text-dim); font-size: 0.84rem; }
+  .empty-icon { font-size: 2.5rem; margin-bottom: 12px; opacity: 0.35; }
+
+  /* TOAST */
+  #toast {
+    position: fixed; bottom: 28px; right: 28px;
+    background: var(--surface); border: 1px solid var(--border-bright); border-radius: var(--radius);
+    padding: 13px 18px; font-size: 0.8rem; color: var(--text);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    transform: translateY(16px); opacity: 0; transition: all 0.3s;
+    z-index: 999; max-width: 360px;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.error { border-color: var(--red); color: var(--red); }
+  #toast.success { border-color: var(--green); color: var(--green); }
+
+  @media (max-width: 900px) {
+    main { padding: 20px; }
+    header { padding: 14px 20px; }
+    .toolbar { gap: 10px; }
+    .search-wrap { flex: 0 0 auto; width: 100%; order: 3; }
+    .toolbar-spacer { display: none; }
+    .employee-tiles { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  }
+  @media (max-width: 600px) {
+    .employee-tiles { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <a class="logo" href="index.html">
+      <div class="logo-icon"><img src="origo.jpeg" alt="Origo"></div>
+      Origo BC Portal <span id="header-subtitle">/ Employee Phonebook</span>
+    </a>
+    <div class="header-right">
+      <a href="index.html" class="pill" data-t="Home">Home</a>
+      <div class="pill">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-label" data-t="Authenticating...">Authenticating...</span>
+      </div>
+      <a href="api-key-settings.html" class="pill" data-t="API Key">API Key</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="breadcrumb">
+      <a href="index.html">← Home</a>
+      <span class="sep">/</span>
+      <span id="crumb-page" style="color:var(--text)" data-t="Employee Phonebook">Employee Phonebook</span>
+    </div>
+
+    <div class="toolbar">
+      <div class="toolbar-title">
+        <small id="company-label">—</small>
+        <span data-t="Employee Phonebook">Employee Phonebook</span>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <div class="view-toggle">
+        <button class="view-btn active" id="btn-tiles" onclick="setView('tiles')" title="Tiles view">⊞</button>
+        <button class="view-btn" id="btn-list" onclick="setView('list')" title="List view">☰</button>
+      </div>
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="search" id="search-input" data-tp="Search employees..." placeholder="Search employees..."
+               oninput="onSearch(this.value)" />
+      </div>
+    </div>
+
+    <div id="content-area">
+      <div class="loader-wrap" id="initial-loader">
+        <div class="spinner"></div>
+        <span class="loader-label" data-t="Loading...">Loading...</span>
+      </div>
+    </div>
+
+    <div id="pagination-wrap"></div>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Constants ─────────────────────────────────────────────────────────────────
+const EMPLOYEE_LIST_FIELDS  = [2, 3, 4, 5920, 6, 7, 18, 65, 10, 19, 1100];
+const DIMENSION_VALUE_FIELDS = [1, 2, 3, 10];
+const PAGE_SIZE = 50;
+const VIEW_KEY  = 'bc_portal_employee_view';
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let selectedCompany   = null;   // { id, name }
+let selectedLcid      = 1033;
+let allEmployees        = [];    // all loaded employees (may be multiple pages total)
+let filteredEmployees = [];
+let dimensionValueMap = {};     // code → name
+let currentSkip       = 0;
+let totalEmployees    = 0;
+let currentView       = localStorage.getItem(VIEW_KEY) || 'tiles';
+let uiTranslations    = {};
+let searchDebounce    = null;
+let sortCol           = null;   // list view column key
+let sortAsc           = true;
+
+const UI_STRINGS = [
+  'Home', 'API Key', 'Connected', 'Not connected', 'Authenticating...',
+  'Employee Phonebook', 'Employee directory from Business Central',
+  'Search employees...', 'Name', 'Job Title', 'Mobile', 'Phone', 'Email', 'Department',
+  'No employees found', 'No employee records available',
+  'Page', 'of', 'Previous', 'Next', 'Tiles', 'List', 'Loading...',
+];
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+async function cePost(companyId, event) {
+  const r = await fetch('/api/bc?companyId=' + encodeURIComponent(companyId), {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ ...event, lcid: selectedLcid }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || 'API error ' + r.status);
+  }
+  const result = await r.json();
+  if (result.status === 'Error') throw new Error(result.error || 'Cloud Events task failed');
+  return result;
+}
+
+// ── Translation helpers ───────────────────────────────────────────────────────
+function t(s) { return uiTranslations[s] || s; }
+
+function applyUiTranslations() {
+  document.querySelectorAll('[data-t]').forEach(el => { el.textContent = t(el.dataset.t); });
+  document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
+}
+
+async function loadUiTranslations() {
+  uiTranslations = {};
+  if (selectedLcid === 1033) return;
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type:        'Data.Records.Get',
+      source:      'BC Portal',
+      subject:     'Cloud Event Translation',
+      data: JSON.stringify({
+        tableView: `WHERE(Windows Language ID=CONST(${selectedLcid}),Source=CONST(BC Portal))`,
+        take: UI_STRINGS.length + 50,
+      }),
+    });
+    for (const rec of (res.result || [])) {
+      const src = (rec.primaryKey || {}).SourceText;
+      const tgt = (rec.fields    || {}).TargetText;
+      if (src && tgt) uiTranslations[src] = tgt;
+    }
+  } catch (e) { /* fall back to English */ }
+}
+
+// ── Status helpers ────────────────────────────────────────────────────────────
+function setStatus(state) {
+  const dot = document.getElementById('status-dot');
+  const lbl = document.getElementById('status-label');
+  if (dot) dot.className = 'status-dot' + (state === 'connected' ? ' connected' : state === 'error' ? ' error' : '');
+  if (lbl) lbl.textContent = state === 'connected' ? t('Connected') : state === 'error' ? t('Not connected') : t('Authenticating...');
+}
+
+let _toastTimer;
+function toast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'show' + (type === 'error' ? ' error' : type === 'success' ? ' success' : '');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.className = ''; }, type === 'error' ? 8000 : 3500);
+}
+
+// ── Dimension Values ──────────────────────────────────────────────────────────
+async function loadDimensionValues() {
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type:        'Data.Records.Get',
+      source:      'BC Portal',
+      subject:     'Dimension Value',
+      data: JSON.stringify({
+        tableName:    'Dimension Value',
+        fieldNumbers: DIMENSION_VALUE_FIELDS,
+        tableView:    'WHERE(Global Dimension No.=CONST(1))',
+        take: 500,
+      }),
+    });
+    dimensionValueMap = {};
+    for (const rec of (res.result || [])) {
+      const code = (rec.fields || {}).Code || (rec.primaryKey || {}).Code || '';
+      const name = (rec.fields || {}).Name || '';
+      if (code) dimensionValueMap[code] = name;
+    }
+  } catch (e) { /* non-fatal — codes will show as-is */ }
+}
+
+// ── Employee loading ──────────────────────────────────────────────────────────
+async function loadEmployees(skip = 0) {
+  currentSkip = skip;
+  showLoader();
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type:        'Data.Records.Get',
+      source:      'BC Portal',
+      subject:     'Employee',
+      data: JSON.stringify({
+        tableName:    'Employee',
+        fieldNumbers: EMPLOYEE_LIST_FIELDS,
+        tableView:    'SORTING(First Name,Last Name,Middle Name) ORDER(Ascending) WHERE(Status=CONST(Active))',
+        skip,
+        take: PAGE_SIZE,
+      }),
+    });
+    totalEmployees = res.noOfRecords || 0;
+    allEmployees   = (res.result || []).map(mapEmployee);
+    applySearchFilter(document.getElementById('search-input').value || '');
+    renderPagination();
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+function mapEmployee(rec) {
+  const f  = rec.fields      || {};
+  const pk = rec.primaryKey  || {};
+  const firstName  = f.FirstName  || '';
+  const middleName = f.MiddleName || '';
+  const lastName   = f.LastName   || '';
+  const fullName   = [firstName, middleName, lastName].filter(Boolean).join(' ');
+  const email      = f.CompanyEMail || f.EMail || '';
+  const deptCode   = f.GlobalDimension1Code || '';
+  let photoUrl = null;
+  if (f.Image && f.Image.Value) {
+    photoUrl = 'data:image/jpeg;base64,' + f.Image.Value;
+  }
+  return {
+    id:           rec.id         || pk.No_ || '',
+    number:       pk.No_         || '',
+    fullName,
+    firstName,
+    lastName,
+    jobTitle:     f.JobTitle     || '',
+    phone:        f.PhoneNo_     || '',
+    mobile:       f.MobilePhoneNo_ || '',
+    email,
+    departmentCode: deptCode,
+    department:   dimensionValueMap[deptCode] || deptCode || '',
+    photoUrl,
+    status:       f.Status       || '',
+  };
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+function onSearch(value) {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => applySearchFilter(value), 150);
+}
+
+function applySearchFilter(q) {
+  const lq = (q || '').toLowerCase().trim();
+  if (!lq) {
+    filteredEmployees = allEmployees.slice();
+  } else {
+    filteredEmployees = allEmployees.filter(e =>
+      e.fullName.toLowerCase().includes(lq)        ||
+      e.jobTitle.toLowerCase().includes(lq)        ||
+      e.mobile.toLowerCase().includes(lq)          ||
+      e.phone.toLowerCase().includes(lq)           ||
+      e.email.toLowerCase().includes(lq)           ||
+      e.department.toLowerCase().includes(lq)
+    );
+  }
+  renderEmployees();
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderEmployees() {
+  const area = document.getElementById('content-area');
+  if (!area) return;
+  if (filteredEmployees.length === 0) {
+    const msg = allEmployees.length === 0
+      ? t('No employee records available')
+      : t('No employees found');
+    area.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div>${msg}</div>`;
+    return;
+  }
+  if (currentView === 'list') {
+    renderList(area);
+  } else {
+    renderTiles(area);
+  }
+}
+
+function avatarImg(emp, size = 60) {
+  if (emp.photoUrl) {
+    return `<img class="${size === 32 ? 'list-avatar' : 'emp-avatar'}" src="${emp.photoUrl}" alt="" loading="lazy" />`;
+  }
+  return `<div class="${size === 32 ? 'list-avatar-placeholder' : 'emp-avatar-placeholder'}">👤</div>`;
+}
+
+function renderTiles(area) {
+  const cards = filteredEmployees.map(emp => {
+    const dept = emp.department
+      ? `<span class="emp-department">${escHtml(emp.department)}</span>`
+      : '';
+    const mobile = emp.mobile
+      ? `<div class="emp-contact-row"><span class="emp-contact-icon">📱</span><a href="tel:${escAttr(emp.mobile)}">${escHtml(emp.mobile)}</a></div>`
+      : '';
+    const phone = emp.phone && emp.phone !== emp.mobile
+      ? `<div class="emp-contact-row"><span class="emp-contact-icon">📞</span><a href="tel:${escAttr(emp.phone)}">${escHtml(emp.phone)}</a></div>`
+      : '';
+    const email = emp.email
+      ? `<div class="emp-contact-row"><span class="emp-contact-icon">✉️</span><a href="mailto:${escAttr(emp.email)}">${escHtml(emp.email)}</a></div>`
+      : '';
+    return `
+      <div class="emp-card">
+        <div class="emp-card-top">
+          ${avatarImg(emp, 60)}
+          <div>
+            <div class="emp-name">${escHtml(emp.fullName)}</div>
+            ${emp.jobTitle ? `<div class="emp-title">${escHtml(emp.jobTitle)}</div>` : ''}
+          </div>
+        </div>
+        ${(mobile || phone || email) ? `<div class="emp-contacts">${mobile}${phone}${email}</div>` : ''}
+        ${dept}
+      </div>`;
+  }).join('');
+  area.innerHTML = `<div class="employee-tiles">${cards}</div>`;
+}
+
+function renderList(area) {
+  const rows = filteredEmployees.map(emp => {
+    const dept = emp.department
+      ? `<span class="dept-badge">${escHtml(emp.department)}</span>`
+      : `<span style="color:var(--text-dim)">—</span>`;
+    const mobileCell = emp.mobile
+      ? `<a href="tel:${escAttr(emp.mobile)}">${escHtml(emp.mobile)}</a>`
+      : `<span style="color:var(--text-dim)">—</span>`;
+    const emailCell = emp.email
+      ? `<a href="mailto:${escAttr(emp.email)}">${escHtml(emp.email)}</a>`
+      : `<span style="color:var(--text-dim)">—</span>`;
+    return `<tr>
+      <td>${avatarImg(emp, 32)}</td>
+      <td><strong>${escHtml(emp.fullName)}</strong></td>
+      <td>${escHtml(emp.jobTitle) || '<span style="color:var(--text-dim)">—</span>'}</td>
+      <td>${mobileCell}</td>
+      <td>${emailCell}</td>
+      <td>${dept}</td>
+    </tr>`;
+  }).join('');
+
+  const thClass = (col) => {
+    if (sortCol !== col) return '';
+    return ' class="sorted' + (sortAsc ? '' : ' desc') + '"';
+  };
+
+  area.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            <th${thClass('fullName')} onclick="sortList('fullName')">${t('Name')}</th>
+            <th${thClass('jobTitle')} onclick="sortList('jobTitle')">${t('Job Title')}</th>
+            <th${thClass('mobile')}   onclick="sortList('mobile')">${t('Mobile')}</th>
+            <th${thClass('email')}    onclick="sortList('email')">${t('Email')}</th>
+            <th${thClass('department')} onclick="sortList('department')">${t('Department')}</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function sortList(col) {
+  if (sortCol === col) {
+    sortAsc = !sortAsc;
+  } else {
+    sortCol = col;
+    sortAsc = true;
+  }
+  filteredEmployees.sort((a, b) => {
+    const av = (a[col] || '').toLowerCase();
+    const bv = (b[col] || '').toLowerCase();
+    if (av < bv) return sortAsc ? -1 : 1;
+    if (av > bv) return sortAsc ? 1 : -1;
+    return 0;
+  });
+  renderEmployees();
+}
+
+// ── View toggle ───────────────────────────────────────────────────────────────
+function setView(mode) {
+  currentView = mode;
+  localStorage.setItem(VIEW_KEY, mode);
+  document.getElementById('btn-tiles').classList.toggle('active', mode === 'tiles');
+  document.getElementById('btn-list').classList.toggle('active', mode === 'list');
+  sortCol = null; sortAsc = true;
+  renderEmployees();
+}
+
+// ── Pagination ────────────────────────────────────────────────────────────────
+function renderPagination() {
+  const el = document.getElementById('pagination-wrap');
+  if (!el) return;
+  if (totalEmployees <= PAGE_SIZE) { el.innerHTML = ''; return; }
+  const page       = Math.floor(currentSkip / PAGE_SIZE);
+  const totalPages = Math.ceil(totalEmployees / PAGE_SIZE);
+  el.innerHTML = `
+    <div class="pagination">
+      <span>${t('Page')} ${page + 1} ${t('of')} ${totalPages}</span>
+      <button class="page-btn" onclick="loadEmployees(${Math.max(0, currentSkip - PAGE_SIZE)})"
+        ${page === 0 ? 'disabled' : ''}>← ${t('Previous')}</button>
+      <button class="page-btn" onclick="loadEmployees(${currentSkip + PAGE_SIZE})"
+        ${page >= totalPages - 1 ? 'disabled' : ''}>${t('Next')} →</button>
+    </div>`;
+}
+
+// ── Loader / Error states ─────────────────────────────────────────────────────
+function showLoader() {
+  const area = document.getElementById('content-area');
+  if (area) {
+    area.innerHTML = `<div class="loader-wrap">
+      <div class="spinner"></div>
+      <span class="loader-label">${t('Loading...')}</span>
+    </div>`;
+  }
+}
+
+function showError(msg) {
+  const area = document.getElementById('content-area');
+  if (area) {
+    area.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div>${escHtml(msg)}</div>`;
+  }
+  toast(msg, 'error');
+}
+
+// ── Escape helpers ────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+function escAttr(s) { return encodeURI(String(s)); }
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+(async function init() {
+  const settings = bcSettingsLoad();
+  if (!settings.companyId) {
+    window.location.href = 'index.html';
+    return;
+  }
+
+  selectedCompany = { id: settings.companyId, name: settings.companyName || settings.companyId };
+  selectedLcid    = parseInt(settings.lcid || '1033', 10);
+
+  const lblEl = document.getElementById('company-label');
+  if (lblEl) lblEl.textContent = selectedCompany.name;
+
+  // Apply saved view mode toggle state
+  setView(currentView);
+
+  setStatus('connected');
+
+  // Load translations + dimension values in parallel, then load employees
+  await Promise.all([loadUiTranslations(), loadDimensionValues()]);
+  applyUiTranslations();
+  await loadEmployees(0);
+})();
+</script>
+</body>
+</html>
