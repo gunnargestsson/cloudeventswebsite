@@ -329,18 +329,13 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
       console.log(`[bcQueue] Fetching result from URL: ${dataUrl}`);
       const url = new URL(dataUrl);
       
-      // Check Content-Type to determine how to fetch the data
-      const contentType = await new Promise((resolve, reject) => {
-        https.request(
-          { hostname: url.hostname, path: url.pathname + url.search, method: "HEAD", headers: { Authorization: `Bearer ${token}` } },
-          (res) => resolve(res.headers["content-type"] || "")
-        ).on("error", reject).end();
-      });
+      // Read datacontenttype from queue record to determine response format
+      const dataContentType = queueRecord.datacontenttype || "";
+      console.log(`[bcQueue] Queue datacontenttype: ${dataContentType}`);
       
-      console.log(`[bcQueue] Content-Type: ${contentType}`);
-      
-      // Parse based on Content-Type
-      if (contentType.includes("application/json")) {
+      // Route based on datacontenttype from queue record (no HEAD request needed)
+      if (dataContentType.includes("json")) {
+        // JSON response (e.g., count queries, record data)
         const jsonResult = await httpsJson(url.hostname, url.pathname + url.search, "GET", { Authorization: `Bearer ${token}` }, null);
         console.log(`[bcQueue] Received JSON result - noOfRecords: ${jsonResult.noOfRecords || 'N/A'}, BC Time: ${queueRecord.time || 'null'}`);
         return {
@@ -348,7 +343,7 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
           time: queueRecord.time || null,
         };
       } else {
-        // CSV or text content
+        // CSV or text content (bulk export)
         const csvData = await httpsText(url.hostname, url.pathname + url.search, { Authorization: `Bearer ${token}` });
         const csvSize = csvData ? csvData.length : 0;
         const csvLines = csvData ? csvData.split('\n').length : 0;
