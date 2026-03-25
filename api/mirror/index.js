@@ -618,6 +618,13 @@ async function getTableConfigs(conn, token, companyId) {
   return { mirrors, count: mirrors.length };
 }
 
+async function getTableConfig(conn, token, companyId, tableId) {
+  const tables = await getStoredTables(conn, token, companyId);
+  const table = tables.find((t) => Number(t.tableId) === Number(tableId));
+  if (!table) return null;
+  return normalizeTableConfig(table);
+}
+
 async function saveTableConfigs(conn, token, companyId, tables) {
   if (!Array.isArray(tables)) throw new Error("tables must be an array");
   const normalized = tables.map(normalizeTableConfig);
