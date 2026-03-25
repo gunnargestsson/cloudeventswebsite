@@ -1666,21 +1666,26 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     // Store queueId in runningConfigs so stopTableNow can cancel the BC task
     const runInfo = state.runningConfigs.get(configId);
     if (runInfo) runInfo.queueId = queueId;
-    const maxAttempts = 360; // 1 hour max (360 × 10 sec)
-    const pollIntervalMs = 10000; // 10 seconds
-    let attempt = 0;
+    const maxWaitMs = 12 * 60 * 60 * 1000; // 12 hours max
+    let elapsedMs = 0;
+    // Adaptive polling: 10s for first 2 min, 30s up to 10 min, 60s after that
+    function getPollInterval(elapsed) {
+      if (elapsed < 2 * 60 * 1000) return 10000;   // first 2 min: 10s
+      if (elapsed < 10 * 60 * 1000) return 30000;   // 2–10 min: 30s
+      return 60000;                                  // 10 min+: 60s
+    }
     
     addLog(`${t('Generating CSV export')}...`, 'info');
-    addLog(`${t('Polling for completion every 10 seconds')}...`, 'info');
     
-    while (attempt < maxAttempts) {
+    while (elapsedMs < maxWaitMs) {
       // Check if we were told to stop (scheduler stopped, abort signal fired)
       if (runAc.signal.aborted) {
         addLog(`Mirror run aborted for: ${tableName}`, 'warn');
         return null;
       }
+      const interval = getPollInterval(elapsedMs);
       await new Promise((resolve) => {
-        const timer = setTimeout(resolve, pollIntervalMs);
+        const timer = setTimeout(resolve, interval);
         const onAbort = () => { clearTimeout(timer); resolve(); };
         runAc.signal.addEventListener('abort', onAbort, { once: true });
       });
@@ -1688,7 +1693,7 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
         addLog(`Mirror run aborted for: ${tableName}`, 'warn');
         return null;
       }
-      attempt++;
+      elapsedMs += interval;
       
       let statusResult;
       try {
@@ -1700,7 +1705,7 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
       }
       
       if (statusResult.status === 'completed') {
-        addLog(`${t('CSV generation completed after')} ${Math.floor(attempt * pollIntervalMs / 1000)}s`, 'ok');
+        addLog(`${t('CSV generation completed after')} ${Math.floor(elapsedMs / 1000)}s`, 'ok');
         break;
       }
       
@@ -1708,16 +1713,19 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
         throw new Error('Queue entry was deleted or not found');
       }
       
-      // Still running - log progress every 30 seconds (every 3rd poll)
-      if (attempt % 3 === 0) {
-        addLog(`${t('Still generating CSV')}... (${Math.floor(attempt * pollIntervalMs / 1000)}s elapsed)`, 'info');
+      // Log progress every ~60 seconds
+      const logEvery = interval < 60000 ? Math.max(1, Math.round(60000 / interval)) : 1;
+      if (Math.round(elapsedMs / interval) % logEvery === 0) {
+        const mins = Math.floor(elapsedMs / 60000);
+        const secs = Math.floor((elapsedMs % 60000) / 1000);
+        addLog(`${t('Still generating CSV')}... (${mins > 0 ? mins + 'm ' : ''}${secs}s elapsed, polling every ${interval / 1000}s)`, 'info');
       }
     }
     
     if (runAc.signal.aborted) return null;
     
-    if (attempt >= maxAttempts) {
-      throw new Error(`CSV generation timed out after ${maxAttempts * pollIntervalMs / 1000} seconds`);
+    if (elapsedMs >= maxWaitMs) {
+      throw new Error(`CSV generation timed out after ${maxWaitMs / 3600000} hours`);
     }
     
     // Step 3: Fetch the completed data
