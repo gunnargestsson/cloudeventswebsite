@@ -968,13 +968,14 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
   await withTableRefFallback(tableCfg, async (tableRef) => {
     const tableSelector = parseTableRef(tableRef);
     logs.push(`Checking for new records in ${tableCfg.tableName}...`);
-    const countResult = await dataRecordsGetAsync(conn, token, companyId, {
+    const countPayload = {
       ...tableSelector,
-      tableView: countTableView,
+      ...(countTableView ? { tableView: countTableView } : {}),
       skip: 0,
       take: 1,
       fieldNumbers: [1],
-    });
+    };
+    const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
 
     noOfRecords = Number(countResult.noOfRecords || 0);
     logs.push(`Found ${noOfRecords} record(s) to mirror`);
@@ -982,7 +983,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
 
     const csvPayload = {
       ...tableSelector,
-      tableView: runTableView,
+      ...(runTableView ? { tableView: runTableView } : {}),
       fieldNumbers:
         tableCfg.fieldNumbers && tableCfg.fieldNumbers.length
           ? tableCfg.fieldNumbers
@@ -1054,13 +1055,14 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
       logs.push(`Checking for remaining records...`);
       await withTableRefFallback(tableCfg, async (tableRef) => {
         const tableSelector = parseTableRef(tableRef);
-        const nextCountResult = await dataRecordsGetAsync(conn, token, companyId, {
+        const nextCountPayload = {
           ...tableSelector,
-          tableView: nextTableView,
+          ...(nextTableView ? { tableView: nextTableView } : {}),
           skip: 0,
           take: 1,
           fieldNumbers: [1],
-        });
+        };
+        const nextCountResult = await dataRecordsGetAsync(conn, token, companyId, nextCountPayload);
         const nextCount = Number(nextCountResult.noOfRecords || 0);
         hasMoreRecords = nextCount > 0;
         logs.push(`Found ${nextCount} remaining record(s) in backlog`);
