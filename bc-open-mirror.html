@@ -783,6 +783,7 @@ const UI_STRINGS = [
   'CSV generation completed after',
   'Still generating CSV',
   'Fetching and uploading CSV data',
+  'Status check failed, retrying',
   'Copy',
   'Copy Table',
   'modify filter and save',
@@ -1620,7 +1621,14 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
       }
       attempt++;
       
-      const statusResult = await api('checkQueueStatus', { queueId });
+      let statusResult;
+      try {
+        statusResult = await api('checkQueueStatus', { queueId });
+      } catch (pollError) {
+        // Transient backend error — log warning and retry on next poll
+        addLog(`${t('Status check failed, retrying')}: ${pollError.message}`, 'warn');
+        continue;
+      }
       
       if (statusResult.status === 'completed') {
         addLog(`${t('CSV generation completed after')} ${Math.floor(attempt * pollIntervalMs / 1000)}s`, 'ok');
@@ -1676,7 +1684,6 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     const table = state.tables.find((t) => t.configId === configId);
     const tableName = table ? table.tableName : `Config ${configId}`;
     addLog(`${t('Mirror run failed')}: ${tableName} - ${error.message}`, 'error');
-    handleUiError(error);
     throw error;
   } finally {
     state.activeMirrorCount = Math.max(0, state.activeMirrorCount - 1);
