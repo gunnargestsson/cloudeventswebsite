@@ -772,7 +772,12 @@ const UI_STRINGS = [
   'No',
   'Failed to load tables',
   'Failed to lookup table',
-  'Table not found'
+  'Table not found',
+  'Generating CSV export',
+  'Polling for completion every 10 seconds',
+  'CSV generation completed after',
+  'Still generating CSV',
+  'Fetching and uploading CSV data'
 ];
 
 const CONFIG = {
@@ -1490,11 +1495,60 @@ window.runTableNow = async function runTableNow(tableId) {
     const tableName = table ? table.tableName : `Table ${tableId}`;
     
     addLog(`${t('Starting mirror run for')}: ${tableName}`, 'info');
-    addLog(`${t('Requesting CSV data from Business Central...')}`, 'info');
     
-    const result = await api('runNow', { tableId });
+    // Step 1: Start the queue (returns immediately with queueId)
+    const startResult = await api('startQueueMirror', { tableId });
     
-    // Display any logs from the backend
+    // Display initial logs
+    if (startResult.logs && Array.isArray(startResult.logs)) {
+      startResult.logs.forEach(log => addLog(log, 'info'));
+    }
+    
+    // If skipped (no records), return immediately
+    if (startResult.skipped) {
+      addLog(`${t('Mirror run skipped')}: ${startResult.tableName} - ${startResult.reason || 'No records to mirror'}`, 'warn');
+      return startResult;
+    }
+    
+    // Step 2: Poll for completion (frontend polling - no timeout limit)
+    const queueId = startResult.queueId;
+    const maxAttempts = 360; // 1 hour max (360 × 10 sec)
+    const pollIntervalMs = 10000; // 10 seconds
+    let attempt = 0;
+    
+    addLog(`${t('Generating CSV export')}... (${startResult.recordCount} records)`, 'info');
+    addLog(`${t('Polling for completion every 10 seconds')}...`, 'info');
+    
+    while (attempt < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+      attempt++;
+      
+      const statusResult = await api('checkQueueStatus', { queueId });
+      
+      if (statusResult.status === 'completed') {
+        addLog(`${t('CSV generation completed after')} ${Math.floor(attempt * pollIntervalMs / 1000)}s`, 'ok');
+        break;
+      }
+      
+      if (statusResult.status === 'deleted') {
+        throw new Error('Queue entry was deleted or not found');
+      }
+      
+      // Still running - log progress every 30 seconds (every 3rd poll)
+      if (attempt % 3 === 0) {
+        addLog(`${t('Still generating CSV')}... (${Math.floor(attempt * pollIntervalMs / 1000)}s elapsed)`, 'info');
+      }
+    }
+    
+    if (attempt >= maxAttempts) {
+      throw new Error(`CSV generation timed out after ${maxAttempts * pollIntervalMs / 1000} seconds`);
+    }
+    
+    // Step 3: Fetch the completed data
+    addLog(`${t('Fetching and uploading CSV data')}...`, 'info');
+    const result = await api('fetchQueueData', { queueId, tableId });
+    
+    // Display final logs
     if (result.logs && Array.isArray(result.logs)) {
       result.logs.forEach(log => addLog(log, 'info'));
     }
@@ -1507,18 +1561,14 @@ window.runTableNow = async function runTableNow(tableId) {
     renderTables();
     refreshMetrics();
     
-    if (result.skipped) {
-      addLog(`${t('Mirror run skipped')}: ${result.tableName} - ${result.reason || 'No records to mirror'}`, 'warn');
-    } else {
-      let details = `${result.tableName}`;
-      if (result.mirroredRecords !== undefined) details += ` - ${result.mirroredRecords} records`;
-      if (result.deletedRecords) details += `, ${result.deletedRecords} deleted`;
-      if (result.filePath) details += ` → ${result.filePath}`;
-      addLog(`${t('Mirror run completed')}: ${details}`, 'ok');
-      
-      if (result.hasMoreRecords) {
-        addLog(`${t('More records available, will run again in 5 seconds')}`, 'info');
-      }
+    let details = `${result.tableName}`;
+    if (result.mirroredRecords !== undefined) details += ` - ${result.mirroredRecords} records`;
+    if (result.deletedRecords) details += `, ${result.deletedRecords} deleted`;
+    if (result.filePath) details += ` → ${result.filePath}`;
+    addLog(`${t('Mirror run completed')}: ${details}`, 'ok');
+    
+    if (result.hasMoreRecords) {
+      addLog(`${t('More records available, will run again in 5 seconds')}`, 'info');
     }
     
     return result;

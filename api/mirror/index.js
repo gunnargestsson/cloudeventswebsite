@@ -65,6 +65,15 @@ module.exports = async function (context, req) {
       case "runNow":
         result = await runMirror(conn, token, companyId, Number(req.body?.tableId), lcid);
         break;
+      case "startQueueMirror":
+        result = await startQueueMirror(conn, token, companyId, Number(req.body?.tableId), lcid);
+        break;
+      case "checkQueueStatus":
+        result = await checkQueueStatus(conn, token, companyId, req.body?.queueId);
+        break;
+      case "fetchQueueData":
+        result = await fetchQueueData(conn, token, companyId, req.body?.queueId, Number(req.body?.tableId), lcid);
+        break;
       case "runAllActive":
         result = await runAllActive(conn, token, companyId, lcid);
         break;
@@ -950,6 +959,193 @@ function extractCsvPayload(result) {
   if (typeof result.data === "string") return result.data;
   if (Array.isArray(result.result)) return result.result.join("\n");
   return "";
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FRONTEND POLLING ARCHITECTURE - Separate queue start, status check, data fetch
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function startQueueMirror(conn, token, companyId, tableId, lcid = 1033) {
+  if (!tableId) throw new Error("tableId is required");
+
+  const connection = await getMirrorConnection(conn, token, companyId);
+  if (!connection || connection.status !== "verified")
+    throw new Error("Verified mirror connection is required");
+
+  const tableCfg = await getTableConfig(conn, token, companyId, tableId);
+  if (!tableCfg) throw new Error(`Table config not found for tableId ${tableId}`);
+
+  const logs = [];
+  logs.push(`Starting queue for ${tableCfg.tableName}...`);
+
+  // Get last integration timestamp
+  const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
+
+  // Count records to mirror
+  const countPayload = {
+    tableName: tableCfg.tableName,
+    tableView: buildCountTableView(previousTs),
+  };
+  const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
+  const noOfRecords = countResult.noOfRecords || 0;
+  logs.push(`Found ${noOfRecords} record(s) to mirror`);
+
+  if (noOfRecords === 0) {
+    return {
+      tableId: tableCfg.tableId,
+      tableName: tableCfg.tableName,
+      skipped: true,
+      reason: "No records to mirror",
+      logs,
+    };
+  }
+
+  // Start the CSV export queue (don't wait for completion)
+  const { tenantId, environment } = conn;
+  const queueId = crypto.randomUUID();
+  
+  const csvPayload = {
+    tableName: tableCfg.tableName,
+    tableView: buildRunTableView(previousTs),
+    fieldNumbers: tableCfg.fieldNumbers && tableCfg.fieldNumbers.length ? tableCfg.fieldNumbers : undefined,
+  };
+  if (lcid !== undefined && lcid !== 1033) csvPayload.lcid = Number(lcid);
+
+  const envelope = {
+    specversion: "1.0",
+    id: queueId,
+    type: "CSV.Records.Get",
+    source: SOURCE,
+    data: JSON.stringify(csvPayload),
+  };
+
+  const queuePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues`;
+  await httpsJson(BC_HOST, queuePath, "POST", { Authorization: `Bearer ${token}` }, envelope);
+
+  logs.push(`Queue started: ${queueId}`);
+  logs.push(`Generating CSV export for ${noOfRecords} records...`);
+
+  return {
+    tableId: tableCfg.tableId,
+    tableName: tableCfg.tableName,
+    queueId,
+    recordCount: noOfRecords,
+    logs,
+  };
+}
+
+async function checkQueueStatus(conn, token, companyId, queueId) {
+  if (!queueId) throw new Error("queueId is required");
+
+  const { tenantId, environment } = conn;
+  const getStatusPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})/Microsoft.NAV.GetStatus`;
+
+  // Call GetStatus action - returns HTTP status code indicating queue state
+  const statusResponse = await httpsJsonWithStatus(BC_HOST, getStatusPath, "POST", { Authorization: `Bearer ${token}` }, null);
+
+  // BC returns status as HTTP status codes:
+  // 201 Created = still running
+  // 200 OK = completed (Updated)
+  // 204 No Content = deleted or not found
+  if (statusResponse.statusCode === 204) {
+    return { status: "deleted", message: "Queue entry deleted or not found" };
+  }
+
+  if (statusResponse.statusCode === 200) {
+    return { status: "completed", message: "Queue task completed" };
+  }
+
+  // 201 = still running
+  return { status: "running", message: "Queue task is still running" };
+}
+
+async function fetchQueueData(conn, token, companyId, queueId, tableId, lcid = 1033) {
+  if (!queueId) throw new Error("queueId is required");
+  if (!tableId) throw new Error("tableId is required");
+
+  const connection = await getMirrorConnection(conn, token, companyId);
+  if (!connection || connection.status !== "verified")
+    throw new Error("Verified mirror connection is required");
+
+  const tableCfg = await getTableConfig(conn, token, companyId, tableId);
+  if (!tableCfg) throw new Error(`Table config not found for tableId ${tableId}`);
+
+  const logs = [];
+  const { tenantId, environment } = conn;
+
+  // Get the queue record to retrieve data URL and timestamp
+  const queueRecordPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})`;
+  const queueRecord = await httpsJson(BC_HOST, queueRecordPath, "GET", { Authorization: `Bearer ${token}` }, null);
+
+  const dataUrl = queueRecord.data;
+  if (!dataUrl || !String(dataUrl).startsWith("https://")) {
+    throw new Error("Queue completed but no valid data URL returned");
+  }
+
+  const dataContentType = queueRecord.datacontenttype || "";
+  logs.push(`Fetching CSV data from BC (${dataContentType})...`);
+
+  // Fetch the CSV data
+  const url = new URL(dataUrl);
+  const csv = await httpsText(url.hostname, url.pathname + url.search, { Authorization: `Bearer ${token}` });
+  
+  const csvSize = csv ? csv.length : 0;
+  const csvLines = csv ? csv.split('\n').length - 1 : 0; // -1 for header
+  logs.push(`Downloaded CSV: ${csvSize} bytes, ${csvLines} data rows`);
+
+  // Get confirmed timestamp from BC
+  let confirmedIso = null;
+  let confirmedDt = null;
+  if (queueRecord.time) {
+    confirmedDt = new Date(queueRecord.time);
+    confirmedIso = isoNoMs(confirmedDt);
+  }
+
+  // Get previous timestamp for deleted records check
+  const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
+
+  // Count and fetch deleted records
+  const noOfDeleted = await getDeletedRecordCount(conn, token, companyId, tableCfg, previousTs, confirmedIso);
+  logs.push(`Found ${noOfDeleted} deleted record(s)`);
+
+  let deletedCsv = "";
+  if (noOfDeleted > 0) {
+    deletedCsv = await getCsvDeletedRecords(conn, token, companyId, tableCfg, previousTs, confirmedIso, lcid);
+  }
+
+  // Upload to Open Mirror
+  const { filePath, mirroredRecords, deletedRecords } = await uploadCsvToOpenMirror(
+    connection,
+    tableCfg,
+    csv,
+    deletedCsv
+  );
+
+  logs.push(`Uploaded to Open Mirror: ${filePath}`);
+  logs.push(`${mirroredRecords} records mirrored, ${deletedRecords} deleted`);
+
+  // Save integration timestamp
+  await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableId, confirmedIso || previousTs);
+
+  // Check for remaining records
+  const remainingPayload = {
+    tableName: tableCfg.tableName,
+    tableView: buildCountTableView(confirmedIso || previousTs),
+  };
+  const remainingResult = await dataRecordsGetAsync(conn, token, companyId, remainingPayload);
+  const remainingRecords = remainingResult.noOfRecords || 0;
+  logs.push(`Checking for remaining records: ${remainingRecords} remaining in backlog`);
+
+  return {
+    tableId: tableCfg.tableId,
+    tableName: tableCfg.tableName,
+    mirroredRecords,
+    deletedRecords,
+    filePath,
+    endDateTime: confirmedIso,
+    hasMoreRecords: remainingRecords > 0,
+    logs,
+  };
 }
 
 async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
