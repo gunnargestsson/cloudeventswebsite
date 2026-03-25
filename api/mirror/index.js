@@ -71,6 +71,9 @@ module.exports = async function (context, req) {
       case "checkQueueStatus":
         result = await checkQueueStatus(conn, token, companyId, req.body?.queueId);
         break;
+      case "cancelQueueMirror":
+        result = await cancelQueueMirror(conn, token, companyId, req.body?.queueId);
+        break;
       case "fetchQueueData":
         result = await fetchQueueData(conn, token, companyId, req.body?.queueId, req.body?.configId, lcid);
         break;
@@ -1107,6 +1110,25 @@ async function checkQueueStatus(conn, token, companyId, queueId) {
 
   // 201 = still running
   return { status: "running", message: "Queue task is still running" };
+}
+
+async function cancelQueueMirror(conn, token, companyId, queueId) {
+  if (!queueId) throw new Error("queueId is required");
+
+  const { tenantId, environment } = conn;
+  const cancelPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})/Microsoft.NAV.CancelTask`;
+
+  const cancelResponse = await httpsJsonWithStatus(BC_HOST, cancelPath, "POST", { Authorization: `Bearer ${token}` }, null);
+
+  // BC returns:
+  // 200 OK (Updated) = task was cancelled successfully
+  // 204 No Content (Deleted) = no task was scheduled
+  // 204 No Content (None) = cancellation failed
+  if (cancelResponse.statusCode === 200) {
+    return { status: "cancelled", message: "Queue task cancelled" };
+  }
+
+  return { status: "none", message: "No task to cancel or cancellation failed" };
 }
 
 async function fetchQueueData(conn, token, companyId, queueId, configId, lcid = 1033) {

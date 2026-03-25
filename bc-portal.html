@@ -1174,7 +1174,7 @@ async function loadCustomers(skip = 0) {
         specversion: '1.0',
         type: 'Data.Records.Get',
         source: 'BC Portal',
-        data: JSON.stringify({ tableName: 'Customer', fieldNumbers: [2, 7, 35, 39, 59, 82, 83, 102, 140], skip, take })
+        data: JSON.stringify({ tableName: 'Customer', fieldNumbers: [2, 7, 35, 39, 59, 82, 83, 102], skip, take })
       }),
       getFieldMeta('Customer', [39])
     ]);
@@ -1185,6 +1185,7 @@ async function loadCustomers(skip = 0) {
     document.getElementById('customer-count').textContent = total.toLocaleString() + ' ' + t('customers');
     renderCustomers(customers);
     paginate('customer-pagination', total, skip, take, 'loadCustomers');
+    loadCustomerImages(customers);
   } catch(e) {
     const errorDetails = e.stack || e.message;
     document.getElementById('customer-grid').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><p style="white-space: pre-wrap; text-align: left; font-size: 0.75rem;">${errorDetails}</p></div>`;
@@ -1208,6 +1209,29 @@ function renderCustomers(list) {
         ${c.balance?`<span class="cust-tag">${fmt(c.balance)}</span>`:''}
       </div>
     </div>`).join('');
+}
+
+async function loadCustomerImages(list) {
+  if (!list.length) return;
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type: 'Data.Records.Get',
+      source: 'BC Portal',
+      data: JSON.stringify({ tableName: 'Customer', fieldNumbers: [140], skip: 0, take: list.length })
+    });
+    for (const rec of (res.result || [])) {
+      const img = (rec.fields || {}).Image;
+      if (img && img.Value) {
+        const cust = list.find(c => c.id === rec.id);
+        if (cust) {
+          cust.image = img.Value;
+          const card = document.querySelector(`.customer-card[onclick*="'${cust.id}'"] .cust-avatar`);
+          if (card) card.innerHTML = `<img src="data:image/jpeg;base64,${img.Value}" alt="">`;
+        }
+      }
+    }
+  } catch(e) { /* images are non-critical — fail silently */ }
 }
 
 function filterCustomers() {

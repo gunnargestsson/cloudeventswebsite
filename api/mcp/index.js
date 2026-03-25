@@ -868,6 +868,71 @@ async function toolSetTranslations({ source, lcid, translations, companyId, tena
   return { company: company.name, source, lcid: Number(lcid), written: translations.length };
 }
 
+async function toolGetFieldTranslation({ table, systemId, fieldId, lcid, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table)                                    throw new Error("Parameter 'table' is required (table name or number)");
+  if (!systemId)                                 throw new Error("Parameter 'systemId' is required (record SystemId GUID without braces)");
+  if (fieldId === undefined || fieldId === null) throw new Error("Parameter 'fieldId' is required (field number)");
+  if (!lcid)                                     throw new Error("Parameter 'lcid' is required (Windows Language ID, e.g. 1033)");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Field.Translation.Get",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(table),
+    data:        JSON.stringify({ systemId: String(systemId), fieldId: Number(fieldId), lcid: Number(lcid) }),
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolSetFieldTranslation({ table, systemId, fieldId, lcid, value, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table)                                    throw new Error("Parameter 'table' is required (table name or number)");
+  if (!systemId)                                 throw new Error("Parameter 'systemId' is required (record SystemId GUID without braces)");
+  if (fieldId === undefined || fieldId === null) throw new Error("Parameter 'fieldId' is required (field number)");
+  if (!lcid)                                     throw new Error("Parameter 'lcid' is required (Windows Language ID, e.g. 1033)");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = { systemId: String(systemId), fieldId: Number(fieldId), lcid: Number(lcid) };
+  if (value !== undefined && value !== null) data.value = String(value);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Field.Translation.Set",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(table),
+    data:        JSON.stringify(data),
+  });
+
+  return { company: company.name, ...result };
+}
+
+async function toolGetFieldTranslations({ table, systemId, fieldId, lcid, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table)    throw new Error("Parameter 'table' is required (table name or number)");
+  if (!systemId) throw new Error("Parameter 'systemId' is required (record SystemId GUID without braces)");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = { systemId: String(systemId) };
+  if (fieldId !== undefined && fieldId !== null) data.fieldId = Number(fieldId);
+  if (lcid    !== undefined && lcid    !== null) data.lcid    = Number(lcid);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Field.Translations.Get",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(table),
+    data:        JSON.stringify(data),
+  });
+
+  return { company: company.name, ...result };
+}
+
 // ── Cloud Events Integration helpers ─────────────────────────────────────────
 
 const CI_TABLE = "Cloud Events Integration";
@@ -2996,6 +3061,49 @@ const TOOLS = [
     },
   },
   {
+    name:        "get_field_translation",
+    description: "Returns the translated value for a single field on a specific BC record (Field.Translation.Get). Uses BC codeunit 3711 Translation.Get(). Requires table, record SystemId, field number, and language LCID.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:    { type: "string",  description: "BC table name or table number (e.g. 'Customer' or '18')." },
+        systemId: { type: "string",  description: "Record SystemId GUID without braces (e.g. '12345678-1234-1234-1234-123456789012')." },
+        fieldId:  { type: "integer", description: "Field number to retrieve translation for (e.g. 2 for Name)." },
+        lcid:     { type: "integer", description: "Windows Language ID (e.g. 1039 for Icelandic, 1030 for Danish, 1033 for English)." },
+      },
+      required: ["table", "systemId", "fieldId", "lcid"],
+    },
+  },
+  {
+    name:        "set_field_translation",
+    description: "Creates, updates, or deletes a translation for a single field on a BC record (Field.Translation.Set). Uses BC codeunit 3711 Translation.Set(). Pass an empty or omitted value to delete the translation.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:    { type: "string",  description: "BC table name or table number (e.g. 'Customer' or '18')." },
+        systemId: { type: "string",  description: "Record SystemId GUID without braces." },
+        fieldId:  { type: "integer", description: "Field number to set translation for." },
+        lcid:     { type: "integer", description: "Windows Language ID (e.g. 1039 for Icelandic)." },
+        value:    { type: "string",  description: "Translated text. Omit or pass empty string to delete the translation." },
+      },
+      required: ["table", "systemId", "fieldId", "lcid"],
+    },
+  },
+  {
+    name:        "get_field_translations",
+    description: "Returns all translations for a BC record across fields and/or languages (Field.Translations.Get). Omit fieldId (or pass 0) to get all fields. Omit lcid to get all languages. Returns translationCount and a translations array with {fieldId, languageId, value} per entry.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:    { type: "string",  description: "BC table name or table number (e.g. 'Customer' or '18')." },
+        systemId: { type: "string",  description: "Record SystemId GUID without braces." },
+        fieldId:  { type: "integer", description: "Field number to filter by. Omit or pass 0 to return all translated fields." },
+        lcid:     { type: "integer", description: "Windows Language ID to filter by. Omit to return all languages." },
+      },
+      required: ["table", "systemId"],
+    },
+  },
+  {
     name:        "get_record_ids",
     description: "Returns SystemId + SystemModifiedAt for every record matching an optional filter and date range using Data.RecordIds.Get. Designed for fast incremental sync — no field data is returned.",
     inputSchema: {
@@ -3503,6 +3611,9 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "search_records":      content = await toolSearchRecords(args);      break;
           case "list_translations":            content = await toolListTranslations(args);            break;
           case "set_translations":             content = await toolSetTranslations(args);             break;
+          case "get_field_translation":        content = await toolGetFieldTranslation(args);         break;
+          case "set_field_translation":        content = await toolSetFieldTranslation(args);         break;
+          case "get_field_translations":       content = await toolGetFieldTranslations(args);        break;
           case "get_integration_timestamp":     content = await toolGetIntegrationTimestamp(args);     break;
           case "set_integration_timestamp":     content = await toolSetIntegrationTimestamp(args);     break;
           case "reverse_integration_timestamp": content = await toolReverseIntegrationTimestamp(args); break;

@@ -796,7 +796,8 @@ const UI_STRINGS = [
   'Stop Now',
   'Running',
   'Started',
-  'Duration'
+  'Duration',
+  'Mirror run cancelled in BC'
 ];
 
 const CONFIG = {
@@ -1587,6 +1588,12 @@ window.toggleActivation = async function toggleActivation(configId, currentlyAct
 
 window.stopTableNow = function stopTableNow(configId) {
   const info = state.runningConfigs.get(configId);
+  // Send CancelTask to BC if we have a queueId (fire-and-forget)
+  if (info && info.queueId) {
+    api('cancelQueueMirror', { queueId: info.queueId })
+      .then(r => { if (r && r.status === 'cancelled') addLog(t('Mirror run cancelled in BC'), 'info'); })
+      .catch(() => {});
+  }
   if (info && info.ac) info.ac.abort();
   // Also stop any scheduler timer so it doesn't auto-restart
   stopSchedulerForTable(configId);
@@ -1656,6 +1663,9 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     
     // Step 2: Poll for completion (frontend polling - no timeout limit)
     const queueId = startResult.queueId;
+    // Store queueId in runningConfigs so stopTableNow can cancel the BC task
+    const runInfo = state.runningConfigs.get(configId);
+    if (runInfo) runInfo.queueId = queueId;
     const maxAttempts = 360; // 1 hour max (360 × 10 sec)
     const pollIntervalMs = 10000; // 10 seconds
     let attempt = 0;
