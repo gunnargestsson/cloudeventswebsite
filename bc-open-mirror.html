@@ -1794,9 +1794,7 @@ function startSchedulerForTable(table) {
     try {
       result = await window.runTableNow(table.configId, { signal: ac.signal });
     } catch (error) {
-      if (!ac.signal.aborted) {
-        addLog(`${t('Mirror run failed')}: ${table.tableName} — ${error.message}`, 'error');
-      }
+      // Error already logged inside runTableNow — just swallow here
     }
 
     // Clean up the abort controller
@@ -1812,10 +1810,9 @@ function startSchedulerForTable(table) {
       nextDelayMs = 5000;
       addLog(`${t('Backlog detected for')} ${table.tableName}, ${t('scheduling immediate follow-up')}`, 'info');
     } else {
-      // No more records - schedule next run after full interval from lastRunAt
-      const updatedTable = state.tables.find((t) => t.configId === table.configId);
-      const lastRunMs = updatedTable?.lastRunAt ? new Date(updatedTable.lastRunAt).getTime() : Date.now();
-      nextDelayMs = Math.max(0, lastRunMs + intervalMs - Date.now());
+      // No more records (or skipped/failed) — wait the full interval from now.
+      // Using lastRunAt would compute 0 when it's stale, causing rapid-fire loops.
+      nextDelayMs = intervalMs;
     }
 
     // Schedule the next run
