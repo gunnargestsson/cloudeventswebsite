@@ -294,8 +294,8 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
   // Poll for status using Microsoft.NAV.GetStatus
   const getStatusPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})/Microsoft.NAV.GetStatus`;
   const queueRecordPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})`;
-  const maxAttempts = 120; // 60 minutes max with 30-second intervals
-  const pollIntervalMs = 5000;
+  const maxAttempts = 108; // 9 minutes max (108 × 5 sec = 540 sec) - fits within Azure Function 10-min timeout
+  const pollIntervalMs = 5000; // 5 seconds between polls
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
