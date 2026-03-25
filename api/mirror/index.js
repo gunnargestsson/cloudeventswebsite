@@ -707,6 +707,13 @@ function buildWhereClause(storedWhere, extraClause) {
   return storedWhere.replace(/\)\s*$/i, `,${extraClause})`);
 }
 
+function buildCountTableView(tableCfg, startIso, endIso) {
+  // For count queries, we only need the WHERE clause without sorting
+  const rangeClause = startIso ? `SystemModifiedAt=FILTER(${startIso}..${endIso})` : null;
+  const where = buildWhereClause(tableCfg.tableView || "", rangeClause);
+  return where || null;
+}
+
 function buildRunTableView(tableCfg, startIso, endIso) {
   const rangeClause = startIso ? `SystemModifiedAt=FILTER(${startIso}..${endIso})` : null;
   const where = buildWhereClause(tableCfg.tableView || "", rangeClause);
@@ -944,6 +951,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
   const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
+  const countTableView = buildCountTableView(tableCfg, previousTs, endIso);
   const runTableView = buildRunTableView(tableCfg, previousTs, endIso);
 
   // ── Step 1: Count and fetch modified records ─────────────────────────────────
@@ -956,7 +964,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
     const tableSelector = parseTableRef(tableRef);
     const countResult = await dataRecordsGet(conn, token, companyId, {
       ...tableSelector,
-      tableView: runTableView,
+      tableView: countTableView,
       skip: 0,
       take: 1,
       fieldNumbers: [1],
