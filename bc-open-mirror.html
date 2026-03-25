@@ -344,6 +344,10 @@
   }
   .pill.active { color: var(--green); border-color: rgba(39,192,138,0.3); background: rgba(39,192,138,0.08); }
   .pill.inactive { color: var(--amber); border-color: rgba(245,166,35,0.3); background: rgba(245,166,35,0.08); }
+  .pill.running { color: var(--blue, #5bc0de); border-color: rgba(91,192,222,0.3); background: rgba(91,192,222,0.08); animation: pulse-running 2s infinite; }
+  @keyframes pulse-running { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+  .mirror-card.locked .mirror-actions button:not(.stop-btn) { opacity: 0.35; pointer-events: none; }
+  .mirror-running-info { font-size: 0.72rem; color: var(--text-dim); display: flex; gap: 16px; align-items: center; }
   .mirror-meta-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -788,7 +792,11 @@ const UI_STRINGS = [
   'Copy Table',
   'modify filter and save',
   'Another config for this table already uses the same Table View.',
-  'Saving table'
+  'Saving table',
+  'Stop Now',
+  'Running',
+  'Started',
+  'Duration'
 ];
 
 const CONFIG = {
@@ -818,6 +826,8 @@ const state = {
   maxConcurrentMirrors: 3,     // max simultaneous mirror tasks
   activeMirrorCount: 0,        // currently running mirror tasks
   activeTableIds: new Set(),   // tableIds currently running — prevents same-table concurrency
+  runningConfigs: new Map(),   // configId → { startedAt: Date, ac: AbortController }
+  durationTicker: null,        // setInterval id for updating running durations
 };
 
 function t(key) {
@@ -1432,19 +1442,26 @@ function renderTables() {
   container.innerHTML = filtered.map((table) => {
     const statusClass = table.active ? 'active' : 'inactive';
     const cid = escapeHtml(table.configId);
+    const running = state.runningConfigs.has(table.configId);
+    const runInfo = running ? state.runningConfigs.get(table.configId) : null;
+    const cardClass = running ? 'mirror-card locked' : 'mirror-card';
+    const durationStr = runInfo ? formatDuration(Date.now() - runInfo.startedAt.getTime()) : '';
+    const startStr = runInfo ? runInfo.startedAt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '';
     return `
-      <div class="mirror-card">
+      <div class="${cardClass}">
         <div class="mirror-card-top">
           <div>
             <div class="mirror-title">${escapeHtml(table.tableName)}</div>
             <div class="mirror-id">${t('Table ID')}: ${table.tableId}</div>
           </div>
           <div class="pill-row">
+            ${running ? `<span class="pill running">${t('Running')}</span>` : ''}
             <span class="pill ${statusClass}">${table.active ? t('Active') : t('Inactive')}</span>
             <span class="pill">${table.intervalMin} ${t('min')}</span>
             <span class="pill">${t('Field Count')}: ${table.fieldNumbers && table.fieldNumbers.length ? table.fieldNumbers.length : t('Fields')}</span>
           </div>
         </div>
+        ${running ? `<div class="mirror-running-info"><span>${t('Started')}: ${startStr}</span><span>${t('Duration')}: ${durationStr}</span></div>` : ''}
         <div class="mirror-meta-grid">
           <div class="meta-box"><div class="meta-label">${t('Table View')}</div><div class="meta-value">${escapeHtml(table.tableView || '—')}</div></div>
           <div class="meta-box"><div class="meta-label">${t('Data Per Company')}</div><div class="meta-value">${table.dataPerCompany}</div></div>
@@ -1453,7 +1470,9 @@ function renderTables() {
         </div>
         <div class="mirror-actions">
           <button class="btn ${table.active ? 'secondary' : ''}" onclick="toggleActivation('${cid}', ${table.active})">${table.active ? t('Deactivate') : t('Activate')}</button>
-          <button class="btn secondary" onclick="runTableNow('${cid}')">${t('Run Now')}</button>
+          ${running
+            ? `<button class="btn danger stop-btn" onclick="stopTableNow('${cid}')">${t('Stop Now')}</button>`
+            : `<button class="btn secondary" onclick="runTableNow('${cid}')">${t('Run Now')}</button>`}
           <button class="btn ghost" onclick="copyTable('${cid}')">${t('Copy')}</button>
           ${table.active ? '' : `<button class="btn ghost" onclick="editTable('${cid}')">${t('Edit Table')}</button>`}
           <button class="btn danger" onclick="removeTable('${cid}')">${t('Delete')}</button>
@@ -1566,6 +1585,31 @@ window.toggleActivation = async function toggleActivation(configId, currentlyAct
   }
 };
 
+window.stopTableNow = function stopTableNow(configId) {
+  const info = state.runningConfigs.get(configId);
+  if (info && info.ac) info.ac.abort();
+  // Also stop any scheduler timer so it doesn't auto-restart
+  stopSchedulerForTable(configId);
+};
+
+function formatDuration(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+  if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`;
+  return `${s}s`;
+}
+
+function startDurationTicker() {
+  if (state.durationTicker) return;
+  state.durationTicker = setInterval(() => {
+    if (state.runningConfigs.size > 0) renderTables();
+    else { clearInterval(state.durationTicker); state.durationTicker = null; }
+  }, 60000);
+}
+
 window.runTableNow = async function runTableNow(configId, { signal } = {}) {
   const table = state.tables.find((t) => t.configId === configId);
   const tableName = table ? table.tableName : `Config ${configId}`;
@@ -1577,8 +1621,15 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     if (!tableOk || (signal && signal.aborted)) return null;
   }
 
+  // Build an AbortController for manual stop — chain from caller signal if present
+  const runAc = new AbortController();
+  if (signal) signal.addEventListener('abort', () => runAc.abort(), { once: true });
+
   state.activeMirrorCount++;
   if (tableId) state.activeTableIds.add(tableId);
+  state.runningConfigs.set(configId, { startedAt: new Date(), ac: runAc });
+  renderTables();
+  startDurationTicker();
   try {
     
     addLog(`${t('Starting mirror run for')}: ${tableName}`, 'info');
@@ -1598,7 +1649,7 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     }
     
     // Abort check — scheduler may have stopped while we were starting the queue
-    if (signal && signal.aborted) {
+    if (runAc.signal.aborted) {
       addLog(`Mirror run aborted for: ${tableName}`, 'warn');
       return null;
     }
@@ -1614,18 +1665,16 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     
     while (attempt < maxAttempts) {
       // Check if we were told to stop (scheduler stopped, abort signal fired)
-      if (signal && signal.aborted) {
+      if (runAc.signal.aborted) {
         addLog(`Mirror run aborted for: ${tableName}`, 'warn');
         return null;
       }
       await new Promise((resolve) => {
         const timer = setTimeout(resolve, pollIntervalMs);
-        if (signal) {
-          const onAbort = () => { clearTimeout(timer); resolve(); };
-          signal.addEventListener('abort', onAbort, { once: true });
-        }
+        const onAbort = () => { clearTimeout(timer); resolve(); };
+        runAc.signal.addEventListener('abort', onAbort, { once: true });
       });
-      if (signal && signal.aborted) {
+      if (runAc.signal.aborted) {
         addLog(`Mirror run aborted for: ${tableName}`, 'warn');
         return null;
       }
@@ -1655,7 +1704,7 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
       }
     }
     
-    if (signal && signal.aborted) return null;
+    if (runAc.signal.aborted) return null;
     
     if (attempt >= maxAttempts) {
       throw new Error(`CSV generation timed out after ${maxAttempts * pollIntervalMs / 1000} seconds`);
@@ -1690,7 +1739,7 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     
     return result;
   } catch (error) {
-    if (signal && signal.aborted) return null;
+    if (runAc.signal.aborted) return null;
     const table = state.tables.find((t) => t.configId === configId);
     const tableName = table ? table.tableName : `Config ${configId}`;
     addLog(`${t('Mirror run failed')}: ${tableName} - ${error.message}`, 'error');
@@ -1698,6 +1747,8 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
   } finally {
     state.activeMirrorCount = Math.max(0, state.activeMirrorCount - 1);
     if (tableId) state.activeTableIds.delete(tableId);
+    state.runningConfigs.delete(configId);
+    renderTables();
   }
 };
 
@@ -1866,10 +1917,14 @@ function stopScheduler(silent = false) {
   // Abort all in-flight polling loops
   state.schedulerAbort.forEach((ac) => ac.abort());
   state.schedulerAbort.clear();
+  // Abort all running configs (manual + scheduled)
+  state.runningConfigs.forEach((info) => { if (info.ac) info.ac.abort(); });
+  state.runningConfigs.clear();
   // Clear all pending timers
   state.schedulerTimers.forEach((timer) => { clearTimeout(timer); clearInterval(timer); });
   state.schedulerTimers.clear();
   state.activeTableIds.clear();
+  if (state.durationTicker) { clearInterval(state.durationTicker); state.durationTicker = null; }
   if (!silent) addLog(t('Scheduler stopped'), 'warn');
 }
 
