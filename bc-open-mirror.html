@@ -1494,6 +1494,11 @@ window.runTableNow = async function runTableNow(tableId) {
     
     const result = await api('runNow', { tableId });
     
+    // Display any logs from the backend
+    if (result.logs && Array.isArray(result.logs)) {
+      result.logs.forEach(log => addLog(log, 'info'));
+    }
+    
     if (result.endDateTime) {
       const idx = state.tables.findIndex((row) => Number(row.tableId) === Number(tableId));
       if (idx >= 0) state.tables[idx].lastRunAt = result.endDateTime;

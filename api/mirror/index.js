@@ -963,9 +963,11 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
   let csv = "";
   let confirmedDt = endDt;
   let confirmedIso = endIso;
+  const logs = [];
 
   await withTableRefFallback(tableCfg, async (tableRef) => {
     const tableSelector = parseTableRef(tableRef);
+    logs.push(`Checking for new records in ${tableCfg.tableName}...`);
     const countResult = await dataRecordsGetAsync(conn, token, companyId, {
       ...tableSelector,
       tableView: countTableView,
@@ -975,6 +977,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
     });
 
     noOfRecords = Number(countResult.noOfRecords || 0);
+    logs.push(`Found ${noOfRecords} record(s) to mirror`);
     if (noOfRecords === 0) return;
 
     const csvPayload = {
@@ -1016,6 +1019,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
       skipped: true,
       reason: "No records to mirror",
       endDateTime: null,
+      logs,
     };
   }
 
@@ -1047,6 +1051,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
     try {
       const nextEndIso = isoNoMs(new Date());
       const nextTableView = buildCountTableView(tableCfg, confirmedIso, nextEndIso);
+      logs.push(`Checking for remaining records...`);
       await withTableRefFallback(tableCfg, async (tableRef) => {
         const tableSelector = parseTableRef(tableRef);
         const nextCountResult = await dataRecordsGetAsync(conn, token, companyId, {
@@ -1058,10 +1063,12 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
         });
         const nextCount = Number(nextCountResult.noOfRecords || 0);
         hasMoreRecords = nextCount > 0;
+        logs.push(`Found ${nextCount} remaining record(s) in backlog`);
       });
     } catch (error) {
       // If check fails, default to false and continue with normal interval
       hasMoreRecords = false;
+      logs.push(`Could not check for remaining records`);
     }
 
     return {
@@ -1074,6 +1081,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
       filePath: csvPath,
       deletedFilePath,
       hasMoreRecords,
+      logs,
     };
   } catch (error) {
     await reverseIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
