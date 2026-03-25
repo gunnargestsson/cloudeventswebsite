@@ -780,7 +780,9 @@ const UI_STRINGS = [
   'Fetching and uploading CSV data',
   'Copy',
   'Copy Table',
-  'modify filter and save'
+  'modify filter and save',
+  'Another config for this table already uses the same Table View.',
+  'Saving table'
 ];
 
 const CONFIG = {
@@ -1348,6 +1350,33 @@ async function saveTable() {
   if (existingIndex >= 0 && tables[existingIndex].active) {
     throw new Error(t('Config Locked While Active'));
   }
+
+  // Block duplicate tableView for the same table
+  const duplicateView = tables.find((row) =>
+    row.configId !== config.configId
+    && Number(row.tableId) === Number(config.tableId)
+    && (row.tableView || '') === (config.tableView || '')
+  );
+  if (duplicateView) {
+    throw new Error(t('Another config for this table already uses the same Table View.'));
+  }
+
+  // Sync field selection: adopt fields from the first sibling config if this is a new config
+  // or propagate this config's fields to all siblings
+  const siblings = tables.filter((row) =>
+    row.configId !== config.configId
+    && Number(row.tableId) === Number(config.tableId)
+  );
+  if (siblings.length) {
+    const activeSibling = siblings.find((s) => s.active) || siblings[0];
+    // If any sibling is active, adopt its field selection (it can't be edited while active)
+    if (activeSibling.active) {
+      config.fieldNumbers = [...(activeSibling.fieldNumbers || [])];
+    } else {
+      // Propagate this config's field selection to all siblings
+      siblings.forEach((s) => { s.fieldNumbers = [...(config.fieldNumbers || [])]; });
+    }
+  }
   
   if (existingIndex >= 0) {
     console.log('[saveTable] Updating existing config at index', existingIndex);
@@ -1475,7 +1504,7 @@ window.copyTable = async function copyTable(configId) {
     document.getElementById('input-table-name').value = table.tableName;
     document.getElementById('input-interval').value = table.intervalMin;
     document.getElementById('input-data-per-company').value = getDisplayBooleanValue(table.dataPerCompany);
-    document.getElementById('input-table-view').value = table.tableView || '';
+    document.getElementById('input-table-view').value = '';
     state.allFields = !(table.fieldNumbers && table.fieldNumbers.length);
     document.getElementById('input-all-fields').checked = state.allFields;
     state.selectedFields = [...(table.fieldNumbers || [])];
