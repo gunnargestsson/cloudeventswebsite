@@ -1,21 +1,33 @@
 const https = require("https");
 
 // Module-level token cache — survives across warm invocations of the same function instance
-let _cachedToken = null;
-let _tokenExpiry = 0;
+const _tokenCache = new Map();
 
-async function getToken(tenantId, clientId, clientSecret) {
-  if (_cachedToken && Date.now() < _tokenExpiry - 60000) return _cachedToken;
+function resolveConn(headers = {}) {
+  const tenantId = headers["x-bc-tenant"] || process.env.BC_TENANT_ID;
+  const clientId = headers["x-bc-client-id"] || process.env.BC_CLIENT_ID;
+  const clientSecret = headers["x-bc-client-secret"] || process.env.BC_CLIENT_SECRET;
+  const environment = headers["x-bc-environment"] || process.env.BC_ENVIRONMENT || "UAT";
+  if (!tenantId || !clientId || !clientSecret) {
+    throw new Error("Missing credentials: provide x-bc-* headers or configure server BC_* environment variables");
+  }
+  return { tenantId, clientId, clientSecret, environment };
+}
+
+async function getToken(conn) {
+  const key = `${conn.tenantId}|${conn.clientId}`;
+  const cached = _tokenCache.get(key);
+  if (cached && Date.now() < cached.expiry - 60000) return cached.token;
 
   const body = new URLSearchParams({
     grant_type: "client_credentials",
-    client_id: clientId,
-    client_secret: clientSecret,
+    client_id: conn.clientId,
+    client_secret: conn.clientSecret,
     scope: "https://api.businesscentral.dynamics.com/.default",
   }).toString();
 
   const data = await post(
-    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+    `https://login.microsoftonline.com/${conn.tenantId}/oauth2/v2.0/token`,
     body,
     { "Content-Type": "application/x-www-form-urlencoded" }
   );
@@ -27,22 +39,19 @@ async function getToken(tenantId, clientId, clientSecret) {
     throw new Error("Microsoft identity platform returned no access_token");
   }
 
-  _cachedToken = data.access_token;
-  _tokenExpiry = Date.now() + data.expires_in * 1000;
-  return _cachedToken;
+  _tokenCache.set(key, { token: data.access_token, expiry: Date.now() + data.expires_in * 1000 });
+  return data.access_token;
 }
 
 module.exports = async function (context, req) {
-  const tenantId = process.env.BC_TENANT_ID;
-  const clientId = process.env.BC_CLIENT_ID;
-  const clientSecret = process.env.BC_CLIENT_SECRET;
-  const environment = process.env.BC_ENVIRONMENT || "UAT";
-
-  if (!tenantId || !clientId || !clientSecret) {
+  let conn;
+  try {
+    conn = resolveConn(req.headers);
+  } catch (e) {
     context.res = {
       status: 500,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "Server configuration missing." }),
+      body: JSON.stringify({ error: e.message }),
     };
     return;
   }
@@ -55,9 +64,9 @@ module.exports = async function (context, req) {
       return;
     }
     try {
-      const accessToken = await getToken(tenantId, clientId, clientSecret);
+      const accessToken = await getToken(conn);
       const authHeader = `Bearer ${accessToken}`;
-      const tasksUrl = `https://api.businesscentral.dynamics.com/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/tasks/`;
+      const tasksUrl = `https://api.businesscentral.dynamics.com/v2.0/${conn.tenantId}/${conn.environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/tasks/`;
       const task = await bcRequest("POST", tasksUrl, authHeader, req.body);
       if (!task || !task.data) {
         // No follow-up URL (inbound-only event) — return task response directly
@@ -90,8 +99,8 @@ module.exports = async function (context, req) {
   }
 
   try {
-    const accessToken = await getToken(tenantId, clientId, clientSecret);
-    const bcBase = `https://api.businesscentral.dynamics.com/v2.0/${tenantId}/${environment}/api/v2.0`;
+    const accessToken = await getToken(conn);
+    const bcBase = `https://api.businesscentral.dynamics.com/v2.0/${conn.tenantId}/${conn.environment}/api/v2.0`;
     const url = `${bcBase}/${bcPath}`;
     const authHeader = `Bearer ${accessToken}`;
 

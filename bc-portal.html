@@ -890,7 +890,9 @@ const LCID_NAMES = {
 // ---- API ----
 // bcGet: used only for company list (standard v2.0 API, pre-company-selection)
 async function bcGet(path) {
-  const r = await fetch('/api/bc?path=' + encodeURIComponent(path));
+  const r = await fetch('/api/bc?path=' + encodeURIComponent(path), {
+    headers: bcSettingsHeaders() || {}
+  });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
     let errorMsg = e.error || 'API error ' + r.status;
@@ -910,7 +912,7 @@ async function bcGet(path) {
 async function cePost(companyId, event) {
   const r = await fetch('/api/bc?companyId=' + encodeURIComponent(companyId), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(bcSettingsHeaders() || {}) },
     body: JSON.stringify({ ...event, lcid: selectedLcid })
   });
   if (!r.ok) {

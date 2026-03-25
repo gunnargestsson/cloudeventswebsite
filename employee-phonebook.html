@@ -326,7 +326,7 @@ const UI_STRINGS = [
 async function cePost(companyId, event) {
   const r = await fetch('/api/bc?companyId=' + encodeURIComponent(companyId), {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(bcSettingsHeaders() || {}) },
     body:    JSON.stringify({ ...event, lcid: selectedLcid }),
   });
   if (!r.ok) {
