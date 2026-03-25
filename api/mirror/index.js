@@ -326,19 +326,29 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
         throw new Error("Queue completed but no valid data URL returned");
       }
 
-      console.log(`[bcQueue] Fetching CSV from URL: ${dataUrl}`);
+      console.log(`[bcQueue] Fetching result from URL: ${dataUrl}`);
       const url = new URL(dataUrl);
-      const csvData = await httpsText(url.hostname, url.pathname + url.search, { Authorization: `Bearer ${token}` });
       
-      const csvSize = csvData ? csvData.length : 0;
-      const csvLines = csvData ? csvData.split('\n').length : 0;
-      console.log(`[bcQueue] CSV received - Size: ${csvSize} bytes, Lines: ${csvLines}, BC Time: ${queueRecord.time || 'null'}`);
-
-      // Return both the CSV data and the BC timestamp from the queue record
-      return {
-        data: csvData,
-        time: queueRecord.time || null,
-      };
+      // Try JSON first (for Data.Records.Get count queries), fall back to text (for CSV.Records.Get)
+      try {
+        const jsonResult = await httpsJson(url.hostname, url.pathname + url.search, "GET", { Authorization: `Bearer ${token}` }, null);
+        console.log(`[bcQueue] Received JSON result - noOfRecords: ${jsonResult.noOfRecords || 'N/A'}, BC Time: ${queueRecord.time || 'null'}`);
+        // Return the full JSON result with BC timestamp attached
+        return {
+          ...jsonResult,
+          time: queueRecord.time || null,
+        };
+      } catch {
+        // Not JSON, treat as CSV text
+        const csvData = await httpsText(url.hostname, url.pathname + url.search, { Authorization: `Bearer ${token}` });
+        const csvSize = csvData ? csvData.length : 0;
+        const csvLines = csvData ? csvData.split('\n').length : 0;
+        console.log(`[bcQueue] Received CSV - Size: ${csvSize} bytes, Lines: ${csvLines}, BC Time: ${queueRecord.time || 'null'}`);
+        return {
+          data: csvData,
+          time: queueRecord.time || null,
+        };
+      }
     }
 
     // Status 201 Created = still running, continue polling
