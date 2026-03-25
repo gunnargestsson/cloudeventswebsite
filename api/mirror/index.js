@@ -995,11 +995,11 @@ async function startQueueMirror(conn, token, companyId, tableId, lcid = 1033) {
   // Get last integration timestamp
   const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
 
-  // Count records to mirror
+  // Count records to mirror (sync — count is lightweight with skip:0, take:1)
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
   const countPayload = buildCountPayload(tableCfg, previousTs, endIso);
-  const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
+  const countResult = await dataRecordsGet(conn, token, companyId, countPayload);
   const noOfRecords = countResult.noOfRecords || 0;
   logs.push(`Found ${noOfRecords} record(s) to mirror`);
 
@@ -1151,10 +1151,10 @@ async function fetchQueueData(conn, token, companyId, queueId, tableId, lcid = 1
   // Save integration timestamp
   await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableId, confirmedIso || previousTs);
 
-  // Check for remaining records
+  // Check for remaining records (sync — count is lightweight with skip:0, take:1)
   const nextEndIso = isoNoMs(new Date());
   const remainingPayload = buildCountPayload(tableCfg, confirmedIso || previousTs, nextEndIso);
-  const remainingResult = await dataRecordsGetAsync(conn, token, companyId, remainingPayload);
+  const remainingResult = await dataRecordsGet(conn, token, companyId, remainingPayload);
   const remainingRecords = remainingResult.noOfRecords || 0;
   logs.push(`Checking for remaining records: ${remainingRecords} remaining in backlog`);
 
@@ -1207,7 +1207,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
     if (previousTs) countPayload.startDateTime = previousTs;
     if (endIso) countPayload.endDateTime = endIso;
     if (tableCfg.tableView) countPayload.tableView = tableCfg.tableView;
-    const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
+    const countResult = await dataRecordsGet(conn, token, companyId, countPayload);
 
     noOfRecords = Number(countResult.noOfRecords || 0);
     logs.push(`Found ${noOfRecords} record(s) to mirror`);
@@ -1294,7 +1294,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
         if (confirmedIso) nextCountPayload.startDateTime = confirmedIso;
         if (nextEndIso) nextCountPayload.endDateTime = nextEndIso;
         if (tableCfg.tableView) nextCountPayload.tableView = tableCfg.tableView;
-        const nextCountResult = await dataRecordsGetAsync(conn, token, companyId, nextCountPayload);
+        const nextCountResult = await dataRecordsGet(conn, token, companyId, nextCountPayload);
         const nextCount = Number(nextCountResult.noOfRecords || 0);
         hasMoreRecords = nextCount > 0;
         logs.push(`Found ${nextCount} remaining record(s) in backlog`);
