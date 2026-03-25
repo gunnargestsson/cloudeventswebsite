@@ -1670,7 +1670,7 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     const pollIntervalMs = 10000; // 10 seconds
     let attempt = 0;
     
-    addLog(`${t('Generating CSV export')}... (${startResult.recordCount} records)`, 'info');
+    addLog(`${t('Generating CSV export')}...`, 'info');
     addLog(`${t('Polling for completion every 10 seconds')}...`, 'info');
     
     while (attempt < maxAttempts) {
@@ -1727,6 +1727,12 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     // Display final logs
     if (result.logs && Array.isArray(result.logs)) {
       result.logs.forEach(log => addLog(log, 'info'));
+    }
+
+    // Queue completed but BC had 0 records — treat as skipped
+    if (result.skipped) {
+      addLog(`${t('Mirror run skipped')}: ${result.tableName || tableName} - ${result.reason || 'No records to mirror'}`, 'warn');
+      return result;
     }
     
     if (result.endDateTime) {

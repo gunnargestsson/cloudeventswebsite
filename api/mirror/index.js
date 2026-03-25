@@ -1021,11 +1021,14 @@ function extractCsvPayload(result) {
 async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   if (!configId) throw new Error("configId is required");
 
-  const connection = await getMirrorConnection(conn, token, companyId);
+  // Parallel fetch: connection + table config (independent getConfig calls)
+  const [connection, tableCfg] = await Promise.all([
+    getMirrorConnection(conn, token, companyId),
+    getTableConfig(conn, token, companyId, configId),
+  ]);
+
   if (!connection || connection.status !== "verified")
     throw new Error("Verified mirror connection is required");
-
-  const tableCfg = await getTableConfig(conn, token, companyId, configId);
   if (!tableCfg) throw new Error(`Config not found: ${configId}`);
 
   const logs = [];
@@ -1035,25 +1038,11 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   const previousTs = tableCfg.syncTimestamp
     || await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId).catch(() => null);
 
-  // Count records to mirror (sync — count is lightweight with skip:0, take:1)
+  // Start the CSV export queue immediately — skip the synchronous record count
+  // to avoid Azure Function timeouts on large tables like G/L Entry.
+  // The actual record count will be determined when the queue completes.
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
-  const countPayload = buildCountPayload(tableCfg, previousTs, endIso);
-  const countResult = await dataRecordsGet(conn, token, companyId, countPayload);
-  const noOfRecords = countResult.noOfRecords || 0;
-  logs.push(`Found ${noOfRecords} record(s) to mirror`);
-
-  if (noOfRecords === 0) {
-    return {
-      tableId: tableCfg.tableId,
-      tableName: tableCfg.tableName,
-      skipped: true,
-      reason: "No records to mirror",
-      logs,
-    };
-  }
-
-  // Start the CSV export queue (don't wait for completion)
   const { tenantId, environment } = conn;
   const queueId = crypto.randomUUID();
   
@@ -1076,13 +1065,11 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   await httpsJson(BC_HOST, queuePath, "POST", { Authorization: `Bearer ${token}` }, envelope);
 
   logs.push(`Queue started: ${queueId}`);
-  logs.push(`Generating CSV export for ${noOfRecords} records...`);
 
   return {
     tableId: tableCfg.tableId,
     tableName: tableCfg.tableName,
     queueId,
-    recordCount: noOfRecords,
     logs,
   };
 }
@@ -1135,11 +1122,14 @@ async function fetchQueueData(conn, token, companyId, queueId, configId, lcid = 
   if (!queueId) throw new Error("queueId is required");
   if (!configId) throw new Error("configId is required");
 
-  const connection = await getMirrorConnection(conn, token, companyId);
+  // Parallel fetch: connection + table config (independent getConfig calls)
+  const [connection, tableCfg] = await Promise.all([
+    getMirrorConnection(conn, token, companyId),
+    getTableConfig(conn, token, companyId, configId),
+  ]);
+
   if (!connection || connection.status !== "verified")
     throw new Error("Verified mirror connection is required");
-
-  const tableCfg = await getTableConfig(conn, token, companyId, configId);
   if (!tableCfg) throw new Error(`Config not found: ${configId}`);
 
   const logs = [];
@@ -1151,7 +1141,17 @@ async function fetchQueueData(conn, token, companyId, queueId, configId, lcid = 
 
   const dataUrl = queueRecord.data;
   if (!dataUrl || !String(dataUrl).startsWith("https://")) {
-    throw new Error("Queue completed but no valid data URL returned");
+    // No data URL means BC had no records to export — treat as skipped
+    logs.push("No records to mirror");
+    return {
+      tableId: tableCfg.tableId,
+      tableName: tableCfg.tableName,
+      skipped: true,
+      reason: "No records to mirror",
+      mirroredRecords: 0,
+      deletedRecords: 0,
+      logs,
+    };
   }
 
   const dataContentType = queueRecord.datacontenttype || "";
