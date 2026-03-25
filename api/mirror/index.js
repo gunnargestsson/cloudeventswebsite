@@ -329,17 +329,26 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
       console.log(`[bcQueue] Fetching result from URL: ${dataUrl}`);
       const url = new URL(dataUrl);
       
-      // Try JSON first (for Data.Records.Get count queries), fall back to text (for CSV.Records.Get)
-      try {
+      // Check Content-Type to determine how to fetch the data
+      const contentType = await new Promise((resolve, reject) => {
+        https.request(
+          { hostname: url.hostname, path: url.pathname + url.search, method: "HEAD", headers: { Authorization: `Bearer ${token}` } },
+          (res) => resolve(res.headers["content-type"] || "")
+        ).on("error", reject).end();
+      });
+      
+      console.log(`[bcQueue] Content-Type: ${contentType}`);
+      
+      // Parse based on Content-Type
+      if (contentType.includes("application/json")) {
         const jsonResult = await httpsJson(url.hostname, url.pathname + url.search, "GET", { Authorization: `Bearer ${token}` }, null);
         console.log(`[bcQueue] Received JSON result - noOfRecords: ${jsonResult.noOfRecords || 'N/A'}, BC Time: ${queueRecord.time || 'null'}`);
-        // Return the full JSON result with BC timestamp attached
         return {
           ...jsonResult,
           time: queueRecord.time || null,
         };
-      } catch {
-        // Not JSON, treat as CSV text
+      } else {
+        // CSV or text content
         const csvData = await httpsText(url.hostname, url.pathname + url.search, { Authorization: `Bearer ${token}` });
         const csvSize = csvData ? csvData.length : 0;
         const csvLines = csvData ? csvData.split('\n').length : 0;
