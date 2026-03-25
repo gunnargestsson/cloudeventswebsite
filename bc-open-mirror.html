@@ -777,7 +777,10 @@ const UI_STRINGS = [
   'Polling for completion every 10 seconds',
   'CSV generation completed after',
   'Still generating CSV',
-  'Fetching and uploading CSV data'
+  'Fetching and uploading CSV data',
+  'Copy',
+  'Copy Table',
+  'modify filter and save'
 ];
 
 const CONFIG = {
@@ -798,6 +801,7 @@ const state = {
   fieldCache: new Map(),
   selectedFields: [],
   allFields: true,
+  editingConfigId: null,
   logEntries: [],
   schedulerTimers: new Map(),
   schedulerRunning: false,
@@ -1226,6 +1230,7 @@ window.toggleField = function toggleField(number) {
 };
 
 function resetForm() {
+  state.editingConfigId = null;
   document.getElementById('input-table-id').value = '';
   hideTableOptions();
   setTableFieldsEditable(true);
@@ -1315,6 +1320,7 @@ function collectTableConfig() {
   if (!state.allFields && !fieldNumbers.length) throw new Error(t('Load fields before adding a table or keep all fields enabled.'));
 
   return {
+    configId: state.editingConfigId || crypto.randomUUID(),
     tableId,
     tableName,
     dataPerCompany,
@@ -1327,7 +1333,7 @@ function collectTableConfig() {
 
 function mergeLastRunAt(newTables, prevTables) {
   return newTables.map((t) => {
-    const prev = prevTables.find((p) => Number(p.tableId) === Number(t.tableId));
+    const prev = prevTables.find((p) => p.configId === t.configId);
     return prev?.lastRunAt ? { ...t, lastRunAt: prev.lastRunAt } : t;
   });
 }
@@ -1337,17 +1343,17 @@ async function saveTable() {
   console.log('[saveTable] Collected config:', config);
   
   const tables = [...state.tables];
-  const existingIndex = tables.findIndex((row) => Number(row.tableId) === config.tableId);
+  const existingIndex = tables.findIndex((row) => row.configId === config.configId);
   
   if (existingIndex >= 0 && tables[existingIndex].active) {
     throw new Error(t('Config Locked While Active'));
   }
   
   if (existingIndex >= 0) {
-    console.log('[saveTable] Updating existing table at index', existingIndex);
+    console.log('[saveTable] Updating existing config at index', existingIndex);
     tables.splice(existingIndex, 1, { ...tables[existingIndex], ...config, active: tables[existingIndex].active });
   } else {
-    console.log('[saveTable] Adding new table');
+    console.log('[saveTable] Adding new config');
     tables.push(config);
   }
   
@@ -1383,6 +1389,7 @@ function renderTables() {
 
   container.innerHTML = filtered.map((table) => {
     const statusClass = table.active ? 'active' : 'inactive';
+    const cid = escapeHtml(table.configId);
     return `
       <div class="mirror-card">
         <div class="mirror-card-top">
@@ -1403,10 +1410,11 @@ function renderTables() {
           <div class="meta-box"><div class="meta-label">${t('Fields')}</div><div class="meta-value">${table.fieldNumbers && table.fieldNumbers.length ? escapeHtml(table.fieldNumbers.join(', ')) : escapeHtml(t('Mirror all supported fields'))}</div></div>
         </div>
         <div class="mirror-actions">
-          <button class="btn ${table.active ? 'secondary' : ''}" onclick="toggleActivation(${table.tableId}, ${table.active})">${table.active ? t('Deactivate') : t('Activate')}</button>
-          <button class="btn secondary" onclick="runTableNow(${table.tableId})">${t('Run Now')}</button>
-          ${table.active ? '' : `<button class="btn ghost" onclick="editTable(${table.tableId})">${t('Edit Table')}</button>`}
-          <button class="btn danger" onclick="removeTable(${table.tableId})">${t('Delete')}</button>
+          <button class="btn ${table.active ? 'secondary' : ''}" onclick="toggleActivation('${cid}', ${table.active})">${table.active ? t('Deactivate') : t('Activate')}</button>
+          <button class="btn secondary" onclick="runTableNow('${cid}')">${t('Run Now')}</button>
+          <button class="btn ghost" onclick="copyTable('${cid}')">${t('Copy')}</button>
+          ${table.active ? '' : `<button class="btn ghost" onclick="editTable('${cid}')">${t('Edit Table')}</button>`}
+          <button class="btn danger" onclick="removeTable('${cid}')">${t('Delete')}</button>
         </div>
       </div>
     `;
@@ -1419,9 +1427,9 @@ function refreshMetrics() {
   document.getElementById('metric-last-run').textContent = formatRunAt(state.lastRunAt) || t('Never');
 }
 
-window.editTable = async function editTable(tableId) {
+window.editTable = async function editTable(configId) {
   try {
-    const table = state.tables.find((row) => Number(row.tableId) === Number(tableId));
+    const table = state.tables.find((row) => row.configId === configId);
     if (!table) return;
     if (table.active) {
       setBanner('table-banner', t('Config Locked While Active'), 'error');
@@ -1429,13 +1437,14 @@ window.editTable = async function editTable(tableId) {
     }
 
     const prevTables = state.tables;
-    const tables = prevTables.filter((row) => Number(row.tableId) !== Number(tableId));
+    const tables = prevTables.filter((row) => row.configId !== configId);
     const result = await api('saveTableConfigs', { tables });
     state.tables = mergeLastRunAt(result.mirrors || tables, prevTables);
-    stopSchedulerForTable(tableId);
+    stopSchedulerForTable(configId);
     renderTables();
     refreshMetrics();
 
+    state.editingConfigId = table.configId;
     setTablePanelCollapsed(false);
     document.getElementById('input-table-id').value = table.tableId;
     setTableFieldsEditable(false);
@@ -1454,50 +1463,76 @@ window.editTable = async function editTable(tableId) {
   }
 };
 
-window.removeTable = async function removeTable(tableId) {
+window.copyTable = async function copyTable(configId) {
   try {
-    if (!confirm(t('Delete table configuration?'))) return;
-    const prevTables = state.tables;
-    const tables = prevTables.filter((row) => Number(row.tableId) !== Number(tableId));
-    const result = await api('saveTableConfigs', { tables });
-    state.tables = mergeLastRunAt(result.mirrors || tables, prevTables);
-    stopSchedulerForTable(tableId);
-    renderTables();
-    refreshMetrics();
-    addLog(`${t('Deleted table')} ${tableId}`, 'warn');
+    const table = state.tables.find((row) => row.configId === configId);
+    if (!table) return;
+
+    state.editingConfigId = null; // new config — will get a fresh UUID on save
+    setTablePanelCollapsed(false);
+    document.getElementById('input-table-id').value = table.tableId;
+    setTableFieldsEditable(false);
+    document.getElementById('input-table-name').value = table.tableName;
+    document.getElementById('input-interval').value = table.intervalMin;
+    document.getElementById('input-data-per-company').value = getDisplayBooleanValue(table.dataPerCompany);
+    document.getElementById('input-table-view').value = table.tableView || '';
+    state.allFields = !(table.fieldNumbers && table.fieldNumbers.length);
+    document.getElementById('input-all-fields').checked = state.allFields;
+    state.selectedFields = [...(table.fieldNumbers || [])];
+    await lookupTableMetadata(String(table.tableId), { preserveFields: true });
+    setBanner('table-banner', `${t('Copy Table')}: ${table.tableName} — ${t('modify filter and save')}`, 'ok');
+    addLog(`${t('Copy Table')}: ${table.tableName}`, 'info');
   } catch (error) {
     handleUiError(error);
   }
 };
 
-window.toggleActivation = async function toggleActivation(tableId, currentlyActive) {
+window.removeTable = async function removeTable(configId) {
+  try {
+    if (!confirm(t('Delete table configuration?'))) return;
+    const prevTables = state.tables;
+    const tables = prevTables.filter((row) => row.configId !== configId);
+    const result = await api('saveTableConfigs', { tables });
+    state.tables = mergeLastRunAt(result.mirrors || tables, prevTables);
+    stopSchedulerForTable(configId);
+    renderTables();
+    refreshMetrics();
+    const table = prevTables.find((row) => row.configId === configId);
+    addLog(`${t('Deleted table')} ${table ? table.tableName : configId}`, 'warn');
+  } catch (error) {
+    handleUiError(error);
+  }
+};
+
+window.toggleActivation = async function toggleActivation(configId, currentlyActive) {
   try {
     if (!currentlyActive && (!state.connection || state.connection.status !== 'verified')) {
       setBanner('table-banner', t('Connection is required before activation.'), 'error');
       return;
     }
     const action = currentlyActive ? 'deactivateTable' : 'activateTable';
-    const result = await api(action, { tableId });
-    state.tables = state.tables.map((row) => Number(row.tableId) === Number(tableId) ? { ...row, active: !currentlyActive } : row);
+    const result = await api(action, { configId });
+    state.tables = state.tables.map((row) => row.configId === configId ? { ...row, active: !currentlyActive } : row);
     renderTables();
     refreshMetrics();
-    addLog(currentlyActive ? `${t('Table deactivated')}: ${tableId}` : `${t('Table activated')}: ${result.tableName || tableId}`, 'ok');
-    if (currentlyActive) stopSchedulerForTable(tableId);
-    else if (state.schedulerRunning) startSchedulerForTable(state.tables.find((row) => Number(row.tableId) === Number(tableId)));
+    const table = state.tables.find((row) => row.configId === configId);
+    addLog(currentlyActive ? `${t('Table deactivated')}: ${table?.tableName || configId}` : `${t('Table activated')}: ${result.tableName || configId}`, 'ok');
+    if (currentlyActive) stopSchedulerForTable(configId);
+    else if (state.schedulerRunning) startSchedulerForTable(state.tables.find((row) => row.configId === configId));
   } catch (error) {
     handleUiError(error);
   }
 };
 
-window.runTableNow = async function runTableNow(tableId) {
+window.runTableNow = async function runTableNow(configId) {
   try {
-    const table = state.tables.find((t) => Number(t.tableId) === Number(tableId));
-    const tableName = table ? table.tableName : `Table ${tableId}`;
+    const table = state.tables.find((t) => t.configId === configId);
+    const tableName = table ? table.tableName : `Config ${configId}`;
     
     addLog(`${t('Starting mirror run for')}: ${tableName}`, 'info');
     
     // Step 1: Start the queue (returns immediately with queueId)
-    const startResult = await api('startQueueMirror', { tableId });
+    const startResult = await api('startQueueMirror', { configId });
     
     // Display initial logs
     if (startResult.logs && Array.isArray(startResult.logs)) {
@@ -1546,7 +1581,7 @@ window.runTableNow = async function runTableNow(tableId) {
     
     // Step 3: Fetch the completed data
     addLog(`${t('Fetching and uploading CSV data')}...`, 'info');
-    const result = await api('fetchQueueData', { queueId, tableId });
+    const result = await api('fetchQueueData', { queueId, configId });
     
     // Display final logs
     if (result.logs && Array.isArray(result.logs)) {
@@ -1554,7 +1589,7 @@ window.runTableNow = async function runTableNow(tableId) {
     }
     
     if (result.endDateTime) {
-      const idx = state.tables.findIndex((row) => Number(row.tableId) === Number(tableId));
+      const idx = state.tables.findIndex((row) => row.configId === configId);
       if (idx >= 0) state.tables[idx].lastRunAt = result.endDateTime;
       state.lastRunAt = result.endDateTime;
     }
@@ -1573,8 +1608,8 @@ window.runTableNow = async function runTableNow(tableId) {
     
     return result;
   } catch (error) {
-    const table = state.tables.find((t) => Number(t.tableId) === Number(tableId));
-    const tableName = table ? table.tableName : `Table ${tableId}`;
+    const table = state.tables.find((t) => t.configId === configId);
+    const tableName = table ? table.tableName : `Config ${configId}`;
     addLog(`${t('Mirror run failed')}: ${tableName} - ${error.message}`, 'error');
     handleUiError(error);
     throw error;
@@ -1636,17 +1671,17 @@ async function verifyConnection() {
   }
 }
 
-function stopSchedulerForTable(tableId) {
-  const timer = state.schedulerTimers.get(tableId);
+function stopSchedulerForTable(configId) {
+  const timer = state.schedulerTimers.get(configId);
   if (timer) {
     clearTimeout(timer);
     clearInterval(timer);
-    state.schedulerTimers.delete(tableId);
+    state.schedulerTimers.delete(configId);
   }
 }
 
 function startSchedulerForTable(table) {
-  stopSchedulerForTable(table.tableId);
+  stopSchedulerForTable(table.configId);
   const intervalMs = Math.max(1, Number(table.intervalMin || 60)) * 60 * 1000;
 
   // Compute how long until the next run is due.
@@ -1658,7 +1693,7 @@ function startSchedulerForTable(table) {
   const runAndSchedule = async () => {
     let result = null;
     try {
-      result = await window.runTableNow(table.tableId);
+      result = await window.runTableNow(table.configId);
     } catch (error) {
       addLog(`${t('Mirror run failed')}: ${table.tableName} — ${error.message}`, 'error');
     }
@@ -1671,18 +1706,18 @@ function startSchedulerForTable(table) {
       addLog(`${t('Backlog detected for')} ${table.tableName}, ${t('scheduling immediate follow-up')}`, 'info');
     } else {
       // No more records - schedule next run after full interval from lastRunAt
-      const updatedTable = state.tables.find((t) => Number(t.tableId) === Number(table.tableId));
+      const updatedTable = state.tables.find((t) => t.configId === table.configId);
       const lastRunMs = updatedTable?.lastRunAt ? new Date(updatedTable.lastRunAt).getTime() : Date.now();
       nextDelayMs = Math.max(0, lastRunMs + intervalMs - Date.now());
     }
 
     // Schedule the next run
     const nextTimer = setTimeout(runAndSchedule, nextDelayMs);
-    state.schedulerTimers.set(table.tableId, nextTimer);
+    state.schedulerTimers.set(table.configId, nextTimer);
   };
 
   const initialTimer = setTimeout(runAndSchedule, delayMs);
-  state.schedulerTimers.set(table.tableId, initialTimer);
+  state.schedulerTimers.set(table.configId, initialTimer);
 }
 
 function startScheduler() {
@@ -1706,10 +1741,10 @@ async function runActiveTables() {
     if (row.ok) {
       addLog(row.skipped ? `${t('Mirror run skipped')}: ${row.tableName}` : `${t('Mirror run completed')}: ${row.tableName}`, row.skipped ? 'warn' : 'ok');
       if (row.endDateTime) newest = row.endDateTime;
-      const idx = state.tables.findIndex((item) => Number(item.tableId) === Number(row.tableId));
+      const idx = state.tables.findIndex((item) => item.configId === row.configId);
       if (idx >= 0 && row.endDateTime) state.tables[idx].lastRunAt = row.endDateTime;
     } else {
-      addLog(`${t('Mirror run failed')}: ${row.tableId} — ${row.error}`, 'error');
+      addLog(`${t('Mirror run failed')}: ${row.tableName || row.configId} — ${row.error}`, 'error');
     }
   });
   state.lastRunAt = newest;

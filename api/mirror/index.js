@@ -56,29 +56,29 @@ module.exports = async function (context, req) {
         result = await saveTableConfigs(conn, token, companyId, req.body?.tables);
         break;
       case "activateTable":
-        result = await activateTable(conn, token, companyId, Number(req.body?.tableId));
+        result = await activateTable(conn, token, companyId, req.body?.configId);
         break;
       case "deactivateTable":
-        result = await deactivateTable(conn, token, companyId, Number(req.body?.tableId));
+        result = await deactivateTable(conn, token, companyId, req.body?.configId);
         break;
       case "runMirror":
       case "runNow":
-        result = await runMirror(conn, token, companyId, Number(req.body?.tableId), lcid);
+        result = await runMirror(conn, token, companyId, req.body?.configId, lcid);
         break;
       case "startQueueMirror":
-        result = await startQueueMirror(conn, token, companyId, Number(req.body?.tableId), lcid);
+        result = await startQueueMirror(conn, token, companyId, req.body?.configId, lcid);
         break;
       case "checkQueueStatus":
         result = await checkQueueStatus(conn, token, companyId, req.body?.queueId);
         break;
       case "fetchQueueData":
-        result = await fetchQueueData(conn, token, companyId, req.body?.queueId, Number(req.body?.tableId), lcid);
+        result = await fetchQueueData(conn, token, companyId, req.body?.queueId, req.body?.configId, lcid);
         break;
       case "runAllActive":
         result = await runAllActive(conn, token, companyId, lcid);
         break;
       case "upload-ddl":
-        result = await uploadDdlOnly(conn, token, companyId, Number(req.body?.tableId));
+        result = await uploadDdlOnly(conn, token, companyId, req.body?.configId);
         break;
       default:
         return json(400, { error: `Unknown action: ${action}` });
@@ -458,7 +458,17 @@ async function getStoredTables(conn, token, companyId) {
   const raw = await getConfig(conn, token, companyId, CONFIG_TABLES_ID);
   if (!raw) return [];
   const parsed = JSON.parse(raw);
-  return Array.isArray(parsed) ? parsed : [];
+  const tables = Array.isArray(parsed) ? parsed : [];
+  // Auto-assign configIds for configs created before configId was introduced
+  let needsSave = false;
+  for (const t of tables) {
+    if (!t.configId) {
+      t.configId = crypto.randomUUID();
+      needsSave = true;
+    }
+  }
+  if (needsSave) await setStoredTables(conn, token, companyId, tables);
+  return tables;
 }
 
 async function setStoredTables(conn, token, companyId, tables) {
@@ -475,6 +485,7 @@ function normalizeWhereFilter(raw) {
 
 function normalizeTableConfig(table) {
   return {
+    configId: table.configId || crypto.randomUUID(),
     tableId: Number(table.tableId),
     tableName: String(table.tableName || ""),
     dataPerCompany: Boolean(table.dataPerCompany),
@@ -482,6 +493,7 @@ function normalizeTableConfig(table) {
     tableView: normalizeWhereFilter(table.tableView),
     intervalMin: Math.max(1, Number(table.intervalMin || 60)),
     active: Boolean(table.active),
+    syncTimestamp: table.syncTimestamp || null,
   };
 }
 
@@ -522,6 +534,7 @@ function getMirrorInfo() {
       tableConfig: CONFIG_TABLES_ID,
     },
     fieldsMetadata: [
+      { name: "configId", label: "Config ID", type: "text" },
       { name: "tableId", label: "Table ID", type: "integer" },
       { name: "tableName", label: "Table Name", type: "text" },
       { name: "dataPerCompany", label: "Data Per Company", type: "boolean" },
@@ -611,16 +624,22 @@ async function saveMirrorConnection(connCtx, token, companyId, connection) {
 async function getTableConfigs(conn, token, companyId) {
   const tables = await getStoredTables(conn, token, companyId);
   const normalized = tables.map(normalizeTableConfig);
-  const timestamps = await Promise.all(
-    normalized.map((t) => getIntegrationTimestamp(conn, token, companyId, t.tableId).catch(() => null))
+  // Use per-config syncTimestamp; fall back to integration table for legacy configs
+  const mirrors = await Promise.all(
+    normalized.map(async (t) => {
+      let lastRunAt = t.syncTimestamp;
+      if (!lastRunAt) {
+        lastRunAt = await getIntegrationTimestamp(conn, token, companyId, t.tableId).catch(() => null);
+      }
+      return { ...t, lastRunAt };
+    })
   );
-  const mirrors = normalized.map((t, i) => ({ ...t, lastRunAt: timestamps[i] || null }));
   return { mirrors, count: mirrors.length };
 }
 
-async function getTableConfig(conn, token, companyId, tableId) {
+async function getTableConfig(conn, token, companyId, configId) {
   const tables = await getStoredTables(conn, token, companyId);
-  const table = tables.find((t) => Number(t.tableId) === Number(tableId));
+  const table = tables.find((t) => t.configId === configId);
   if (!table) return null;
   return normalizeTableConfig(table);
 }
@@ -632,16 +651,16 @@ async function saveTableConfigs(conn, token, companyId, tables) {
   return { saved: true, count: normalized.length, mirrors: normalized };
 }
 
-async function activateTable(conn, token, companyId, tableId) {
-  if (!tableId) throw new Error("tableId is required");
+async function activateTable(conn, token, companyId, configId) {
+  if (!configId) throw new Error("configId is required");
   const connection = await getMirrorConnection(conn, token, companyId);
   if (!connection || connection.status !== "verified") {
     throw new Error("Mirror connection must be verified before activation");
   }
 
   const tables = await getStoredTables(conn, token, companyId);
-  const idx = tables.findIndex((t) => Number(t.tableId) === Number(tableId));
-  if (idx < 0) throw new Error(`Table ${tableId} is not configured`);
+  const idx = tables.findIndex((t) => t.configId === configId);
+  if (idx < 0) throw new Error(`Config ${configId} is not configured`);
 
   const tableCfg = normalizeTableConfig(tables[idx]);
   await uploadDdl(conn, token, companyId, connection, tableCfg);
@@ -650,28 +669,28 @@ async function activateTable(conn, token, companyId, tableId) {
   tables[idx] = tableCfg;
   await setStoredTables(conn, token, companyId, tables);
 
-  return { activated: true, tableId, tableName: tableCfg.tableName };
+  return { activated: true, configId, tableId: tableCfg.tableId, tableName: tableCfg.tableName };
 }
 
-async function deactivateTable(conn, token, companyId, tableId) {
-  if (!tableId) throw new Error("tableId is required");
+async function deactivateTable(conn, token, companyId, configId) {
+  if (!configId) throw new Error("configId is required");
   const tables = await getStoredTables(conn, token, companyId);
-  const idx = tables.findIndex((t) => Number(t.tableId) === Number(tableId));
-  if (idx < 0) throw new Error(`Table ${tableId} is not configured`);
+  const idx = tables.findIndex((t) => t.configId === configId);
+  if (idx < 0) throw new Error(`Config ${configId} is not configured`);
   tables[idx] = { ...normalizeTableConfig(tables[idx]), active: false };
   await setStoredTables(conn, token, companyId, tables);
-  return { deactivated: true, tableId };
+  return { deactivated: true, configId, tableId: Number(tables[idx].tableId) };
 }
 
-async function uploadDdlOnly(conn, token, companyId, tableId) {
-  if (!tableId) throw new Error("tableId is required");
+async function uploadDdlOnly(conn, token, companyId, configId) {
+  if (!configId) throw new Error("configId is required");
   const connection = await getMirrorConnection(conn, token, companyId);
   if (!connection || connection.status !== "verified") throw new Error("Verified mirror connection is required");
   const tables = await getStoredTables(conn, token, companyId);
-  const cfg = tables.find((t) => Number(t.tableId) === Number(tableId));
-  if (!cfg) throw new Error(`Table ${tableId} is not configured`);
+  const cfg = tables.find((t) => t.configId === configId);
+  if (!cfg) throw new Error(`Config ${configId} is not configured`);
   await uploadDdl(conn, token, companyId, connection, normalizeTableConfig(cfg));
-  return { uploaded: true, tableId };
+  return { uploaded: true, configId };
 }
 
 function ciTableView(tableId) {
@@ -726,6 +745,23 @@ async function reverseIntegrationTimestamp(conn, token, companyId, tableId) {
       fields: { Reversed: "true" },
     }],
   });
+}
+
+async function updateConfigSyncTimestamp(conn, token, companyId, configId, timestamp) {
+  const tables = await getStoredTables(conn, token, companyId);
+  const idx = tables.findIndex((t) => t.configId === configId);
+  if (idx >= 0) {
+    tables[idx].syncTimestamp = timestamp;
+    await setStoredTables(conn, token, companyId, tables);
+  }
+}
+
+async function reverseConfigSyncTimestamp(conn, token, companyId, configId) {
+  const tables = await getStoredTables(conn, token, companyId);
+  const idx = tables.findIndex((t) => t.configId === configId);
+  if (idx < 0 || !tables[idx].syncTimestamp) return;
+  tables[idx].syncTimestamp = null;
+  await setStoredTables(conn, token, companyId, tables);
 }
 
 function isoNoMs(dateObj) {
@@ -979,21 +1015,22 @@ function extractCsvPayload(result) {
 // FRONTEND POLLING ARCHITECTURE - Separate queue start, status check, data fetch
 // ══════════════════════════════════════════════════════════════════════════════
 
-async function startQueueMirror(conn, token, companyId, tableId, lcid = 1033) {
-  if (!tableId) throw new Error("tableId is required");
+async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
+  if (!configId) throw new Error("configId is required");
 
   const connection = await getMirrorConnection(conn, token, companyId);
   if (!connection || connection.status !== "verified")
     throw new Error("Verified mirror connection is required");
 
-  const tableCfg = await getTableConfig(conn, token, companyId, tableId);
-  if (!tableCfg) throw new Error(`Table config not found for tableId ${tableId}`);
+  const tableCfg = await getTableConfig(conn, token, companyId, configId);
+  if (!tableCfg) throw new Error(`Config not found: ${configId}`);
 
   const logs = [];
   logs.push(`Starting queue for ${tableCfg.tableName}...`);
 
-  // Get last integration timestamp
-  const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
+  // Get last sync timestamp (per-config, with legacy fallback)
+  const previousTs = tableCfg.syncTimestamp
+    || await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId).catch(() => null);
 
   // Count records to mirror (sync — count is lightweight with skip:0, take:1)
   const endDt = new Date();
@@ -1072,16 +1109,16 @@ async function checkQueueStatus(conn, token, companyId, queueId) {
   return { status: "running", message: "Queue task is still running" };
 }
 
-async function fetchQueueData(conn, token, companyId, queueId, tableId, lcid = 1033) {
+async function fetchQueueData(conn, token, companyId, queueId, configId, lcid = 1033) {
   if (!queueId) throw new Error("queueId is required");
-  if (!tableId) throw new Error("tableId is required");
+  if (!configId) throw new Error("configId is required");
 
   const connection = await getMirrorConnection(conn, token, companyId);
   if (!connection || connection.status !== "verified")
     throw new Error("Verified mirror connection is required");
 
-  const tableCfg = await getTableConfig(conn, token, companyId, tableId);
-  if (!tableCfg) throw new Error(`Table config not found for tableId ${tableId}`);
+  const tableCfg = await getTableConfig(conn, token, companyId, configId);
+  if (!tableCfg) throw new Error(`Config not found: ${configId}`);
 
   const logs = [];
   const { tenantId, environment } = conn;
@@ -1114,8 +1151,9 @@ async function fetchQueueData(conn, token, companyId, queueId, tableId, lcid = 1
     confirmedIso = isoNoMs(confirmedDt);
   }
 
-  // Get previous timestamp for deleted records check
-  const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
+  // Get previous timestamp for deleted records check (per-config, with legacy fallback)
+  const previousTs = tableCfg.syncTimestamp
+    || await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId).catch(() => null);
 
   // Count and fetch deleted records
   const noOfDeleted = await getDeletedRecordCount(conn, token, companyId, tableCfg, previousTs, confirmedIso);
@@ -1148,8 +1186,8 @@ async function fetchQueueData(conn, token, companyId, queueId, tableId, lcid = 1
   logs.push(`Uploaded to Open Mirror: ${filePath}`);
   logs.push(`${mirroredRecords} records mirrored, ${deletedRecords} deleted`);
 
-  // Save integration timestamp
-  await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableId, confirmedIso || previousTs);
+  // Save per-config sync timestamp
+  await updateConfigSyncTimestamp(conn, token, companyId, tableCfg.configId, confirmedIso || previousTs);
 
   // Check for remaining records (sync — count is lightweight with skip:0, take:1)
   const nextEndIso = isoNoMs(new Date());
@@ -1170,8 +1208,8 @@ async function fetchQueueData(conn, token, companyId, queueId, tableId, lcid = 1
   };
 }
 
-async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
-  if (!tableId) throw new Error("tableId is required");
+async function runMirror(conn, token, companyId, configId, lcid = 1033) {
+  if (!configId) throw new Error("configId is required");
 
   const connection = await getMirrorConnection(conn, token, companyId);
   if (!connection || connection.status !== "verified")
@@ -1180,11 +1218,13 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
   const tables = await getStoredTables(conn, token, companyId);
   const tableCfg = tables
     .map(normalizeTableConfig)
-    .find((t) => Number(t.tableId) === Number(tableId));
-  if (!tableCfg) throw new Error(`Table ${tableId} is not configured`);
+    .find((t) => t.configId === configId);
+  if (!tableCfg) throw new Error(`Config ${configId} is not configured`);
   if (!tableCfg.active) throw new Error(`Table ${tableCfg.tableName} is inactive`);
 
-  const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
+  // Per-config sync timestamp with legacy fallback
+  const previousTs = tableCfg.syncTimestamp
+    || await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableId).catch(() => null);
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
   const runTableView = buildRunTableView(tableCfg, previousTs, endIso);
@@ -1260,7 +1300,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
     throw new Error("CSV.Records.Get returned no CSV payload");
 
   // ── Step 4: Confirm timestamp and upload ─────────────────────────────────────
-  await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableId, confirmedIso);
+  await updateConfigSyncTimestamp(conn, token, companyId, tableCfg.configId, confirmedIso);
 
   try {
     const stamp = formatMirrorFileStamp(confirmedDt);
@@ -1318,7 +1358,7 @@ async function runMirror(conn, token, companyId, tableId, lcid = 1033) {
       logs,
     };
   } catch (error) {
-    await reverseIntegrationTimestamp(conn, token, companyId, tableCfg.tableId);
+    await reverseConfigSyncTimestamp(conn, token, companyId, tableCfg.configId);
     throw error;
   }
 }
@@ -1328,10 +1368,10 @@ async function runAllActive(conn, token, companyId, lcid = 1033) {
   const results = [];
   for (const table of tables) {
     try {
-      const run = await runMirror(conn, token, companyId, table.tableId, lcid);
-      results.push({ tableId: table.tableId, ok: true, ...run });
+      const run = await runMirror(conn, token, companyId, table.configId, lcid);
+      results.push({ configId: table.configId, tableId: table.tableId, ok: true, ...run });
     } catch (error) {
-      results.push({ tableId: table.tableId, ok: false, error: error.message });
+      results.push({ configId: table.configId, tableId: table.tableId, ok: false, error: error.message });
     }
   }
   return { total: tables.length, results };
