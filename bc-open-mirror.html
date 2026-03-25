@@ -817,6 +817,7 @@ const state = {
   lastRunAt: null,
   maxConcurrentMirrors: 3,     // max simultaneous mirror tasks
   activeMirrorCount: 0,        // currently running mirror tasks
+  activeTableIds: new Set(),   // tableIds currently running — prevents same-table concurrency
 };
 
 function t(key) {
@@ -1566,10 +1567,19 @@ window.toggleActivation = async function toggleActivation(configId, currentlyAct
 };
 
 window.runTableNow = async function runTableNow(configId, { signal } = {}) {
+  const table = state.tables.find((t) => t.configId === configId);
+  const tableName = table ? table.tableName : `Config ${configId}`;
+  const tableId = table ? table.tableId : null;
+
+  // Wait until no other config for the same table is running
+  if (tableId) {
+    const tableOk = await waitForTableSlot(tableId, signal);
+    if (!tableOk || (signal && signal.aborted)) return null;
+  }
+
   state.activeMirrorCount++;
+  if (tableId) state.activeTableIds.add(tableId);
   try {
-    const table = state.tables.find((t) => t.configId === configId);
-    const tableName = table ? table.tableName : `Config ${configId}`;
     
     addLog(`${t('Starting mirror run for')}: ${tableName}`, 'info');
     
@@ -1687,6 +1697,7 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     throw error;
   } finally {
     state.activeMirrorCount = Math.max(0, state.activeMirrorCount - 1);
+    if (tableId) state.activeTableIds.delete(tableId);
   }
 };
 
@@ -1775,6 +1786,18 @@ function waitForConcurrencySlot(signal) {
   });
 }
 
+// Wait until no other config with the same BC tableId is running
+function waitForTableSlot(tableId, signal) {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (signal && signal.aborted) { resolve(false); return; }
+      if (!state.activeTableIds.has(tableId)) { resolve(true); return; }
+      setTimeout(check, 2000);
+    };
+    check();
+  });
+}
+
 function startSchedulerForTable(table) {
   stopSchedulerForTable(table.configId);
   const intervalMs = Math.max(1, Number(table.intervalMin || 60)) * 60 * 1000;
@@ -1846,6 +1869,7 @@ function stopScheduler(silent = false) {
   // Clear all pending timers
   state.schedulerTimers.forEach((timer) => { clearTimeout(timer); clearInterval(timer); });
   state.schedulerTimers.clear();
+  state.activeTableIds.clear();
   if (!silent) addLog(t('Scheduler stopped'), 'warn');
 }
 
