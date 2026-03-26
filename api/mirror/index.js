@@ -1105,10 +1105,10 @@ async function checkQueueStatus(conn, token, companyId, queueId) {
   try {
     statusResponse = await httpsJsonWithStatus(BC_HOST, getStatusPath, "POST", { Authorization: `Bearer ${token}` }, null);
   } catch (err) {
-    // BC returns HTTP 500 with "status code '0'" when the task hasn't been
-    // scheduled yet (pending). Treat as "running" so the frontend keeps polling.
+    // BC returns HTTP 500 with "status code '0'" when the task was cancelled
+    // or never started. Treat as "deleted" so the frontend stops polling.
     if (err.message && err.message.includes("status code '0'")) {
-      return { status: "running", message: "Queue task is pending (not yet scheduled)" };
+      return { status: "deleted", message: "Queue task was cancelled or never started (BC status 0)" };
     }
     throw err;
   }
