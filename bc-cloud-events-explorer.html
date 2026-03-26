@@ -510,7 +510,7 @@ function switchTab(tab,btn){
 // ── COMPOSE ───────────────────────────────────────────────────────────────────
 function inferFields(name){
   const lc=name.toLowerCase();
-  let subjectLabel=null;
+  let subjectLabel='Subject (optional)';
   if(lc.includes('customer')) subjectLabel='Customer No.';
   else if(lc.includes('item')) subjectLabel='Item No.';
   else if(lc.includes('order')&&!lc.includes('statistics')) subjectLabel='Order No. or SystemId';
@@ -518,9 +518,7 @@ function inferFields(name){
   else if(lc.includes('invoice')||lc.includes('shipment')||lc.includes('creditmemo')||lc.includes('return')) subjectLabel='Document No. or SystemId';
   else if(lc.includes('vendor')) subjectLabel='Vendor No.';
   else if(lc.includes('permission')) subjectLabel='Table Name';
-  else if(lc.includes('implementation')||lc.includes('messagetype')) subjectLabel=null;
   else if(lc.includes('table')&&lc.includes('help')) subjectLabel='Table Name (optional)';
-  else if(lc.includes('help.')) subjectLabel=null;
 
   const dataFields=[];
   if(lc.includes('records.get')||lc.includes('recordids.get')){
@@ -567,10 +565,8 @@ function renderCompose(){
   </div>`;
   html+=`<div class="fg"><label>Endpoint</label><select id="f_endpoint"><option value="tasks">tasks (synchronous)</option><option value="queues">queues (asynchronous)</option></select></div>`;
 
-  if(subjectLabel!==null){
-    html+=`<div class="slbl">Subject</div>`;
-    html+=`<div class="fg"><label>${esc(subjectLabel)}</label><input id="f_subject" placeholder="${esc(subjectLabel)}"></div>`;
-  }
+  html+=`<div class="slbl">Subject</div>`;
+  html+=`<div class="fg"><label>${esc(subjectLabel)}</label><input id="f_subject" placeholder="${esc(subjectLabel)}"></div>`;
 
   if(dataFields.length){
     html+=`<div class="slbl">Data Parameters</div>`;
