@@ -75,7 +75,7 @@ module.exports = async function (context, req) {
         result = await cancelQueueMirror(conn, token, companyId, req.body?.queueId);
         break;
       case "fetchQueueData":
-        result = await fetchQueueData(conn, token, companyId, req.body?.queueId, req.body?.configId, lcid);
+        result = await fetchQueueData(conn, token, companyId, req.body?.queueId, req.body?.deletedQueueId, req.body?.configId, lcid);
         break;
       case "runAllActive":
         result = await runAllActive(conn, token, companyId, lcid);
@@ -1022,41 +1022,6 @@ async function uploadDdl(conn, token, companyId, connection, tableCfg) {
   await uploadTextToMirror(connection, ddlPath, JSON.stringify(ddl, null, 2));
 }
 
-async function getDeletedRecordCount(conn, token, companyId, tableCfg, startIso, endIso) {
-  const tableSelector = tableCfg.tableName
-    ? { tableName: tableCfg.tableName }
-    : { tableNumber: tableCfg.tableId };
-
-  const payload = {
-    ...tableSelector,
-    skip: 0,
-    take: 1,
-  };
-  if (startIso) payload.startDateTime = startIso;
-  if (endIso) payload.endDateTime = endIso;
-
-  // Synchronous — deleted record count with take:1 is fast
-  const result = await bcTask(conn, token, companyId, "Deleted.RecordIds.Get", null, payload);
-  return Number(result.noOfRecords || 0);
-}
-
-async function getCsvDeletedRecords(conn, token, companyId, tableCfg, startIso, endIso, lcid) {
-  const tableSelector = tableCfg.tableName
-    ? { tableName: tableCfg.tableName }
-    : { tableNumber: tableCfg.tableId };
-
-  const payload = {
-    ...tableSelector,
-  };
-  if (startIso) payload.startDateTime = startIso;
-  if (endIso) payload.endDateTime = endIso;
-  if (lcid !== undefined && lcid !== 1033) payload.lcid = Number(lcid);
-
-  // Synchronous — deleted record sets are typically small
-  const result = await bcTask(conn, token, companyId, "CSV.DeletedRecords.Get", null, payload, true);
-  return extractCsvPayload(result);
-}
-
 function extractCsvPayload(result) {
   if (!result) return "";
   if (typeof result === "string") return result;
@@ -1085,7 +1050,7 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   if (!tableCfg) throw new Error(`Config not found: ${configId}`);
 
   const logs = [];
-  logs.push(`Starting queue for ${tableCfg.tableName}...`);
+  logs.push(`Starting queues for ${tableCfg.tableName}...`);
 
   // Get last sync timestamp from integration table
   const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableName, tableCfg.configId).catch(() => null);
@@ -1093,8 +1058,7 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
 
-  // Submit CSV queue immediately — no blocking count.
-  // If BC has 0 records the CSV will be empty; fetchQueueData handles that.
+  // Build payloads for both CSV queues
   const csvPayload = {
     tableName: tableCfg.tableName,
     tableView: buildRunTableView(tableCfg),
@@ -1104,14 +1068,28 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   if (endIso) csvPayload.endDateTime = endIso;
   if (lcid !== undefined && lcid !== 1033) csvPayload.lcid = Number(lcid);
 
-  const queueId = await bcQueueSubmit(conn, token, companyId, "CSV.Records.Get", null, csvPayload);
+  const tableSelector = tableCfg.tableName
+    ? { tableName: tableCfg.tableName }
+    : { tableNumber: tableCfg.tableId };
+  const deletedPayload = { ...tableSelector };
+  if (previousTs) deletedPayload.startDateTime = previousTs;
+  if (endIso) deletedPayload.endDateTime = endIso;
+  if (lcid !== undefined && lcid !== 1033) deletedPayload.lcid = Number(lcid);
 
-  logs.push(`Queue started: ${queueId}`);
+  // Submit both queues in parallel — fire-and-forget, frontend polls
+  const [queueId, deletedQueueId] = await Promise.all([
+    bcQueueSubmit(conn, token, companyId, "CSV.Records.Get", null, csvPayload),
+    bcQueueSubmit(conn, token, companyId, "CSV.DeletedRecords.Get", null, deletedPayload),
+  ]);
+
+  logs.push(`CSV queue started: ${queueId}`);
+  logs.push(`Deleted records queue started: ${deletedQueueId}`);
 
   return {
     tableId: tableCfg.tableId,
     tableName: tableCfg.tableName,
     queueId,
+    deletedQueueId,
     logs,
   };
 }
@@ -1160,7 +1138,7 @@ async function cancelQueueMirror(conn, token, companyId, queueId) {
   return { status: "none", message: "No task to cancel or cancellation failed" };
 }
 
-async function fetchQueueData(conn, token, companyId, queueId, configId, lcid = 1033) {
+async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, configId, lcid = 1033) {
   if (!queueId) throw new Error("queueId is required");
   if (!configId) throw new Error("configId is required");
 
@@ -1176,14 +1154,23 @@ async function fetchQueueData(conn, token, companyId, queueId, configId, lcid = 
 
   const logs = [];
   const { tenantId, environment } = conn;
+  const authHeaders = { Authorization: `Bearer ${token}` };
+  const queueBasePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues`;
 
-  // Get the queue record to retrieve data URL and timestamp
-  const queueRecordPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})`;
-  const queueRecord = await httpsJson(BC_HOST, queueRecordPath, "GET", { Authorization: `Bearer ${token}` }, null);
+  // Fetch both queue records in parallel
+  const queueFetches = [httpsJson(BC_HOST, `${queueBasePath}(${queueId})`, "GET", authHeaders, null)];
+  if (deletedQueueId) {
+    queueFetches.push(httpsJson(BC_HOST, `${queueBasePath}(${deletedQueueId})`, "GET", authHeaders, null));
+  }
+  const [queueRecord, deletedQueueRecord] = await Promise.all(queueFetches);
 
-  const dataUrl = queueRecord.data;
-  if (!dataUrl || !String(dataUrl).startsWith("https://")) {
-    // No data URL means BC had no records to export — treat as skipped
+  // Check data URLs — BC only provides a download URL when there are records
+  const csvDataUrl = queueRecord.data;
+  const hasCsvData = csvDataUrl && String(csvDataUrl).startsWith("https://");
+  const deletedDataUrl = deletedQueueRecord ? deletedQueueRecord.data : null;
+  const hasDeletedData = deletedDataUrl && String(deletedDataUrl).startsWith("https://");
+
+  if (!hasCsvData && !hasDeletedData) {
     logs.push("No records to mirror");
     return {
       tableId: tableCfg.tableId,
@@ -1196,35 +1183,37 @@ async function fetchQueueData(conn, token, companyId, queueId, configId, lcid = 
     };
   }
 
-  const dataContentType = queueRecord.datacontenttype || "";
-  logs.push(`Fetching CSV data from BC (${dataContentType})...`);
+  // Download CSV data in parallel where URLs exist
+  let csv = "";
+  let deletedCsv = "";
+  const downloads = [];
+  if (hasCsvData) {
+    const url = new URL(csvDataUrl);
+    downloads.push(
+      httpsText(url.hostname, url.pathname + url.search, authHeaders)
+        .then(text => { csv = text || ""; })
+    );
+  }
+  if (hasDeletedData) {
+    const url = new URL(deletedDataUrl);
+    downloads.push(
+      httpsText(url.hostname, url.pathname + url.search, authHeaders)
+        .then(text => { deletedCsv = text || ""; })
+    );
+  }
+  await Promise.all(downloads);
 
-  // Fetch the CSV data
-  const url = new URL(dataUrl);
-  const csv = await httpsText(url.hostname, url.pathname + url.search, { Authorization: `Bearer ${token}` });
-  
-  const csvSize = csv ? csv.length : 0;
-  const csvLines = csv ? csv.split('\n').length - 1 : 0; // -1 for header
-  logs.push(`Downloaded CSV: ${csvSize} bytes, ${csvLines} data rows`);
+  const mirroredRecords = csv ? csv.split('\n').length - 1 : 0;
+  const deletedRecords = deletedCsv ? deletedCsv.split('\n').length - 1 : 0;
+  logs.push(`Downloaded: ${mirroredRecords} records, ${deletedRecords} deleted`);
 
-  // Get confirmed timestamp from BC
+  // Get confirmed timestamp from BC (prefer CSV queue time, fall back to deleted queue)
   let confirmedIso = null;
   let confirmedDt = null;
-  if (queueRecord.time) {
-    confirmedDt = new Date(queueRecord.time);
+  const bcTime = (queueRecord.time || (deletedQueueRecord && deletedQueueRecord.time));
+  if (bcTime) {
+    confirmedDt = new Date(bcTime);
     confirmedIso = isoNoMs(confirmedDt);
-  }
-
-  // Get previous timestamp for deleted records check from integration table
-  const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableName, tableCfg.configId).catch(() => null);
-
-  // Count and fetch deleted records
-  const noOfDeleted = await getDeletedRecordCount(conn, token, companyId, tableCfg, previousTs, confirmedIso);
-  logs.push(`Found ${noOfDeleted} deleted record(s)`);
-
-  let deletedCsv = "";
-  if (noOfDeleted > 0) {
-    deletedCsv = await getCsvDeletedRecords(conn, token, companyId, tableCfg, previousTs, confirmedIso, lcid);
   }
 
   // Upload to Open Mirror
@@ -1232,25 +1221,23 @@ async function fetchQueueData(conn, token, companyId, queueId, configId, lcid = 
   const safeTableName = washName(tableCfg.tableName);
   let csvPath = null;
   let deletedFilePath = null;
-  const mirroredRecords = csv ? csv.split('\n').length - 1 : 0; // -1 for header
-  const deletedRecords = noOfDeleted;
 
-  if (csv) {
+  if (mirroredRecords > 0) {
     csvPath = pathJoin(safeTableName, `${stamp}.csv`);
     await uploadTextToMirror(connection, csvPath, csv);
   }
 
-  if (deletedCsv) {
+  if (deletedRecords > 0) {
     deletedFilePath = pathJoin(safeTableName, `${stamp}_deleted.csv`);
     await uploadTextToMirror(connection, deletedFilePath, deletedCsv);
   }
 
   const filePath = csvPath || deletedFilePath;
-  logs.push(`Uploaded to Open Mirror: ${filePath}`);
+  if (filePath) logs.push(`Uploaded to Open Mirror: ${filePath}`);
   logs.push(`${mirroredRecords} records mirrored, ${deletedRecords} deleted`);
 
   // Save sync timestamp to BC integration table
-  const tsToSave = confirmedIso || previousTs;
+  const tsToSave = confirmedIso;
   if (tsToSave) {
     await setIntegrationTimestamp(conn, token, companyId, tableCfg, tsToSave);
   }
@@ -1294,57 +1281,43 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
 
   logs.push(`Starting CSV export for ${tableCfg.tableName}...`);
 
-  // Synchronous record count (take:1 is fast)
-  const countPayload = {
+  const csvPayload = {
     tableName: tableCfg.tableName,
-    ...(tableCfg.tableView ? { tableView: tableCfg.tableView } : {}),
-    take: 1,
+    ...(runTableView ? { tableView: runTableView } : {}),
+    fieldNumbers:
+      tableCfg.fieldNumbers && tableCfg.fieldNumbers.length
+        ? tableCfg.fieldNumbers
+        : undefined,
   };
-  if (previousTs) countPayload.startDateTime = previousTs;
-  if (endIso) countPayload.endDateTime = endIso;
+  if (previousTs) csvPayload.startDateTime = previousTs;
+  if (endIso) csvPayload.endDateTime = endIso;
+  if (lcid !== undefined && lcid !== 1033) csvPayload.lcid = Number(lcid);
 
-  const countResult = await bcTask(conn, token, companyId, "Data.Records.Get", null, countPayload);
-  const recordCount = Number(countResult.noOfRecords || 0);
-  logs.push(`${tableCfg.tableName}: ${recordCount} record(s)`);
+  const tableSelector = tableCfg.tableName
+    ? { tableName: tableCfg.tableName }
+    : { tableNumber: tableCfg.tableId };
+  const deletedPayload = { ...tableSelector };
+  if (previousTs) deletedPayload.startDateTime = previousTs;
+  if (endIso) deletedPayload.endDateTime = endIso;
+  if (lcid !== undefined && lcid !== 1033) deletedPayload.lcid = Number(lcid);
 
-  let csvResult = null;
-  if (recordCount > 0) {
-    const csvPayload = {
-      tableName: tableCfg.tableName,
-      ...(runTableView ? { tableView: runTableView } : {}),
-      fieldNumbers:
-        tableCfg.fieldNumbers && tableCfg.fieldNumbers.length
-          ? tableCfg.fieldNumbers
-          : undefined,
-    };
-    if (previousTs) csvPayload.startDateTime = previousTs;
-    if (endIso) csvPayload.endDateTime = endIso;
-    if (lcid !== undefined && lcid !== 1033) csvPayload.lcid = Number(lcid);
-
-    csvResult = await bcQueue(conn, token, companyId, "CSV.Records.Get", null, csvPayload);
-  }
+  // Submit both CSV queues in parallel (blocking poll — server-side path)
+  const [csvResult, deletedResult] = await Promise.all([
+    bcQueue(conn, token, companyId, "CSV.Records.Get", null, csvPayload),
+    bcQueue(conn, token, companyId, "CSV.DeletedRecords.Get", null, deletedPayload),
+  ]);
 
   csv = csvResult ? extractCsvPayload(csvResult) : "";
   if (csvResult && csvResult.time) {
     confirmedDt = new Date(csvResult.time);
     confirmedIso = isoNoMs(confirmedDt);
   }
-  const noOfRecords = csv ? csv.split('\n').length - 1 : 0; // -1 for header
-  logs.push(`Found ${noOfRecords} record(s) to mirror`);
+  const noOfRecords = csv ? csv.split('\n').length - 1 : 0;
+  const deletedCsv = deletedResult ? extractCsvPayload(deletedResult) : "";
+  const noOfDeleted = deletedCsv ? deletedCsv.split('\n').length - 1 : 0;
+  logs.push(`${tableCfg.tableName}: ${noOfRecords} record(s), ${noOfDeleted} deleted`);
 
-  // ── Step 2: Count deleted records (Deleted.RecordIds.Get) then fetch CSV ─────
-  const noOfDeleted = await getDeletedRecordCount(
-    conn, token, companyId, tableCfg, previousTs, confirmedIso
-  );
-
-  let deletedCsv = "";
-  if (noOfDeleted > 0) {
-    deletedCsv = await getCsvDeletedRecords(
-      conn, token, companyId, tableCfg, previousTs, confirmedIso, lcid
-    );
-  }
-
-  // ── Step 3: Skip if nothing to mirror ────────────────────────────────────────
+  // ── Step 2: Skip if nothing to mirror ────────────────────────────────────────
   if (noOfRecords === 0 && noOfDeleted === 0) {
     return {
       tableId: tableCfg.tableId,

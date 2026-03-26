@@ -1582,10 +1582,15 @@ window.toggleActivation = async function toggleActivation(configId, currentlyAct
 
 window.stopTableNow = function stopTableNow(configId) {
   const info = state.runningConfigs.get(configId);
-  // Send CancelTask to BC if we have a queueId (fire-and-forget)
+  // Send CancelTask to BC for both queues (fire-and-forget)
   if (info && info.queueId) {
     api('cancelQueueMirror', { queueId: info.queueId })
-      .then(r => { if (r && r.status === 'cancelled') addLog(t('Mirror run cancelled in BC'), 'info'); })
+      .then(r => { if (r && r.status === 'cancelled') addLog(t('CSV queue cancelled in BC'), 'info'); })
+      .catch(() => {});
+  }
+  if (info && info.deletedQueueId) {
+    api('cancelQueueMirror', { queueId: info.deletedQueueId })
+      .then(r => { if (r && r.status === 'cancelled') addLog(t('Deleted records queue cancelled in BC'), 'info'); })
       .catch(() => {});
   }
   if (info && info.ac) info.ac.abort();
@@ -1651,9 +1656,13 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     
     // Step 2: Poll for completion (frontend polling - no timeout limit)
     const queueId = startResult.queueId;
-    // Store queueId in runningConfigs so stopTableNow can cancel the BC task
+    const deletedQueueId = startResult.deletedQueueId;
+    // Store queueIds in runningConfigs so stopTableNow can cancel the BC tasks
     const runInfo = state.runningConfigs.get(configId);
-    if (runInfo) runInfo.queueId = queueId;
+    if (runInfo) {
+      runInfo.queueId = queueId;
+      runInfo.deletedQueueId = deletedQueueId;
+    }
     const maxWaitMs = 12 * 60 * 60 * 1000; // 12 hours max
     let elapsedMs = 0;
     // Adaptive polling: 10s for first 2 min, 30s up to 10 min, 60s after that
@@ -1664,6 +1673,9 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     }
     
     addLog(`${t('Generating CSV export')}...`, 'info');
+    
+    let csvDone = false;
+    let deletedDone = !deletedQueueId; // if no deleted queue, consider it done
     
     while (elapsedMs < maxWaitMs) {
       // Check if we were told to stop (scheduler stopped, abort signal fired)
@@ -1683,22 +1695,30 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
       }
       elapsedMs += interval;
       
-      let statusResult;
-      try {
-        statusResult = await api('checkQueueStatus', { queueId });
-      } catch (pollError) {
-        // Transient backend error — log warning and retry on next poll
-        addLog(`${t('Status check failed, retrying')}: ${pollError.message}`, 'warn');
-        continue;
+      // Poll both queues in parallel
+      const polls = [];
+      if (!csvDone) polls.push(api('checkQueueStatus', { queueId }).then(r => ({ key: 'csv', ...r })).catch(e => ({ key: 'csv', error: e })));
+      if (!deletedDone) polls.push(api('checkQueueStatus', { queueId: deletedQueueId }).then(r => ({ key: 'deleted', ...r })).catch(e => ({ key: 'deleted', error: e })));
+      
+      const results = await Promise.all(polls);
+      
+      for (const r of results) {
+        if (r.error) {
+          addLog(`${t('Status check failed, retrying')}: ${r.error.message}`, 'warn');
+          continue;
+        }
+        if (r.status === 'deleted') {
+          throw new Error(`Queue entry was deleted or not found (${r.key})`);
+        }
+        if (r.status === 'completed') {
+          if (r.key === 'csv') csvDone = true;
+          if (r.key === 'deleted') deletedDone = true;
+        }
       }
       
-      if (statusResult.status === 'completed') {
+      if (csvDone && deletedDone) {
         addLog(`${t('CSV generation completed after')} ${Math.floor(elapsedMs / 1000)}s`, 'ok');
         break;
-      }
-      
-      if (statusResult.status === 'deleted') {
-        throw new Error('Queue entry was deleted or not found');
       }
       
       // Log progress every ~60 seconds
@@ -1706,7 +1726,8 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
       if (Math.round(elapsedMs / interval) % logEvery === 0) {
         const mins = Math.floor(elapsedMs / 60000);
         const secs = Math.floor((elapsedMs % 60000) / 1000);
-        addLog(`${t('Still generating CSV')}... (${mins > 0 ? mins + 'm ' : ''}${secs}s elapsed, polling every ${interval / 1000}s)`, 'info');
+        const pending = [!csvDone ? 'records' : null, !deletedDone ? 'deleted' : null].filter(Boolean).join(', ');
+        addLog(`${t('Still generating CSV')}... (${mins > 0 ? mins + 'm ' : ''}${secs}s elapsed, waiting for: ${pending})`, 'info');
       }
     }
     
@@ -1718,7 +1739,7 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     
     // Step 3: Fetch the completed data
     addLog(`${t('Fetching and uploading CSV data')}...`, 'info');
-    const result = await api('fetchQueueData', { queueId, configId });
+    const result = await api('fetchQueueData', { queueId, deletedQueueId, configId });
     
     // Display final logs
     if (result.logs && Array.isArray(result.logs)) {
