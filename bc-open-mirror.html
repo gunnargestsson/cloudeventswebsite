@@ -907,51 +907,65 @@ async function api(action, payload = {}) {
   const headers = bcSettingsHeaders();
   if (!headers) throw new Error('Missing Business Central configuration. Reconnect on the start page.');
   
-  console.log(`[API] Calling action: ${action}`, payload);
-  
-  const response = await fetch('/api/mirror', {
-    method: 'POST',
-    headers: {
-      ...headers,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ action, companyId: state.companyId, lcid: state.lcid, ...payload })
-  });
-  
-  console.log(`[API] Response status: ${response.status} ${response.statusText}`);
-  console.log(`[API] Content-Type: ${response.headers.get('content-type')}`);
-  
-  const contentType = response.headers.get('content-type');
-  let data;
-  let rawText;
-  
-  try {
-    rawText = await response.text();
-    console.log(`[API] Raw response body (${rawText.length} bytes):`, rawText.substring(0, 500));
+  const requestBody = JSON.stringify({ action, companyId: state.companyId, lcid: state.lcid, ...payload });
+  const maxRetries = 2;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    console.log(`[API] Calling action: ${action}${attempt > 0 ? ` (retry ${attempt}/${maxRetries})` : ''}`, payload);
     
-    if (contentType && contentType.includes('application/json')) {
-      data = JSON.parse(rawText);
-    } else {
-      console.warn(`[API] Non-JSON response received`);
-      data = { error: rawText };
+    const response = await fetch('/api/mirror', {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json'
+      },
+      body: requestBody
+    });
+    
+    console.log(`[API] Response status: ${response.status} ${response.statusText}`);
+    console.log(`[API] Content-Type: ${response.headers.get('content-type')}`);
+    
+    // Retry on 5xx server errors (e.g. SWA "Backend call failure" during deploys)
+    if (response.status >= 500 && attempt < maxRetries) {
+      const retryBody = await response.text().catch(() => '');
+      const delayMs = (attempt + 1) * 2000; // 2s, 4s
+      console.warn(`[API] Server error ${response.status}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries}): ${retryBody.substring(0, 200)}`);
+      await new Promise((r) => setTimeout(r, delayMs));
+      continue;
     }
-  } catch (e) {
-    console.error(`[API] Failed to parse response:`, e);
-    console.error(`[API] Raw text was:`, rawText);
-    data = { 
-      error: `Failed to parse server response: ${e.message}. Raw response: ${rawText?.substring(0, 200)}` 
-    };
+
+    const contentType = response.headers.get('content-type');
+    let data;
+    let rawText;
+    
+    try {
+      rawText = await response.text();
+      console.log(`[API] Raw response body (${rawText.length} bytes):`, rawText.substring(0, 500));
+      
+      if (contentType && contentType.includes('application/json')) {
+        data = JSON.parse(rawText);
+      } else {
+        console.warn(`[API] Non-JSON response received`);
+        data = { error: rawText };
+      }
+    } catch (e) {
+      console.error(`[API] Failed to parse response:`, e);
+      console.error(`[API] Raw text was:`, rawText);
+      data = { 
+        error: `Failed to parse server response: ${e.message}. Raw response: ${rawText?.substring(0, 200)}` 
+      };
+    }
+    
+    if (!response.ok) {
+      const errorMsg = data.error || `Request failed (${response.status} ${response.statusText})`;
+      console.error(`[API] Request failed:`, errorMsg);
+      console.error(`[API] Full response data:`, data);
+      throw new Error(errorMsg);
+    }
+    
+    console.log(`[API] Success:`, data);
+    return data;
   }
-  
-  if (!response.ok) {
-    const errorMsg = data.error || `Request failed (${response.status} ${response.statusText})`;
-    console.error(`[API] Request failed:`, errorMsg);
-    console.error(`[API] Full response data:`, data);
-    throw new Error(errorMsg);
-  }
-  
-  console.log(`[API] Success:`, data);
-  return data;
 }
 
 async function loadUiTranslations() {
