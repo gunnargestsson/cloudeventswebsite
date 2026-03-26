@@ -1101,7 +1101,17 @@ async function checkQueueStatus(conn, token, companyId, queueId) {
   const getStatusPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})/Microsoft.NAV.GetStatus`;
 
   // Call GetStatus action - returns HTTP status code indicating queue state
-  const statusResponse = await httpsJsonWithStatus(BC_HOST, getStatusPath, "POST", { Authorization: `Bearer ${token}` }, null);
+  let statusResponse;
+  try {
+    statusResponse = await httpsJsonWithStatus(BC_HOST, getStatusPath, "POST", { Authorization: `Bearer ${token}` }, null);
+  } catch (err) {
+    // BC returns HTTP 500 with "status code '0'" when the task hasn't been
+    // scheduled yet (pending). Treat as "running" so the frontend keeps polling.
+    if (err.message && err.message.includes("status code '0'")) {
+      return { status: "running", message: "Queue task is pending (not yet scheduled)" };
+    }
+    throw err;
+  }
 
   // BC returns status as HTTP status codes:
   // 201 Created = still running
