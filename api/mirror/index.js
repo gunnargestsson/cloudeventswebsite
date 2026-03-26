@@ -1090,10 +1090,10 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
 
   const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
   const recordCount = Number(countResult.noOfRecords || 0);
-  logs.push(`Record count: ${recordCount}`);
+  logs.push(`${tableCfg.tableName}: ${recordCount} record(s)`);
 
   if (recordCount === 0) {
-    logs.push(`No records modified — skipping CSV export`);
+    logs.push(`${tableCfg.tableName}: no records modified — skipping CSV export`);
     return { tableId: tableCfg.tableId, tableName: tableCfg.tableName, skipped: true, reason: "No records to mirror", logs };
   }
 
@@ -1319,7 +1319,7 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
 
   const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
   const recordCount = Number(countResult.noOfRecords || 0);
-  logs.push(`Record count: ${recordCount}`);
+  logs.push(`${tableCfg.tableName}: ${recordCount} record(s)`);
 
   let csvResult = null;
   if (recordCount > 0) {
