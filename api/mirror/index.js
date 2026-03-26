@@ -86,6 +86,15 @@ module.exports = async function (context, req) {
       case "initializeTable":
         result = await initializeTable(conn, token, companyId, req.body?.configId);
         break;
+      case "listTables":
+        result = await listTables(conn, token, companyId, lcid);
+        break;
+      case "getTableFields":
+        result = await getTableFieldsAction(conn, token, companyId, req.body?.table, lcid);
+        break;
+      case "getTableInfo":
+        result = await getTableInfo(conn, token, companyId, req.body?.table);
+        break;
       default:
         return json(400, { error: `Unknown action: ${action}` });
     }
@@ -891,6 +900,26 @@ function mapFabricType(fieldType) {
   }
 }
 
+async function listTables(conn, token, companyId, lcid) {
+  const result = await bcTask(conn, token, companyId, "Help.Tables.Get", null, null);
+  const tables = result.result || result.value || result.tables || (Array.isArray(result) ? result : []);
+  return { tables, total: tables.length };
+}
+
+async function getTableInfo(conn, token, companyId, tableRef) {
+  if (!tableRef) throw new Error("Parameter 'table' is required");
+  const result = await bcTask(conn, token, companyId, "Help.Tables.Get", String(tableRef), null);
+  const table = (result.result && result.result[0]) || result;
+  return { table };
+}
+
+async function getTableFieldsAction(conn, token, companyId, tableRef, lcid) {
+  if (!tableRef) throw new Error("Parameter 'table' is required");
+  const result = await bcTask(conn, token, companyId, "Help.Fields.Get", String(tableRef), null);
+  const fields = result.result || result.value || (Array.isArray(result) ? result : []);
+  return { fields, fieldCount: fields.length };
+}
+
 async function getTableFields(conn, token, companyId, tableRef) {
   const result = await bcTask(conn, token, companyId, "Help.Fields.Get", String(tableRef), null);
   return result.result || result.value || (Array.isArray(result) ? result : []);
@@ -994,7 +1023,7 @@ async function getDeletedRecordCount(conn, token, companyId, tableCfg, startIso,
   if (startIso) payload.startDateTime = startIso;
   if (endIso) payload.endDateTime = endIso;
 
-  const result = await bcTask(conn, token, companyId, "Deleted.RecordIds.Get", null, payload);
+  const result = await bcQueue(conn, token, companyId, "Deleted.RecordIds.Get", null, payload);
   return Number(result.noOfRecords || 0);
 }
 
@@ -1047,11 +1076,26 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   // Get last sync timestamp from integration table
   const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableName, tableCfg.configId).catch(() => null);
 
-  // Queue the CSV export immediately — skip the synchronous record count
-  // to avoid BC task API timeouts on large tables like G/L Entry.
-  // If there are 0 records, BC returns no data URL and fetchQueueData handles it as skipped.
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
+
+  // Async record count before queuing CSV — never use synchronous bcTask for counts
+  const countPayload = {
+    tableName: tableCfg.tableName,
+    tableView: buildRunTableView(tableCfg),
+    take: 0,
+  };
+  if (previousTs) countPayload.startDateTime = previousTs;
+  if (endIso) countPayload.endDateTime = endIso;
+
+  const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
+  const recordCount = Number(countResult.noOfRecords || 0);
+  logs.push(`Record count: ${recordCount}`);
+
+  if (recordCount === 0) {
+    logs.push(`No records modified — skipping CSV export`);
+    return { tableId: tableCfg.tableId, tableName: tableCfg.tableName, skipped: true, reason: "No records to mirror", logs };
+  }
 
   const { tenantId, environment } = conn;
   const queueId = crypto.randomUUID();
@@ -1263,22 +1307,39 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
   const logs = [];
 
   logs.push(`Starting CSV export for ${tableCfg.tableName}...`);
-  const csvPayload = {
+
+  // Async record count before queuing CSV
+  const countPayload = {
     tableName: tableCfg.tableName,
     ...(runTableView ? { tableView: runTableView } : {}),
-    fieldNumbers:
-      tableCfg.fieldNumbers && tableCfg.fieldNumbers.length
-        ? tableCfg.fieldNumbers
-        : undefined,
+    take: 0,
   };
-  if (previousTs) csvPayload.startDateTime = previousTs;
-  if (endIso) csvPayload.endDateTime = endIso;
-  if (lcid !== undefined && lcid !== 1033) csvPayload.lcid = Number(lcid);
+  if (previousTs) countPayload.startDateTime = previousTs;
+  if (endIso) countPayload.endDateTime = endIso;
 
-  const csvResult = await bcQueue(conn, token, companyId, "CSV.Records.Get", null, csvPayload);
+  const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
+  const recordCount = Number(countResult.noOfRecords || 0);
+  logs.push(`Record count: ${recordCount}`);
 
-  csv = extractCsvPayload(csvResult);
-  if (csvResult.time) {
+  let csvResult = null;
+  if (recordCount > 0) {
+    const csvPayload = {
+      tableName: tableCfg.tableName,
+      ...(runTableView ? { tableView: runTableView } : {}),
+      fieldNumbers:
+        tableCfg.fieldNumbers && tableCfg.fieldNumbers.length
+          ? tableCfg.fieldNumbers
+          : undefined,
+    };
+    if (previousTs) csvPayload.startDateTime = previousTs;
+    if (endIso) csvPayload.endDateTime = endIso;
+    if (lcid !== undefined && lcid !== 1033) csvPayload.lcid = Number(lcid);
+
+    csvResult = await bcQueue(conn, token, companyId, "CSV.Records.Get", null, csvPayload);
+  }
+
+  csv = csvResult ? extractCsvPayload(csvResult) : "";
+  if (csvResult && csvResult.time) {
     confirmedDt = new Date(csvResult.time);
     confirmedIso = isoNoMs(confirmedDt);
   }

@@ -834,6 +834,7 @@ const state = {
   activeTableIds: new Set(),   // tableIds currently running — prevents same-table concurrency
   runningConfigs: new Map(),   // configId → { startedAt: Date, ac: AbortController }
   durationTicker: null,        // setInterval id for updating running durations
+  dropdownSelection: false,    // true when a dropdown option was just clicked — suppresses change event
 };
 
 function t(key) {
@@ -953,28 +954,6 @@ async function api(action, payload = {}) {
   return data;
 }
 
-async function callMcpTool(name, args) {
-  // Merge BC connection parameters into tool arguments
-  const connParams = bcSettingsAsToolArgs();
-  const mergedArgs = { ...connParams, ...args };
-  
-  const response = await fetch('/api/mcp', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: { name, arguments: mergedArgs }
-    })
-  });
-  const rpc = await response.json();
-  if (rpc.error) throw new Error(rpc.error.message || `${name} failed`);
-  return rpc.result?.content?.[0]?.text ? JSON.parse(rpc.result.content[0].text) : rpc.result?.content || rpc.result;
-}
-
 async function loadUiTranslations() {
   const headers = bcSettingsHeaders();
   if (!headers || !state.companyId || state.lcid === 1033) return;
@@ -1090,23 +1069,10 @@ async function ensureTableCatalog() {
   if (state.tableCatalog.length) return state.tableCatalog;
   if (state.tableCatalogPromise) return state.tableCatalogPromise;
   state.tableCatalogPromise = (async () => {
-    const tables = [];
-    let skip = 0;
-    let total = 0;
-    do {
-      const payload = await callMcpTool('list_tables', {
-        companyId: state.companyId,
-        lcid: state.lcid,
-        take: 500,
-        skip
-      });
-      const page = Array.isArray(payload.tables) ? payload.tables : Array.isArray(payload) ? payload : [];
-      total = Number(payload.total || page.length);
-      tables.push(...page.map(normalizeTableEntry).filter((table) => table.tableId > 0));
-      skip += page.length;
-      if (!page.length) break;
-    } while (skip < total);
-    state.tableCatalog = tables.sort((left, right) => left.tableId - right.tableId);
+    const payload = await api('listTables');
+    const raw = Array.isArray(payload.tables) ? payload.tables : Array.isArray(payload) ? payload : [];
+    state.tableCatalog = raw.map(normalizeTableEntry).filter((table) => table.tableId > 0)
+      .sort((left, right) => left.tableId - right.tableId);
     return state.tableCatalog;
   })().finally(() => {
     state.tableCatalogPromise = null;
@@ -1288,12 +1254,7 @@ async function lookupTableMetadata(tableRef = document.getElementById('input-tab
   }
   try {
     setBanner('table-banner', t('Loading fields...'), '');
-    const payload = await callMcpTool('get_table_info', {
-      table: query,
-      companyId: state.companyId,
-      lcid: state.lcid,
-      format: 'json'
-    });
+    const payload = await api('getTableInfo', { table: query });
     const table = payload.table || (Array.isArray(payload) && payload.length ? payload[0] : payload);
     if (!table) throw new Error(t('Table not found'));
     const normalized = normalizeTableEntry(table);
@@ -1319,12 +1280,7 @@ async function loadFields({ tableId = Number(document.getElementById('input-tabl
   if (!tableId && !tableName) throw new Error(t('Please enter a valid table ID'));
   setBanner('table-banner', t('Loading fields...'), '');
   const ref = tableName || String(tableId);
-  const payload = await callMcpTool('get_table_fields', {
-    table: ref,
-    companyId: state.companyId,
-    lcid: state.lcid,
-    format: 'json'
-  });
+  const payload = await api('getTableFields', { table: ref });
   const fields = payload.fields || payload.result || payload;
   const array = Array.isArray(fields) ? fields : [];
   state.fieldCache.set(tableId || Number((array[0] && (array[0].tableNo || array[0].tableId)) || 0), array);
@@ -2019,7 +1975,10 @@ function bindEvents() {
     }
     openTableOptions(value).catch(handleUiError);
   });
-  document.getElementById('input-table-id').addEventListener('change', () => commitTableInput().catch(handleUiError));
+  document.getElementById('input-table-id').addEventListener('change', () => {
+    if (state.dropdownSelection) { state.dropdownSelection = false; return; }
+    commitTableInput().catch(handleUiError);
+  });
   document.getElementById('input-table-id').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
@@ -2032,8 +1991,11 @@ function bindEvents() {
   document.getElementById('table-id-options').addEventListener('click', (event) => {
     const option = event.target.closest('[data-table-id]');
     if (!option) return;
-    lookupTableMetadata(String(option.getAttribute('data-table-id'))).catch(handleUiError);
+    const tableId = String(option.getAttribute('data-table-id'));
+    document.getElementById('input-table-id').value = tableId;
+    state.dropdownSelection = true;
     hideTableOptions();
+    lookupTableMetadata(tableId).catch(handleUiError);
   });
   document.addEventListener('click', (event) => {
     if (!document.getElementById('table-picker').contains(event.target)) hideTableOptions();
