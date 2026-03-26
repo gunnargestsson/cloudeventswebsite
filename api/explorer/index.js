@@ -202,13 +202,14 @@ module.exports = async function (context, req) {
     // PDF — return binary (SKILL.md §7.3 PDF types)
     if (task.datacontenttype && task.datacontenttype.includes("pdf")) {
       const { buffer, contentType } = await bcBinary(task.data, auth);
-      context.res = { status: 200, headers: { "Content-Type": contentType || "application/pdf" }, body: buffer, isRaw: true };
+      context.res = { status: 200, headers: { "Content-Type": contentType || "application/pdf", "x-ce-id": task.id || "" }, body: buffer, isRaw: true };
       return;
     }
 
     // Step 2: fetch result from data URL
     const dataPath = new URL(task.data).pathname + new URL(task.data).search;
     const result = await bcJson("GET", dataPath, auth, null);
+    if (task.id && typeof result === "object" && result !== null) result._ceId = task.id;
     context.res = { status: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(result) };
 
   } catch (e) {

@@ -706,6 +706,7 @@ function showResp(status,elapsed,data,isErr=false){
   const meta=document.getElementById('rmeta');
   meta.style.display='flex';
   meta.innerHTML=`
+    ${data?._ceId||data?.id?`<div class="rkv"><span class="k">Id</span><span class="v" style="font-family:var(--mono);font-size:10px">${esc(data._ceId||data.id)}</span></div>`:''}
     ${status?`<div class="rkv"><span class="k">HTTP</span><span class="v ${isErr?'err':'ok'}">${status}</span></div>`:''}
     <div class="rkv"><span class="k">ms</span><span class="v">${elapsed}</span></div>
     ${data?.status?`<div class="rkv"><span class="k">Status</span><span class="v ${data.status==='Error'?'err':'ok'}">${data.status}</span></div>`:''}
