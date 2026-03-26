@@ -1149,7 +1149,7 @@ async function cancelQueueMirror(conn, token, companyId, queueId) {
 }
 
 async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, configId, lcid = 1033) {
-  if (!queueId) throw new Error("queueId is required");
+  if (!queueId && !deletedQueueId) throw new Error("At least one queueId is required");
   if (!configId) throw new Error("configId is required");
 
   // Parallel fetch: connection + table config (independent getConfig calls)
@@ -1167,15 +1167,20 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
   const authHeaders = { Authorization: `Bearer ${token}` };
   const queueBasePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues`;
 
-  // Fetch both queue records in parallel
-  const queueFetches = [httpsJson(BC_HOST, `${queueBasePath}(${queueId})`, "GET", authHeaders, null)];
+  // Fetch both queue records in parallel (skip cancelled queues)
+  const queueFetches = [];
+  if (queueId) {
+    queueFetches.push(httpsJson(BC_HOST, `${queueBasePath}(${queueId})`, "GET", authHeaders, null));
+  } else {
+    queueFetches.push(Promise.resolve(null));
+  }
   if (deletedQueueId) {
     queueFetches.push(httpsJson(BC_HOST, `${queueBasePath}(${deletedQueueId})`, "GET", authHeaders, null));
   }
   const [queueRecord, deletedQueueRecord] = await Promise.all(queueFetches);
 
   // Check data URLs — BC only provides a download URL when there are records
-  const csvDataUrl = queueRecord.data;
+  const csvDataUrl = queueRecord ? queueRecord.data : null;
   const hasCsvData = csvDataUrl && String(csvDataUrl).startsWith("https://");
   const deletedDataUrl = deletedQueueRecord ? deletedQueueRecord.data : null;
   const hasDeletedData = deletedDataUrl && String(deletedDataUrl).startsWith("https://");
@@ -1220,7 +1225,7 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
   // Get confirmed timestamp from BC (prefer CSV queue time, fall back to deleted queue)
   let confirmedIso = null;
   let confirmedDt = null;
-  const bcTime = (queueRecord.time || (deletedQueueRecord && deletedQueueRecord.time));
+  const bcTime = ((queueRecord && queueRecord.time) || (deletedQueueRecord && deletedQueueRecord.time));
   if (bcTime) {
     confirmedDt = new Date(bcTime);
     confirmedIso = isoNoMs(confirmedDt);

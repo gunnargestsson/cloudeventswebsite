@@ -1676,6 +1676,8 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     
     let csvDone = false;
     let deletedDone = !deletedQueueId; // if no deleted queue, consider it done
+    let csvCancelled = false;
+    let deletedCancelled = !deletedQueueId ? false : false;
     
     while (elapsedMs < maxWaitMs) {
       // Check if we were told to stop (scheduler stopped, abort signal fired)
@@ -1708,12 +1710,29 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
           continue;
         }
         if (r.status === 'deleted') {
-          throw new Error(`Queue entry was deleted or not found (${r.key})`);
+          // BC status 0 = task was cancelled or never started — mark as done (no data)
+          addLog(`${t('Queue cancelled in BC')} (${r.key}): ${r.message || 'cancelled or never started'}`, 'warn');
+          if (r.key === 'csv') { csvDone = true; csvCancelled = true; }
+          if (r.key === 'deleted') { deletedDone = true; deletedCancelled = true; }
+          continue;
         }
         if (r.status === 'completed') {
           if (r.key === 'csv') csvDone = true;
           if (r.key === 'deleted') deletedDone = true;
         }
+      }
+      
+      // If both queues were cancelled, abort this mirror run immediately
+      if (csvCancelled && (deletedCancelled || !deletedQueueId)) {
+        addLog(`${t('All queues cancelled in BC for')}: ${tableName}`, 'warn');
+        return {
+          tableId,
+          tableName,
+          skipped: true,
+          reason: 'All BC queue tasks were cancelled or never started',
+          mirroredRecords: 0,
+          deletedRecords: 0,
+        };
       }
       
       if (csvDone && deletedDone) {
@@ -1737,9 +1756,13 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
       throw new Error(`CSV generation timed out after ${maxWaitMs / 3600000} hours`);
     }
     
-    // Step 3: Fetch the completed data
+    // Step 3: Fetch the completed data (pass cancelled flags so backend skips cancelled queues)
     addLog(`${t('Fetching and uploading CSV data')}...`, 'info');
-    const result = await api('fetchQueueData', { queueId, deletedQueueId, configId });
+    const result = await api('fetchQueueData', {
+      queueId: csvCancelled ? null : queueId,
+      deletedQueueId: deletedCancelled ? null : deletedQueueId,
+      configId,
+    });
     
     // Display final logs
     if (result.logs && Array.isArray(result.logs)) {
