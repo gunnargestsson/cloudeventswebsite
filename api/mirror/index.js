@@ -806,20 +806,6 @@ function buildWhereClause(storedWhere, extraClause) {
   return storedWhere.replace(/\)\s*$/i, `,${extraClause})`);
 }
 
-function buildCountPayload(tableCfg, startIso, endIso) {
-  // Count queries use startDateTime/endDateTime — never tableView for date filtering
-  const payload = {
-    tableName: tableCfg.tableName,
-    skip: 0,
-    take: 1,
-  };
-  if (startIso) payload.startDateTime = startIso;
-  if (endIso) payload.endDateTime = endIso;
-  // Include user-configured static WHERE filter if present
-  if (tableCfg.tableView) payload.tableView = tableCfg.tableView;
-  return payload;
-}
-
 function buildRunTableView(tableCfg) {
   // Date filtering is handled via startDateTime/endDateTime in the JSON payload,
   // not embedded in tableView. Only sorting + user-configured WHERE filter here.
@@ -1239,13 +1225,6 @@ async function fetchQueueData(conn, token, companyId, queueId, configId, lcid = 
     await setIntegrationTimestamp(conn, token, companyId, tableCfg, tsToSave);
   }
 
-  // Check for remaining records (sync — count is lightweight with skip:0, take:1)
-  const nextEndIso = isoNoMs(new Date());
-  const remainingPayload = buildCountPayload(tableCfg, confirmedIso || previousTs, nextEndIso);
-  const remainingResult = await dataRecordsGet(conn, token, companyId, remainingPayload);
-  const remainingRecords = remainingResult.noOfRecords || 0;
-  logs.push(`Checking for remaining records: ${remainingRecords} remaining in backlog`);
-
   return {
     tableId: tableCfg.tableId,
     tableName: tableCfg.tableName,
@@ -1253,7 +1232,6 @@ async function fetchQueueData(conn, token, companyId, queueId, configId, lcid = 
     deletedRecords,
     filePath,
     endDateTime: confirmedIso,
-    hasMoreRecords: remainingRecords > 0,
     logs,
   };
 }
@@ -1278,50 +1256,34 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
   const endIso = isoNoMs(endDt);
   const runTableView = buildRunTableView(tableCfg);
 
-  // ── Step 1: Count and fetch modified records ─────────────────────────────────
-  let noOfRecords = 0;
+  // ── Step 1: Fetch modified records via async queue ───────────────────────────
   let csv = "";
   let confirmedDt = endDt;
   let confirmedIso = endIso;
   const logs = [];
 
-  await withTableRefFallback(tableCfg, async (tableRef) => {
-    const tableSelector = parseTableRef(tableRef);
-    logs.push(`Checking for new records in ${tableCfg.tableName}...`);
-    const countPayload = {
-      ...tableSelector,
-      skip: 0,
-      take: 1,
-    };
-    if (previousTs) countPayload.startDateTime = previousTs;
-    if (endIso) countPayload.endDateTime = endIso;
-    if (tableCfg.tableView) countPayload.tableView = tableCfg.tableView;
-    const countResult = await dataRecordsGet(conn, token, companyId, countPayload);
+  logs.push(`Starting CSV export for ${tableCfg.tableName}...`);
+  const csvPayload = {
+    tableName: tableCfg.tableName,
+    ...(runTableView ? { tableView: runTableView } : {}),
+    fieldNumbers:
+      tableCfg.fieldNumbers && tableCfg.fieldNumbers.length
+        ? tableCfg.fieldNumbers
+        : undefined,
+  };
+  if (previousTs) csvPayload.startDateTime = previousTs;
+  if (endIso) csvPayload.endDateTime = endIso;
+  if (lcid !== undefined && lcid !== 1033) csvPayload.lcid = Number(lcid);
 
-    noOfRecords = Number(countResult.noOfRecords || 0);
-    logs.push(`Found ${noOfRecords} record(s) to mirror`);
-    if (noOfRecords === 0) return;
+  const csvResult = await bcQueue(conn, token, companyId, "CSV.Records.Get", null, csvPayload);
 
-    const csvPayload = {
-      ...tableSelector,
-      ...(runTableView ? { tableView: runTableView } : {}),
-      fieldNumbers:
-        tableCfg.fieldNumbers && tableCfg.fieldNumbers.length
-          ? tableCfg.fieldNumbers
-          : undefined,
-    };
-    if (previousTs) csvPayload.startDateTime = previousTs;
-    if (endIso) csvPayload.endDateTime = endIso;
-    if (lcid !== undefined && lcid !== 1033) csvPayload.lcid = Number(lcid);
-
-    const csvResult = await bcQueue(conn, token, companyId, "CSV.Records.Get", null, csvPayload);
-
-    csv = extractCsvPayload(csvResult);
-    if (csvResult.time) {
-      confirmedDt = new Date(csvResult.time);
-      confirmedIso = isoNoMs(confirmedDt);
-    }
-  });
+  csv = extractCsvPayload(csvResult);
+  if (csvResult.time) {
+    confirmedDt = new Date(csvResult.time);
+    confirmedIso = isoNoMs(confirmedDt);
+  }
+  const noOfRecords = csv ? csv.split('\n').length - 1 : 0; // -1 for header
+  logs.push(`Found ${noOfRecords} record(s) to mirror`);
 
   // ── Step 2: Count deleted records (Deleted.RecordIds.Get) then fetch CSV ─────
   const noOfDeleted = await getDeletedRecordCount(
@@ -1372,32 +1334,6 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
       await uploadTextToMirror(connection, deletedFilePath, deletedCsv);
     }
 
-    // ── Step 5: Check if there are more records to mirror ────────────────────
-    let hasMoreRecords = false;
-    try {
-      const nextEndIso = isoNoMs(new Date());
-      logs.push(`Checking for remaining records...`);
-      await withTableRefFallback(tableCfg, async (tableRef) => {
-        const tableSelector = parseTableRef(tableRef);
-        const nextCountPayload = {
-          ...tableSelector,
-          skip: 0,
-          take: 1,
-        };
-        if (confirmedIso) nextCountPayload.startDateTime = confirmedIso;
-        if (nextEndIso) nextCountPayload.endDateTime = nextEndIso;
-        if (tableCfg.tableView) nextCountPayload.tableView = tableCfg.tableView;
-        const nextCountResult = await dataRecordsGet(conn, token, companyId, nextCountPayload);
-        const nextCount = Number(nextCountResult.noOfRecords || 0);
-        hasMoreRecords = nextCount > 0;
-        logs.push(`Found ${nextCount} remaining record(s) in backlog`);
-      });
-    } catch (error) {
-      // If check fails, default to false and continue with normal interval
-      hasMoreRecords = false;
-      logs.push(`Could not check for remaining records`);
-    }
-
     return {
       tableId: tableCfg.tableId,
       tableName: tableCfg.tableName,
@@ -1407,7 +1343,6 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
       endDateTime: confirmedIso,
       filePath: csvPath,
       deletedFilePath,
-      hasMoreRecords,
       logs,
     };
   } catch (error) {
