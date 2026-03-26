@@ -797,7 +797,12 @@ const UI_STRINGS = [
   'Running',
   'Started',
   'Duration',
-  'Mirror run cancelled in BC'
+  'Mirror run cancelled in BC',
+  'Initialize',
+  'Initialize table?',
+  'This will reverse all integration timestamps and reset the last run date. The next run will mirror all records from the beginning.',
+  'Table initialized',
+  'Initializing table'
 ];
 
 const CONFIG = {
@@ -1474,6 +1479,7 @@ function renderTables() {
           ${running
             ? `<button class="btn danger stop-btn" onclick="stopTableNow('${cid}')">${t('Stop Now')}</button>`
             : `<button class="btn secondary" onclick="runTableNow('${cid}')">${t('Run Now')}</button>`}
+          <button class="btn ghost" onclick="initializeTable('${cid}')">${t('Initialize')}</button>
           <button class="btn ghost" onclick="copyTable('${cid}')">${t('Copy')}</button>
           ${table.active ? '' : `<button class="btn ghost" onclick="editTable('${cid}')">${t('Edit Table')}</button>`}
           <button class="btn danger" onclick="removeTable('${cid}')">${t('Delete')}</button>
@@ -1561,6 +1567,24 @@ window.removeTable = async function removeTable(configId) {
     refreshMetrics();
     const table = prevTables.find((row) => row.configId === configId);
     addLog(`${t('Deleted table')} ${table ? table.tableName : configId}`, 'warn');
+  } catch (error) {
+    handleUiError(error);
+  }
+};
+
+window.initializeTable = async function initializeTable(configId) {
+  try {
+    const table = state.tables.find((row) => row.configId === configId);
+    const tableName = table ? table.tableName : configId;
+    if (!confirm(`${t('Initialize table?')}\n\n${t('This will reverse all integration timestamps and reset the last run date. The next run will mirror all records from the beginning.')}`)) return;
+    addLog(`${t('Initializing table')}: ${tableName}`, 'info');
+    const result = await api('initializeTable', { configId });
+    // Clear local lastRunAt
+    const idx = state.tables.findIndex((row) => row.configId === configId);
+    if (idx >= 0) state.tables[idx].lastRunAt = null;
+    renderTables();
+    refreshMetrics();
+    addLog(`${t('Table initialized')}: ${tableName} (${result.reversedEntries || 0} entries reversed)`, 'ok');
   } catch (error) {
     handleUiError(error);
   }
