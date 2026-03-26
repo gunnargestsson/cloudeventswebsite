@@ -1061,26 +1061,11 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   // Get last sync timestamp from integration table
   const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableName, tableCfg.configId).catch(() => null);
 
-  // Count first — skip CSV.Records.Get entirely when there are 0 records
+  // Queue the CSV export immediately — skip the synchronous record count
+  // to avoid BC task API timeouts on large tables like G/L Entry.
+  // If there are 0 records, BC returns no data URL and fetchQueueData handles it as skipped.
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
-
-  const countPayload = buildCountPayload(tableCfg, previousTs, endIso);
-  const countResult = await dataRecordsGet(conn, token, companyId, countPayload);
-  const noOfRecords = Number(countResult.noOfRecords || 0);
-  logs.push(`Found ${noOfRecords} record(s) to mirror`);
-
-  if (noOfRecords === 0) {
-    logs.push(`No new records — skipping CSV.Records.Get queue`);
-    return {
-      tableId: tableCfg.tableId,
-      tableName: tableCfg.tableName,
-      queueId: null,
-      skipped: true,
-      reason: "No records to mirror",
-      logs,
-    };
-  }
 
   const { tenantId, environment } = conn;
   const queueId = crypto.randomUUID();
