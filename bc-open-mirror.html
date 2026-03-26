@@ -1635,18 +1635,12 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     
     addLog(`${t('Starting mirror run for')}: ${tableName}`, 'info');
     
-    // Step 1: Start the queue (returns immediately with queueId)
+    // Step 1: Start the queue (returns immediately with queueId — no blocking count)
     const startResult = await api('startQueueMirror', { configId });
     
     // Display initial logs
     if (startResult.logs && Array.isArray(startResult.logs)) {
       startResult.logs.forEach(log => addLog(log, 'info'));
-    }
-    
-    // If skipped (no records), return immediately
-    if (startResult.skipped) {
-      addLog(`${t('Mirror run skipped')}: ${startResult.tableName} - ${startResult.reason || 'No records to mirror'}`, 'warn');
-      return startResult;
     }
     
     // Abort check — scheduler may have stopped while we were starting the queue

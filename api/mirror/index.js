@@ -387,12 +387,24 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
   throw new Error(`Queue task timed out after ${maxAttempts} attempts`);
 }
 
-async function dataRecordsGet(conn, token, companyId, payload) {
-  return bcTask(conn, token, companyId, "Data.Records.Get", null, payload);
+// Submit a queue entry and return immediately (no polling).
+// The frontend is responsible for polling checkQueueStatus + fetching results.
+function bcQueueSubmit(conn, token, companyId, type, subject, data) {
+  const { tenantId, environment } = conn;
+  const queueId = crypto.randomUUID();
+  const envelope = { specversion: "1.0", id: queueId, type, source: SOURCE };
+  if (subject !== undefined && subject !== null) envelope.subject = String(subject);
+  if (data !== undefined && data !== null) envelope.data = JSON.stringify(data);
+
+  const queuePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues`;
+
+  console.log(`[bcQueueSubmit] Submitting queue - Type: ${type}, Queue ID: ${queueId}`);
+  return httpsJson(BC_HOST, queuePath, "POST", { Authorization: `Bearer ${token}` }, envelope)
+    .then(() => queueId);
 }
 
-async function dataRecordsGetAsync(conn, token, companyId, payload) {
-  return bcQueue(conn, token, companyId, "Data.Records.Get", null, payload);
+async function dataRecordsGet(conn, token, companyId, payload) {
+  return bcTask(conn, token, companyId, "Data.Records.Get", null, payload);
 }
 
 async function dataRecordsSet(conn, token, companyId, tableName, payload) {
@@ -1023,7 +1035,8 @@ async function getDeletedRecordCount(conn, token, companyId, tableCfg, startIso,
   if (startIso) payload.startDateTime = startIso;
   if (endIso) payload.endDateTime = endIso;
 
-  const result = await bcQueue(conn, token, companyId, "Deleted.RecordIds.Get", null, payload);
+  // Synchronous — deleted record count with take:1 is fast
+  const result = await bcTask(conn, token, companyId, "Deleted.RecordIds.Get", null, payload);
   return Number(result.noOfRecords || 0);
 }
 
@@ -1039,7 +1052,8 @@ async function getCsvDeletedRecords(conn, token, companyId, tableCfg, startIso, 
   if (endIso) payload.endDateTime = endIso;
   if (lcid !== undefined && lcid !== 1033) payload.lcid = Number(lcid);
 
-  const result = await bcQueue(conn, token, companyId, "CSV.DeletedRecords.Get", null, payload);
+  // Synchronous — deleted record sets are typically small
+  const result = await bcTask(conn, token, companyId, "CSV.DeletedRecords.Get", null, payload, true);
   return extractCsvPayload(result);
 }
 
@@ -1079,27 +1093,8 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   const endDt = new Date();
   const endIso = isoNoMs(endDt);
 
-  // Async record count before queuing CSV — never use synchronous bcTask for counts
-  const countPayload = {
-    tableName: tableCfg.tableName,
-    ...(tableCfg.tableView ? { tableView: tableCfg.tableView } : {}),
-    take: 1,
-  };
-  if (previousTs) countPayload.startDateTime = previousTs;
-  if (endIso) countPayload.endDateTime = endIso;
-
-  const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
-  const recordCount = Number(countResult.noOfRecords || 0);
-  logs.push(`${tableCfg.tableName}: ${recordCount} record(s)`);
-
-  if (recordCount === 0) {
-    logs.push(`${tableCfg.tableName}: no records modified — skipping CSV export`);
-    return { tableId: tableCfg.tableId, tableName: tableCfg.tableName, skipped: true, reason: "No records to mirror", logs };
-  }
-
-  const { tenantId, environment } = conn;
-  const queueId = crypto.randomUUID();
-  
+  // Submit CSV queue immediately — no blocking count.
+  // If BC has 0 records the CSV will be empty; fetchQueueData handles that.
   const csvPayload = {
     tableName: tableCfg.tableName,
     tableView: buildRunTableView(tableCfg),
@@ -1109,16 +1104,7 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   if (endIso) csvPayload.endDateTime = endIso;
   if (lcid !== undefined && lcid !== 1033) csvPayload.lcid = Number(lcid);
 
-  const envelope = {
-    specversion: "1.0",
-    id: queueId,
-    type: "CSV.Records.Get",
-    source: SOURCE,
-    data: JSON.stringify(csvPayload),
-  };
-
-  const queuePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues`;
-  await httpsJson(BC_HOST, queuePath, "POST", { Authorization: `Bearer ${token}` }, envelope);
+  const queueId = await bcQueueSubmit(conn, token, companyId, "CSV.Records.Get", null, csvPayload);
 
   logs.push(`Queue started: ${queueId}`);
 
@@ -1308,7 +1294,7 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
 
   logs.push(`Starting CSV export for ${tableCfg.tableName}...`);
 
-  // Async record count before queuing CSV
+  // Synchronous record count (take:1 is fast)
   const countPayload = {
     tableName: tableCfg.tableName,
     ...(tableCfg.tableView ? { tableView: tableCfg.tableView } : {}),
@@ -1317,7 +1303,7 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
   if (previousTs) countPayload.startDateTime = previousTs;
   if (endIso) countPayload.endDateTime = endIso;
 
-  const countResult = await dataRecordsGetAsync(conn, token, companyId, countPayload);
+  const countResult = await bcTask(conn, token, companyId, "Data.Records.Get", null, countPayload);
   const recordCount = Number(countResult.noOfRecords || 0);
   logs.push(`${tableCfg.tableName}: ${recordCount} record(s)`);
 
