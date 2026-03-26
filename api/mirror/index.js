@@ -1215,8 +1215,12 @@ async function fetchQueueData(conn, token, companyId, queueId, configId, lcid = 
   logs.push(`Uploaded to Open Mirror: ${filePath}`);
   logs.push(`${mirroredRecords} records mirrored, ${deletedRecords} deleted`);
 
-  // Save per-config sync timestamp
-  await updateConfigSyncTimestamp(conn, token, companyId, tableCfg.configId, confirmedIso || previousTs);
+  // Save per-config sync timestamp (local config + BC integration table)
+  const tsToSave = confirmedIso || previousTs;
+  await updateConfigSyncTimestamp(conn, token, companyId, tableCfg.configId, tsToSave);
+  if (tsToSave) {
+    await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableName, tableCfg.configId, tsToSave);
+  }
 
   // Check for remaining records (sync — count is lightweight with skip:0, take:1)
   const nextEndIso = isoNoMs(new Date());
@@ -1330,6 +1334,9 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
 
   // ── Step 4: Confirm timestamp and upload ─────────────────────────────────────
   await updateConfigSyncTimestamp(conn, token, companyId, tableCfg.configId, confirmedIso);
+  if (confirmedIso) {
+    await setIntegrationTimestamp(conn, token, companyId, tableCfg.tableName, tableCfg.configId, confirmedIso);
+  }
 
   try {
     const stamp = formatMirrorFileStamp(confirmedDt);
@@ -1388,6 +1395,7 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
     };
   } catch (error) {
     await reverseConfigSyncTimestamp(conn, token, companyId, tableCfg.configId);
+    await reverseIntegrationTimestamp(conn, token, companyId, tableCfg.tableName, tableCfg.configId).catch(() => {});
     throw error;
   }
 }
