@@ -1082,6 +1082,7 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   // Async record count before queuing CSV — never use synchronous bcTask for counts
   const countPayload = {
     tableName: tableCfg.tableName,
+    ...(tableCfg.tableView ? { tableView: tableCfg.tableView } : {}),
     take: 1,
   };
   if (previousTs) countPayload.startDateTime = previousTs;
@@ -1310,6 +1311,7 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
   // Async record count before queuing CSV
   const countPayload = {
     tableName: tableCfg.tableName,
+    ...(tableCfg.tableView ? { tableView: tableCfg.tableView } : {}),
     take: 1,
   };
   if (previousTs) countPayload.startDateTime = previousTs;
