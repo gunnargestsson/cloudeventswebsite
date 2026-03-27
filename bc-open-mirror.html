@@ -941,6 +941,7 @@ const UI_STRINGS = [
   'Continuation pending',
   'more records to export',
   'continuation pending',
+  'records',
 ];
 
 const CONFIG = {
@@ -2228,7 +2229,13 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
 
       // Still running — log progress periodically
       if (transferElapsed % 30000 === 0) {
-        addLog(`${t('Still transferring data')}... (${Math.floor(transferElapsed / 1000)}s)`, 'info');
+        let msg = `${t('Still transferring data')}... (${Math.floor(transferElapsed / 1000)}s)`;
+        if (status.lineCount > 1) {
+          const records = (status.lineCount - 1).toLocaleString();
+          const mb = (status.totalBytes / (1024 * 1024)).toFixed(1);
+          msg += ` — ${records} ${t('records')}, ${mb} MB`;
+        }
+        addLog(msg, 'info');
       }
     }
 
@@ -2359,7 +2366,15 @@ async function resumeTransfer(configId, tableName, queueId, deletedQueueId, csvS
       }
       if (status.status === 'error') throw new Error(status.error);
       if (status.status === 'not_found') throw new Error('Transfer lost');
-      if (elapsed % 30000 === 0) addLog(`${t('Still transferring data')}... (${Math.floor(elapsed / 1000)}s)`, 'info');
+      if (elapsed % 30000 === 0) {
+        let msg = `${t('Still transferring data')}... (${Math.floor(elapsed / 1000)}s)`;
+        if (status.lineCount > 1) {
+          const records = (status.lineCount - 1).toLocaleString();
+          const mb = (status.totalBytes / (1024 * 1024)).toFixed(1);
+          msg += ` — ${records} ${t('records')}, ${mb} MB`;
+        }
+        addLog(msg, 'info');
+      }
     }
     throw new Error('Resumed transfer timed out');
   } catch (err) {

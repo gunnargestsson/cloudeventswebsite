@@ -1105,7 +1105,7 @@ function buildDdl(tableCfg, fields) {
 // Peak memory stays ~4MB regardless of file size.
 const STREAM_CHUNK_SIZE = 4 * 1024 * 1024; // 4MB — ADLS default max per append
 
-function streamBcToMirror(bcHostname, bcPath, authHeaders, fileClient) {
+function streamBcToMirror(bcHostname, bcPath, authHeaders, fileClient, onProgress) {
   return new Promise((resolve, reject) => {
     const req = https.request(
       { hostname: bcHostname, path: bcPath, method: "GET", headers: { ...authHeaders } },
@@ -1150,6 +1150,7 @@ function streamBcToMirror(bcHostname, bcPath, authHeaders, fileClient) {
                 pending = Buffer.from(pending.subarray(STREAM_CHUNK_SIZE));
                 await fileClient.append(toSend, offset, toSend.length);
                 offset += toSend.length;
+                if (onProgress) onProgress({ totalBytes: offset, lineCount });
               }
             }
 
@@ -1159,6 +1160,7 @@ function streamBcToMirror(bcHostname, bcPath, authHeaders, fileClient) {
             // Flush (commit) the file at the final offset
             await fileClient.flush(offset);
 
+            if (onProgress) onProgress({ totalBytes: offset, lineCount });
             resolve({ totalBytes: offset, lineCount });
           } catch (err) {
             if (!errored) { errored = true; reject(err); }
@@ -1393,7 +1395,7 @@ async function retryQueueMirror(conn, token, companyId, queueId) {
   return { status: "none", message: "No task to retry or already running" };
 }
 
-async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, configId, lcid = 1033) {
+async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, configId, lcid = 1033, onProgress) {
   if (!queueId && !deletedQueueId) throw new Error("At least one queueId is required");
   if (!configId) throw new Error("configId is required");
 
@@ -1575,7 +1577,7 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
     streams.push(
       fileClient.deleteIfExists()
         .then(() => fileClient.create())
-        .then(() => streamBcToMirror(csvUrl.hostname, csvUrl.pathname + csvUrl.search, authHeaders, fileClient))
+        .then(() => streamBcToMirror(csvUrl.hostname, csvUrl.pathname + csvUrl.search, authHeaders, fileClient, onProgress))
         .then(result => {
           // lineCount includes the header row, so records = lineCount - 1
           mirroredRecords = Math.max(0, result.lineCount - 1);
@@ -1667,6 +1669,9 @@ async function clearTransferState(conn, token, companyId, configId) {
   });
 }
 
+// In-memory transfer progress (survives within same process, not persisted)
+const _transferProgress = {};
+
 async function startTransfer(conn, token, companyId, queueId, deletedQueueId, configId, lcid) {
   if (!queueId && !deletedQueueId) throw new Error("At least one queueId is required");
   if (!configId) throw new Error("configId is required");
@@ -1678,14 +1683,22 @@ async function startTransfer(conn, token, companyId, queueId, deletedQueueId, co
     transferId, status: "running", createdAt: new Date().toISOString(),
   });
 
+  // Track streaming progress in-memory so checkTransferStatus can report it
+  _transferProgress[configId] = { totalBytes: 0, lineCount: 0 };
+  const onProgress = ({ totalBytes, lineCount }) => {
+    _transferProgress[configId] = { totalBytes, lineCount };
+  };
+
   // Fire-and-forget: start the actual download+upload in the background
-  fetchQueueData(conn, token, companyId, queueId, deletedQueueId, configId, lcid)
+  fetchQueueData(conn, token, companyId, queueId, deletedQueueId, configId, lcid, onProgress)
     .then(async (result) => {
+      delete _transferProgress[configId];
       await saveTransferState(conn, token, companyId, configId, {
         transferId, status: "completed", createdAt: new Date().toISOString(), result,
       });
     })
     .catch(async (err) => {
+      delete _transferProgress[configId];
       await saveTransferState(conn, token, companyId, configId, {
         transferId, status: "error", createdAt: new Date().toISOString(), error: err.message,
       });
@@ -1722,7 +1735,7 @@ async function checkTransferStatus(conn, token, companyId, transferId, configId)
     await clearTransferState(conn, token, companyId, key);
     return { status: "error", error: t.error };
   }
-  return { status: "running" };
+  return { status: "running", ...(_transferProgress[key] || {}) };
 }
 
 async function runMirror(conn, token, companyId, configId, lcid = 1033) {
