@@ -1082,6 +1082,79 @@ function buildDdl(tableCfg, fields) {
   };
 }
 
+// ── Streaming download → chunked ADLS upload ────────────────────────────────
+// Pipes BC CSV response directly to ADLS Gen2 in 4MB append chunks.
+// Peak memory stays ~4MB regardless of file size.
+const STREAM_CHUNK_SIZE = 4 * 1024 * 1024; // 4MB — ADLS default max per append
+
+function streamBcToMirror(bcHostname, bcPath, authHeaders, fileClient) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      { hostname: bcHostname, path: bcPath, method: "GET", headers: { ...authHeaders } },
+      (res) => {
+        if (res.statusCode >= 400) {
+          const errChunks = [];
+          res.on("data", (c) => errChunks.push(c));
+          res.on("end", () => reject(new Error(`HTTP ${res.statusCode}: ${Buffer.concat(errChunks).toString("utf8").slice(0, 400)}`)));
+          return;
+        }
+
+        let offset = 0;
+        let lineCount = 0;
+        let pending = Buffer.alloc(0);
+        let errored = false;
+
+        // Pause the stream to apply backpressure during ADLS appends
+        res.pause();
+
+        const flushPending = async () => {
+          if (pending.length === 0) return;
+          const toSend = pending;
+          pending = Buffer.alloc(0);
+          await fileClient.append(toSend, offset, toSend.length);
+          offset += toSend.length;
+        };
+
+        const processChunks = async () => {
+          try {
+            for await (const chunk of res) {
+              // Count newlines in this chunk
+              for (let i = 0; i < chunk.length; i++) {
+                if (chunk[i] === 0x0A) lineCount++;
+              }
+
+              // Accumulate into pending buffer
+              pending = Buffer.concat([pending, chunk]);
+
+              // Flush when we have enough for an ADLS append
+              while (pending.length >= STREAM_CHUNK_SIZE) {
+                const toSend = pending.subarray(0, STREAM_CHUNK_SIZE);
+                pending = Buffer.from(pending.subarray(STREAM_CHUNK_SIZE));
+                await fileClient.append(toSend, offset, toSend.length);
+                offset += toSend.length;
+              }
+            }
+
+            // Flush remaining data
+            await flushPending();
+
+            // Flush (commit) the file at the final offset
+            await fileClient.flush(offset);
+
+            resolve({ totalBytes: offset, lineCount });
+          } catch (err) {
+            if (!errored) { errored = true; reject(err); }
+          }
+        };
+
+        processChunks();
+      }
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 async function uploadTextToMirror(connection, relativePath, content) {
   const credential = new ClientSecretCredential(connection.tenant, connection.clientId, connection.clientSecret);
   const serviceClient = createDataLakeServiceClient(connection.mirrorUrl, credential);
@@ -1098,7 +1171,14 @@ async function uploadTextToMirror(connection, relativePath, content) {
 
   const payload = Buffer.from(String(content ?? ""), "utf8");
   if (payload.length > 0) {
-    await fileClient.append(payload, 0, payload.length);
+    // Chunked append for large payloads (ADLS max per append is ~100MB, but 4MB is safer)
+    let offset = 0;
+    while (offset < payload.length) {
+      const end = Math.min(offset + STREAM_CHUNK_SIZE, payload.length);
+      const chunk = payload.subarray(offset, end);
+      await fileClient.append(chunk, offset, chunk.length);
+      offset = end;
+    }
   }
   await fileClient.flush(payload.length);
 }
@@ -1297,30 +1377,6 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
     };
   }
 
-  // Download CSV data in parallel where URLs exist
-  let csv = "";
-  let deletedCsv = "";
-  const downloads = [];
-  if (hasCsvData) {
-    const url = new URL(csvDataUrl);
-    downloads.push(
-      httpsText(url.hostname, url.pathname + url.search, authHeaders)
-        .then(text => { csv = text || ""; })
-    );
-  }
-  if (hasDeletedData) {
-    const url = new URL(deletedDataUrl);
-    downloads.push(
-      httpsText(url.hostname, url.pathname + url.search, authHeaders)
-        .then(text => { deletedCsv = text || ""; })
-    );
-  }
-  await Promise.all(downloads);
-
-  const mirroredRecords = csv ? csv.split('\n').length - 1 : 0;
-  const deletedRecords = deletedCsv ? deletedCsv.split('\n').length - 1 : 0;
-  logs.push(`Downloaded: ${mirroredRecords} records, ${deletedRecords} deleted`);
-
   // Get confirmed timestamp from BC (prefer CSV queue time, fall back to deleted queue)
   let confirmedIso = null;
   let confirmedDt = null;
@@ -1330,21 +1386,58 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
     confirmedIso = isoNoMs(confirmedDt);
   }
 
-  // Upload to Open Mirror
+  // Stream download from BC → chunked upload to ADLS (no full-file buffering)
   const stamp = formatMirrorFileStamp(confirmedDt || new Date());
   const safeTableName = washName(tableCfg.tableName);
+  const credential = new ClientSecretCredential(connection.tenant, connection.clientId, connection.clientSecret);
+  const serviceClient = createDataLakeServiceClient(connection.mirrorUrl, credential);
+  const { fileSystemName, basePath } = parseMirrorUrl(connection.mirrorUrl);
+  const fsClient = serviceClient.getFileSystemClient(fileSystemName);
+
   let csvPath = null;
   let deletedFilePath = null;
+  let mirroredRecords = 0;
+  let deletedRecords = 0;
 
-  if (mirroredRecords > 0) {
+  // Stream both in parallel where URLs exist
+  const streams = [];
+
+  if (hasCsvData) {
     csvPath = pathJoin(safeTableName, `${stamp}.csv`);
-    await uploadTextToMirror(connection, csvPath, csv);
+    const fullPath = pathJoin(basePath, csvPath);
+    const fileClient = fsClient.getFileClient(fullPath);
+    const csvUrl = new URL(csvDataUrl);
+
+    streams.push(
+      fileClient.deleteIfExists()
+        .then(() => fileClient.create())
+        .then(() => streamBcToMirror(csvUrl.hostname, csvUrl.pathname + csvUrl.search, authHeaders, fileClient))
+        .then(result => {
+          // lineCount includes the header row, so records = lineCount - 1
+          mirroredRecords = Math.max(0, result.lineCount - 1);
+          logs.push(`Streamed CSV: ${mirroredRecords} records (${(result.totalBytes / (1024 * 1024)).toFixed(1)} MB)`);
+        })
+    );
   }
 
-  if (deletedRecords > 0) {
+  if (hasDeletedData) {
     deletedFilePath = pathJoin(safeTableName, `${stamp}_deleted.csv`);
-    await uploadTextToMirror(connection, deletedFilePath, deletedCsv);
+    const fullPath = pathJoin(basePath, deletedFilePath);
+    const fileClient = fsClient.getFileClient(fullPath);
+    const delUrl = new URL(deletedDataUrl);
+
+    streams.push(
+      fileClient.deleteIfExists()
+        .then(() => fileClient.create())
+        .then(() => streamBcToMirror(delUrl.hostname, delUrl.pathname + delUrl.search, authHeaders, fileClient))
+        .then(result => {
+          deletedRecords = Math.max(0, result.lineCount - 1);
+          logs.push(`Streamed deleted: ${deletedRecords} records (${(result.totalBytes / (1024 * 1024)).toFixed(1)} MB)`);
+        })
+    );
   }
+
+  await Promise.all(streams);
 
   const filePath = csvPath || deletedFilePath;
   if (filePath) logs.push(`Uploaded to Open Mirror: ${filePath}`);

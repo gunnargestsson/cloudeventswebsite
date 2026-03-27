@@ -748,14 +748,12 @@ const UI_STRINGS = [
   'Table deactivated',
   'Starting mirror run for',
   'Requesting CSV data from Business Central...',
-  'More records available, will run again in 5 seconds',
   'Mirror run completed',
   'Mirror run skipped',
   'Mirror run failed',
   'Scheduler started',
   'Scheduler stopped',
-  'Backlog detected for',
-  'scheduling immediate follow-up',
+
   'Unsupported field type',
   'Primary key',
   'Loading fields...',
@@ -1821,9 +1819,6 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
         if (result.deletedRecords) details += `, ${result.deletedRecords} deleted`;
         if (result.filePath) details += ` → ${result.filePath}`;
         addLog(`${t('Mirror run completed')}: ${details}`, 'ok');
-        if (result.hasMoreRecords) {
-          addLog(`${t('More records available, will run again in 5 seconds')}`, 'info');
-        }
         return result;
       }
 
@@ -2118,17 +2113,9 @@ function startSchedulerForTable(table) {
     // Do NOT reschedule if the scheduler was stopped while we were running
     if (!state.schedulerRunning) return;
 
-    // Determine next run delay based on whether there are more records
-    let nextDelayMs;
-    if (result && result.hasMoreRecords) {
-      // More records exist - run again in 5 seconds to process backlog
-      nextDelayMs = 5000;
-      addLog(`${t('Backlog detected for')} ${table.tableName}, ${t('scheduling immediate follow-up')}`, 'info');
-    } else {
-      // No more records (or skipped/failed) — wait the full interval from now.
-      // Using lastRunAt would compute 0 when it's stale, causing rapid-fire loops.
-      nextDelayMs = intervalMs;
-    }
+    // Wait the full interval from now.
+    // Using lastRunAt would compute 0 when it's stale, causing rapid-fire loops.
+    const nextDelayMs = intervalMs;
 
     // Schedule the next run
     const nextTimer = setTimeout(runAndSchedule, nextDelayMs);
