@@ -1235,6 +1235,11 @@ function setTablePanelCollapsed(collapsed) {
 }
 
 function setMirrorsPanelCollapsed(collapsed) {
+  // On first expand, collapse all individual table cards
+  if (state.mirrorsPanelCollapsed && !collapsed) {
+    state.tables.forEach(t => state.collapsedCards.add(t.configId));
+    renderTables();
+  }
   state.mirrorsPanelCollapsed = collapsed;
   document.getElementById('configured-mirrors-panel').classList.toggle('collapsed', collapsed);
 }
