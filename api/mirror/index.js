@@ -618,6 +618,10 @@ function normalizeTableConfig(table) {
     tableView: normalizeWhereFilter(table.tableView),
     intervalMin: Math.max(1, Number(table.intervalMin || 60)),
     active: Boolean(table.active),
+    errorCount: Number(table.errorCount) || 0,
+    lastError: table.lastError || null,
+    lastSuccessAt: table.lastSuccessAt || null,
+    disabledReason: table.disabledReason || null,
   };
 }
 

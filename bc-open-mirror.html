@@ -490,14 +490,14 @@
   .hidden { display: none !important; }
   @media (max-width: 1024px) {
     .hero { grid-template-columns: 1fr; }
-    .mirror-meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .mirror-meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
     .field-grid { grid-template-columns: 1fr; }
   }
   @media (max-width: 720px) {
     main { padding: 20px; }
     header { padding: 16px 20px; }
     .toolbar { flex-direction: column; align-items: stretch; }
-    .mirror-meta-grid { grid-template-columns: 1fr; }
+    .mirror-meta-grid { grid-template-columns: 1fr !important; }
     .log-entry { grid-template-columns: 1fr; gap: 4px; }
   }
 </style>
@@ -812,7 +812,11 @@ const UI_STRINGS = [
   'Resumed queues all cancelled',
   'Resumed poll failed',
   'Resumed poll giving up',
-  'consecutive errors'
+  'consecutive errors',
+  'Last Error',
+  'Error Count',
+  'Auto-disabled after 5 consecutive errors',
+  'errors since last success'
 ];
 
 const CONFIG = {
@@ -1338,7 +1342,11 @@ function collectTableConfig() {
     fieldNumbers,
     tableView,
     intervalMin: Math.max(1, intervalMin || 60),
-    active: false
+    active: false,
+    errorCount: 0,
+    lastError: null,
+    lastSuccessAt: null,
+    disabledReason: null
   };
 }
 
@@ -1389,7 +1397,17 @@ async function saveTable() {
   
   if (existingIndex >= 0) {
     console.log('[saveTable] Updating existing config at index', existingIndex);
-    tables.splice(existingIndex, 1, { ...tables[existingIndex], ...config, active: tables[existingIndex].active });
+    const existing = tables[existingIndex];
+    // Preserve error tracking and status when updating
+    tables.splice(existingIndex, 1, { 
+      ...existing, 
+      ...config, 
+      active: existing.active,
+      errorCount: existing.errorCount || 0,
+      lastError: existing.lastError,
+      lastSuccessAt: existing.lastSuccessAt,
+      disabledReason: existing.disabledReason
+    });
   } else {
     console.log('[saveTable] Adding new config');
     tables.push(config);
@@ -1448,12 +1466,15 @@ function renderTables() {
           </div>
         </div>
         ${running ? `<div class="mirror-running-info"><span>${t('Started')}: ${startStr}</span><span>${t('Duration')}: ${durationStr}</span></div>` : ''}
-        <div class="mirror-meta-grid">
+        <div class="mirror-meta-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
           <div class="meta-box"><div class="meta-label">${t('Table View')}</div><div class="meta-value">${escapeHtml(table.tableView || '—')}</div></div>
           <div class="meta-box"><div class="meta-label">${t('Data Per Company')}</div><div class="meta-value">${table.dataPerCompany}</div></div>
           <div class="meta-box"><div class="meta-label">${t('Last Run At')}</div><div class="meta-value">${escapeHtml(formatRunAt(table.lastRunAt) || '—')}</div></div>
           <div class="meta-box"><div class="meta-label">${t('Fields')}</div><div class="meta-value">${table.fieldNumbers && table.fieldNumbers.length ? escapeHtml(table.fieldNumbers.join(', ')) : escapeHtml(t('Mirror all supported fields'))}</div></div>
+          <div class="meta-box"><div class="meta-label">${t('Error Count')}</div><div class="meta-value" style="color: ${(table.errorCount || 0) > 0 ? 'var(--red)' : 'var(--text)'};">${table.errorCount || 0}</div></div>
+          <div class="meta-box"><div class="meta-label">${t('Last Error')}</div><div class="meta-value" style="color: var(--text-dim); font-size: 0.68rem; line-height: 1.3;">${escapeHtml(table.lastError ? (table.lastError.length > 100 ? table.lastError.substring(0, 100) + '...' : table.lastError) : '—')}</div></div>
         </div>
+        ${table.disabledReason ? `<div style="padding: 10px 14px; background: rgba(242,95,92,0.12); border: 1px solid rgba(242,95,92,0.3); border-radius: 8px; color: var(--red); font-size: 0.74rem; margin-top: 10px;">⚠️ ${escapeHtml(table.disabledReason)}</div>` : ''}
         <div class="mirror-actions">
           <button class="btn ${table.active ? 'secondary' : ''}" onclick="toggleActivation('${cid}', ${table.active})">${table.active ? t('Deactivate') : t('Activate')}</button>
           ${running
@@ -1578,7 +1599,12 @@ window.toggleActivation = async function toggleActivation(configId, currentlyAct
     }
     const action = currentlyActive ? 'deactivateTable' : 'activateTable';
     const result = await api(action, { configId });
-    state.tables = state.tables.map((row) => row.configId === configId ? { ...row, active: !currentlyActive } : row);
+    state.tables = state.tables.map((row) => row.configId === configId ? { 
+      ...row, 
+      active: !currentlyActive,
+      // Clear disabled reason when manually re-activating
+      disabledReason: currentlyActive ? row.disabledReason : null
+    } : row);
     renderTables();
     refreshMetrics();
     const table = state.tables.find((row) => row.configId === configId);
@@ -1809,8 +1835,19 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
         // doesn't re-fire this table before the full interval has elapsed.
         const runEndTime = result.endDateTime || new Date().toISOString();
         const idx = state.tables.findIndex((row) => row.configId === configId);
-        if (idx >= 0) state.tables[idx].lastRunAt = runEndTime;
+        if (idx >= 0) {
+          state.tables[idx].lastRunAt = runEndTime;
+          // Reset error tracking on successful run
+          state.tables[idx].errorCount = 0;
+          state.tables[idx].lastError = null;
+          state.tables[idx].lastSuccessAt = runEndTime;
+          state.tables[idx].disabledReason = null;
+        }
         state.lastRunAt = runEndTime;
+        // Save the updated error tracking to backend
+        await api('saveTableConfigs', { tables: state.tables }).catch(err => {
+          console.warn('Failed to save error tracking after success:', err);
+        });
         if (result.skipped) {
           addLog(`${t('Mirror run skipped')}: ${result.tableName || tableName} - ${result.reason || 'No records to mirror'}`, 'warn');
           renderTables();
@@ -1845,6 +1882,30 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     if (runAc.signal.aborted) return null;
     const table = state.tables.find((t) => t.configId === configId);
     const tableName = table ? table.tableName : `Config ${configId}`;
+    
+    // Track error and potentially auto-disable
+    const idx = state.tables.findIndex((row) => row.configId === configId);
+    if (idx >= 0) {
+      const currentErrorCount = (state.tables[idx].errorCount || 0) + 1;
+      state.tables[idx].errorCount = currentErrorCount;
+      state.tables[idx].lastError = error.message;
+      
+      // Auto-disable after 5 consecutive errors
+      if (currentErrorCount >= 5 && state.tables[idx].active) {
+        state.tables[idx].active = false;
+        state.tables[idx].disabledReason = t('Auto-disabled after 5 consecutive errors');
+        addLog(`${t('Auto-disabled after 5 consecutive errors')}: ${tableName} (${currentErrorCount} ${t('errors since last success')})`, 'error');
+        
+        // Stop scheduler for this table
+        stopSchedulerForTable(configId);
+      }
+      
+      // Save the updated error tracking to backend
+      await api('saveTableConfigs', { tables: state.tables }).catch(err => {
+        console.warn('Failed to save error tracking:', err);
+      });
+    }
+    
     addLog(`${t('Mirror run failed')}: ${tableName} - ${error.message}`, 'error');
     throw error;
   } finally {
