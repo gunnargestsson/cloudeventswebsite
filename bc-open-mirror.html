@@ -2557,7 +2557,7 @@ function startSchedulerForTable(table) {
     // If this run returned a continuation (more chunks pending), re-trigger immediately
     const continuationPending = result && result.continueFromRecordId
       && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(result.continueFromRecordId);
-    const nextDelayMs = continuationPending ? 0 : intervalMs;
+    const nextDelayMs = continuationPending ? 10000 : intervalMs;
 
     // Schedule the next run
     const nextTimer = setTimeout(runAndSchedule, nextDelayMs);
