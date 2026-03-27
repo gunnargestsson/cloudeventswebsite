@@ -378,13 +378,21 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
       
       // Route based on datacontenttype from queue record (no HEAD request needed)
       if (dataContentType.includes("json")) {
-        // JSON response (e.g., count queries, record data)
+        // JSON response — could be a normal result (count/records) or a BC error
         const jsonResult = await httpsJson(url.hostname, url.pathname + url.search, "GET", { Authorization: `Bearer ${token}` }, null);
+        if (jsonResult.status === "Error" && jsonResult.error) {
+          console.error(`[bcQueue] BC error in queue result: ${jsonResult.error}`);
+          throw new Error(`BC CSV generation failed: ${jsonResult.error}`);
+        }
         console.log(`[bcQueue] Received JSON result - noOfRecords: ${jsonResult.noOfRecords || 'N/A'}, BC Time: ${queueRecord.time || 'null'}`);
         return {
           ...jsonResult,
           time: queueRecord.time || null,
         };
+      } else if (!dataContentType) {
+        // Empty datacontenttype = success but no content
+        console.log(`[bcQueue] Empty datacontenttype - no records`);
+        return { data: "", time: queueRecord.time || null };
       } else {
         // CSV or text content (bulk export)
         const csvData = await httpsText(url.hostname, url.pathname + url.search, { Authorization: `Bearer ${token}` });
@@ -1359,11 +1367,45 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
   }
   const [queueRecord, deletedQueueRecord] = await Promise.all(queueFetches);
 
-  // Check data URLs — BC only provides a download URL when there are records
-  const csvDataUrl = queueRecord ? queueRecord.data : null;
-  const hasCsvData = csvDataUrl && String(csvDataUrl).startsWith("https://");
-  const deletedDataUrl = deletedQueueRecord ? deletedQueueRecord.data : null;
-  const hasDeletedData = deletedDataUrl && String(deletedDataUrl).startsWith("https://");
+  // Validate datacontenttype before proceeding — BC signals the result format:
+  //   "text/csv"  → normal CSV export data
+  //   ""          → success but no content (0 records)
+  //   "text/json" → BC error during CSV generation, data URL contains error JSON
+  async function validateQueueResult(record, label) {
+    if (!record) return { hasData: false };
+    const ct = (record.datacontenttype || "").toLowerCase();
+    const dataUrl = record.data;
+    const hasUrl = dataUrl && String(dataUrl).startsWith("https://");
+
+    if (ct === "text/json" || ct === "application/json") {
+      // BC had an error generating CSV — download the error details
+      let errorMsg = `BC ${label} generation failed`;
+      if (hasUrl) {
+        try {
+          const url = new URL(dataUrl);
+          const errJson = await httpsJson(url.hostname, url.pathname + url.search, "GET", authHeaders, null);
+          if (errJson.error) errorMsg += `: ${errJson.error}`;
+          if (errJson.callStack) errorMsg += ` [${errJson.callStack.split("\\").shift()}]`;
+        } catch { /* use generic message */ }
+      }
+      throw new Error(errorMsg);
+    }
+
+    if (!ct || ct !== "text/csv") {
+      // Empty datacontenttype = success with no content
+      return { hasData: false };
+    }
+
+    if (!hasUrl) return { hasData: false };
+    return { hasData: true };
+  }
+
+  const csvCheck = await validateQueueResult(queueRecord, "CSV");
+  const deletedCheck = await validateQueueResult(deletedQueueRecord, "deleted records");
+  const hasCsvData = csvCheck.hasData;
+  const hasDeletedData = deletedCheck.hasData;
+  const csvDataUrl = hasCsvData ? queueRecord.data : null;
+  const deletedDataUrl = hasDeletedData ? deletedQueueRecord.data : null;
 
   if (!hasCsvData && !hasDeletedData) {
     logs.push("No records to mirror");
