@@ -22,6 +22,19 @@ const CONFIG_TABLES_ID = "11111111-1111-1111-1111-000000000002";
 
 const _tokenCache = new Map();
 
+// ── In-memory transfer tracker for async download+upload operations ──────────
+// Survives across requests within the same function process.
+// Auto-cleaned after 15 minutes to prevent memory leaks.
+const _transfers = new Map();
+const TRANSFER_TTL_MS = 15 * 60 * 1000;
+
+function cleanupTransfers() {
+  const now = Date.now();
+  for (const [id, t] of _transfers) {
+    if (now - t.createdAt > TRANSFER_TTL_MS) _transfers.delete(id);
+  }
+}
+
 module.exports = async function (context, req) {
   try {
     const action = req.body?.action;
@@ -76,6 +89,12 @@ module.exports = async function (context, req) {
         break;
       case "fetchQueueData":
         result = await fetchQueueData(conn, token, companyId, req.body?.queueId, req.body?.deletedQueueId, req.body?.configId, lcid);
+        break;
+      case "startTransfer":
+        result = startTransfer(conn, token, companyId, req.body?.queueId, req.body?.deletedQueueId, req.body?.configId, lcid);
+        break;
+      case "checkTransferStatus":
+        result = checkTransferStatus(req.body?.transferId);
         break;
       case "runAllActive":
         result = await runAllActive(conn, token, companyId, lcid);
@@ -1266,6 +1285,54 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
     endDateTime: confirmedIso,
     logs,
   };
+}
+
+// ── Async transfer: fire-and-forget download+upload with polling ─────────────
+
+function startTransfer(conn, token, companyId, queueId, deletedQueueId, configId, lcid) {
+  if (!queueId && !deletedQueueId) throw new Error("At least one queueId is required");
+  if (!configId) throw new Error("configId is required");
+
+  cleanupTransfers();
+
+  const transferId = crypto.randomUUID();
+  _transfers.set(transferId, { status: "running", createdAt: Date.now() });
+
+  // Fire-and-forget: start the actual download+upload in the background
+  fetchQueueData(conn, token, companyId, queueId, deletedQueueId, configId, lcid)
+    .then(result => {
+      const t = _transfers.get(transferId);
+      if (t) {
+        t.status = "completed";
+        t.result = result;
+      }
+    })
+    .catch(err => {
+      const t = _transfers.get(transferId);
+      if (t) {
+        t.status = "error";
+        t.error = err.message;
+      }
+    });
+
+  return { transferId, status: "running" };
+}
+
+function checkTransferStatus(transferId) {
+  if (!transferId) throw new Error("transferId is required");
+
+  const t = _transfers.get(transferId);
+  if (!t) return { status: "not_found" };
+
+  if (t.status === "completed") {
+    _transfers.delete(transferId);
+    return { status: "completed", ...t.result };
+  }
+  if (t.status === "error") {
+    _transfers.delete(transferId);
+    return { status: "error", error: t.error };
+  }
+  return { status: "running" };
 }
 
 async function runMirror(conn, token, companyId, configId, lcid = 1033) {

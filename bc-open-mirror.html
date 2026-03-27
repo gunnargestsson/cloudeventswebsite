@@ -1756,44 +1756,79 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
       throw new Error(`CSV generation timed out after ${maxWaitMs / 3600000} hours`);
     }
     
-    // Step 3: Fetch the completed data (pass cancelled flags so backend skips cancelled queues)
+    // Step 3: Start async transfer (fire-and-forget download+upload on backend)
     addLog(`${t('Fetching and uploading CSV data')}...`, 'info');
-    const result = await api('fetchQueueData', {
+    const transfer = await api('startTransfer', {
       queueId: csvCancelled ? null : queueId,
       deletedQueueId: deletedCancelled ? null : deletedQueueId,
       configId,
     });
-    
-    // Display final logs
-    if (result.logs && Array.isArray(result.logs)) {
-      result.logs.forEach(log => addLog(log, 'info'));
+
+    if (!transfer.transferId) throw new Error('Failed to start data transfer');
+
+    // Step 4: Poll transfer status until complete
+    const transferId = transfer.transferId;
+    let transferElapsed = 0;
+    const transferMaxWait = 10 * 60 * 1000; // 10 min max for download+upload
+
+    while (transferElapsed < transferMaxWait) {
+      if (runAc.signal.aborted) {
+        addLog(`Mirror run aborted for: ${tableName}`, 'warn');
+        return null;
+      }
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 5000);
+        const onAbort = () => { clearTimeout(timer); resolve(); };
+        runAc.signal.addEventListener('abort', onAbort, { once: true });
+      });
+      if (runAc.signal.aborted) return null;
+      transferElapsed += 5000;
+
+      const status = await api('checkTransferStatus', { transferId });
+
+      if (status.status === 'completed') {
+        // Process the completed result
+        const result = status;
+        if (result.logs && Array.isArray(result.logs)) {
+          result.logs.forEach(log => addLog(log, 'info'));
+        }
+        if (result.skipped) {
+          addLog(`${t('Mirror run skipped')}: ${result.tableName || tableName} - ${result.reason || 'No records to mirror'}`, 'warn');
+          return result;
+        }
+        if (result.endDateTime) {
+          const idx = state.tables.findIndex((row) => row.configId === configId);
+          if (idx >= 0) state.tables[idx].lastRunAt = result.endDateTime;
+          state.lastRunAt = result.endDateTime;
+        }
+        renderTables();
+        refreshMetrics();
+        let details = `${result.tableName || tableName}`;
+        if (result.mirroredRecords !== undefined) details += ` - ${result.mirroredRecords} records`;
+        if (result.deletedRecords) details += `, ${result.deletedRecords} deleted`;
+        if (result.filePath) details += ` → ${result.filePath}`;
+        addLog(`${t('Mirror run completed')}: ${details}`, 'ok');
+        if (result.hasMoreRecords) {
+          addLog(`${t('More records available, will run again in 5 seconds')}`, 'info');
+        }
+        return result;
+      }
+
+      if (status.status === 'error') {
+        throw new Error(`Data transfer failed: ${status.error}`);
+      }
+
+      if (status.status === 'not_found') {
+        throw new Error('Transfer lost — backend may have restarted. Try again.');
+      }
+
+      // Still running — log progress periodically
+      if (transferElapsed % 30000 === 0) {
+        addLog(`${t('Still transferring data')}... (${Math.floor(transferElapsed / 1000)}s)`, 'info');
+      }
     }
 
-    // Queue completed but BC had 0 records — treat as skipped
-    if (result.skipped) {
-      addLog(`${t('Mirror run skipped')}: ${result.tableName || tableName} - ${result.reason || 'No records to mirror'}`, 'warn');
-      return result;
-    }
-    
-    if (result.endDateTime) {
-      const idx = state.tables.findIndex((row) => row.configId === configId);
-      if (idx >= 0) state.tables[idx].lastRunAt = result.endDateTime;
-      state.lastRunAt = result.endDateTime;
-    }
-    renderTables();
-    refreshMetrics();
-    
-    let details = `${result.tableName}`;
-    if (result.mirroredRecords !== undefined) details += ` - ${result.mirroredRecords} records`;
-    if (result.deletedRecords) details += `, ${result.deletedRecords} deleted`;
-    if (result.filePath) details += ` → ${result.filePath}`;
-    addLog(`${t('Mirror run completed')}: ${details}`, 'ok');
-    
-    if (result.hasMoreRecords) {
-      addLog(`${t('More records available, will run again in 5 seconds')}`, 'info');
-    }
-    
-    return result;
+    throw new Error(`Data transfer timed out after ${transferMaxWait / 60000} minutes`);
   } catch (error) {
     if (runAc.signal.aborted) return null;
     const table = state.tables.find((t) => t.configId === configId);
