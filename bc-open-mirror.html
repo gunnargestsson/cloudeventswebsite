@@ -2155,7 +2155,7 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
 
     // Step 4: Poll transfer status until complete
     let transferElapsed = 0;
-    const transferMaxWait = 10 * 60 * 1000; // 10 min max for download+upload
+    const transferMaxWait = 60 * 60 * 1000; // 60 min max for download+upload
 
     while (transferElapsed < transferMaxWait) {
       if (runAc.signal.aborted) {
@@ -2348,7 +2348,7 @@ async function resumeTransfer(configId, tableName, queueId, deletedQueueId, csvS
 
     // Poll transfer until done
     let elapsed = 0;
-    while (elapsed < 10 * 60 * 1000) {
+    while (elapsed < 60 * 60 * 1000) {
       await new Promise(r => setTimeout(r, 5000));
       elapsed += 5000;
       const status = await api('checkTransferStatus', { transferId: transfer.transferId, configId });
