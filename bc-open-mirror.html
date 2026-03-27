@@ -937,7 +937,10 @@ const UI_STRINGS = [
   'Error',
   'Queue error in BC',
   'Giving up after',
-  'consecutive poll errors for'
+  'consecutive poll errors for',
+  'Continuation pending',
+  'more records to export',
+  'continuation pending',
 ];
 
 const CONFIG = {
@@ -1661,6 +1664,7 @@ function renderTables() {
               <span class="pill">${table.intervalMin} ${t('min')}</span>
               <span class="pill">${t('Field Count')}: ${table.fieldNumbers && table.fieldNumbers.length ? table.fieldNumbers.length : t('All')}</span>
               <span class="pill">${t('Last Run At')}: ${escapeHtml(formatRunAt(table.lastRunAt) || '—')}</span>
+              ${table.continueFromRecordId ? `<span class="pill" style="color: var(--amber); border-color: rgba(255,190,11,0.3); background: rgba(255,190,11,0.08);">${t('Continuation pending')}</span>` : ''}
               <span class="pill" style="${(table.errorCount || 0) > 0 ? 'color: var(--red); border-color: rgba(242,95,92,0.3); background: rgba(242,95,92,0.08);' : ''}">${t('Error Count')}: ${table.errorCount || 0}</span>
             </div>
             <span class="collapse-icon">▾</span>
@@ -2173,22 +2177,30 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
         if (result.logs && Array.isArray(result.logs)) {
           result.logs.forEach(log => addLog(log, 'info'));
         }
-        // Always update lastRunAt — even for skipped runs — so the scheduler
-        // doesn't re-fire this table before the full interval has elapsed.
+        // Check if this is a continuation chunk (more records pending)
+        const hasContinuation = result.continueFromRecordId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(result.continueFromRecordId);
         const runEndTime = result.endDateTime || new Date().toISOString();
         const idx = state.tables.findIndex((row) => row.configId === configId);
         if (idx >= 0) {
-          state.tables[idx].lastRunAt = runEndTime;
           // Reset error tracking on successful run
           state.tables[idx].errorCount = 0;
           state.tables[idx].lastError = null;
-          state.tables[idx].lastSuccessAt = runEndTime;
           state.tables[idx].disabledReason = null;
+          if (hasContinuation) {
+            // More chunks pending — store the continuation ID, do NOT update lastRunAt
+            state.tables[idx].continueFromRecordId = result.continueFromRecordId;
+            addLog(`${t('Continuation pending')}: ${tableName} — ${t('more records to export')}`, 'info');
+          } else {
+            // Final chunk or single-chunk export — clear continuation, update timestamps
+            state.tables[idx].continueFromRecordId = null;
+            state.tables[idx].lastRunAt = runEndTime;
+            state.tables[idx].lastSuccessAt = runEndTime;
+            state.lastRunAt = runEndTime;
+          }
         }
-        state.lastRunAt = runEndTime;
-        // Save the updated error tracking to backend
+        // Save config to backend
         await api('saveTableConfigs', { tables: state.tables }).catch(err => {
-          console.warn('Failed to save error tracking after success:', err);
+          console.warn('Failed to save config after mirror run:', err);
         });
         if (result.skipped) {
           addLog(`${t('Mirror run skipped')}: ${result.tableName || tableName} - ${result.reason || 'No records to mirror'}`, 'warn');
@@ -2201,6 +2213,7 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
         if (result.mirroredRecords !== undefined) details += ` - ${result.mirroredRecords} records`;
         if (result.deletedRecords) details += `, ${result.deletedRecords} deleted`;
         if (result.filePath) details += ` → ${result.filePath}`;
+        if (hasContinuation) details += ` (${t('continuation pending')})`;
         addLog(`${t('Mirror run completed')}: ${details}`, 'ok');
         return result;
       }
@@ -2541,9 +2554,10 @@ function startSchedulerForTable(table) {
     // Do NOT reschedule if the scheduler was stopped while we were running
     if (!state.schedulerRunning) return;
 
-    // Wait the full interval from now.
-    // Using lastRunAt would compute 0 when it's stale, causing rapid-fire loops.
-    const nextDelayMs = intervalMs;
+    // If this run returned a continuation (more chunks pending), re-trigger immediately
+    const continuationPending = result && result.continueFromRecordId
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(result.continueFromRecordId);
+    const nextDelayMs = continuationPending ? 0 : intervalMs;
 
     // Schedule the next run
     const nextTimer = setTimeout(runAndSchedule, nextDelayMs);

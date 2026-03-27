@@ -419,12 +419,14 @@ async function bcQueue(conn, token, companyId, type, subject, data) {
 
 // Submit a queue entry and return immediately (no polling).
 // The frontend is responsible for polling checkQueueStatus + fetching results.
-function bcQueueSubmit(conn, token, companyId, type, subject, data) {
+// envelopeExtras: optional object with top-level CloudEvents attributes (e.g. continueFromRecordId)
+function bcQueueSubmit(conn, token, companyId, type, subject, data, envelopeExtras) {
   const { tenantId, environment } = conn;
   const queueId = crypto.randomUUID();
   const envelope = { specversion: "1.0", id: queueId, type, source: SOURCE };
   if (subject !== undefined && subject !== null) envelope.subject = String(subject);
   if (data !== undefined && data !== null) envelope.data = JSON.stringify(data);
+  if (envelopeExtras) Object.assign(envelope, envelopeExtras);
 
   const queuePath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues`;
 
@@ -625,6 +627,7 @@ function normalizeTableConfig(table) {
     lastError: table.lastError || null,
     lastSuccessAt: table.lastSuccessAt || null,
     disabledReason: table.disabledReason || null,
+    continueFromRecordId: table.continueFromRecordId || null,
   };
 }
 
@@ -1261,10 +1264,21 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   if (endIso) deletedPayload.endDateTime = endIso;
   if (lcid !== undefined && lcid !== 1033) deletedPayload.lcid = Number(lcid);
 
-  // Submit both queues in parallel — fire-and-forget, frontend polls
+  // If continuing from a previous chunk, pass continueFromRecordId as a top-level envelope attribute
+  const isContinuation = Boolean(tableCfg.continueFromRecordId);
+  const csvEnvelopeExtras = isContinuation
+    ? { continueFromRecordId: tableCfg.continueFromRecordId }
+    : undefined;
+  if (isContinuation) {
+    logs.push(`Resuming chunked export (continueFromRecordId: ${tableCfg.continueFromRecordId})`);
+  }
+
+  // Submit queues — skip deleted records queue when continuing a chunked export
   const [queueId, deletedQueueId] = await Promise.all([
-    bcQueueSubmit(conn, token, companyId, "CSV.Records.Get", null, csvPayload),
-    bcQueueSubmit(conn, token, companyId, "CSV.DeletedRecords.Get", null, deletedPayload),
+    bcQueueSubmit(conn, token, companyId, "CSV.Records.Get", null, csvPayload, csvEnvelopeExtras),
+    isContinuation
+      ? Promise.resolve(null)
+      : bcQueueSubmit(conn, token, companyId, "CSV.DeletedRecords.Get", null, deletedPayload),
   ]);
 
   // Persist queue state so the frontend can resume after failure/sleep/reload
@@ -1500,8 +1514,15 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
   const hasCsvData = csvCheck.hasData;
   const hasDeletedData = deletedCheck.hasData;
   // Use the potentially updated record from retry
-  const csvDataUrl = hasCsvData ? (csvCheck.record || queueRecord).data : null;
+  const effectiveCsvRecord = csvCheck.record || queueRecord;
+  const csvDataUrl = hasCsvData ? effectiveCsvRecord.data : null;
   const deletedDataUrl = hasDeletedData ? (deletedCheck.record || deletedQueueRecord).data : null;
+
+  // Read continueFromRecordId from the CSV queue response (top-level envelope attribute)
+  const continueFromRecordId = effectiveCsvRecord ? (effectiveCsvRecord.continueFromRecordId || null) : null;
+  if (continueFromRecordId) {
+    logs.push(`Continuation detected — more records pending (continueFromRecordId: ${continueFromRecordId})`);
+  }
 
   if (!hasCsvData && !hasDeletedData) {
     logs.push("No records to mirror");
@@ -1514,6 +1535,7 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
       mirroredRecords: 0,
       deletedRecords: 0,
       endDateTime: new Date().toISOString(),
+      continueFromRecordId: null,
       logs,
     };
   }
@@ -1584,10 +1606,14 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
   if (filePath) logs.push(`Uploaded to Open Mirror: ${filePath}`);
   logs.push(`${mirroredRecords} records mirrored, ${deletedRecords} deleted`);
 
-  // Save sync timestamp to BC integration table
-  const tsToSave = confirmedIso;
-  if (tsToSave) {
-    await setIntegrationTimestamp(conn, token, companyId, tableCfg, tsToSave);
+  // Only save sync timestamp when this is the final chunk (no continuation pending)
+  if (continueFromRecordId) {
+    logs.push(`Skipping timestamp update — continuation chunk pending`);
+  } else {
+    const tsToSave = confirmedIso;
+    if (tsToSave) {
+      await setIntegrationTimestamp(conn, token, companyId, tableCfg, tsToSave);
+    }
   }
 
   // Clear persisted queue state — this run completed successfully
@@ -1600,6 +1626,7 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
     deletedRecords,
     filePath,
     endDateTime: confirmedIso,
+    continueFromRecordId,
     logs,
   };
 }
