@@ -299,6 +299,41 @@
     gap: 12px;
     margin-bottom: 18px;
   }
+  .toolbar-left {
+    flex: 1;
+  }
+  .toolbar-right {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .filter-group {
+    display: flex;
+    gap: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 4px;
+  }
+  .filter-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-mid);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.74rem;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+  }
+  .filter-btn:hover {
+    background: var(--surface3);
+    color: var(--text);
+  }
+  .filter-btn.active {
+    background: var(--accent);
+    color: #fff;
+  }
   .search-wrap { position: relative; flex: 1; }
   .search-wrap input {
     width: 100%;
@@ -322,11 +357,60 @@
     display: grid;
     gap: 16px;
   }
+  .mirror-card.collapsed {
+    padding: 16px 20px;
+  }
+  .mirror-card.collapsed .mirror-card-details,
+  .mirror-card.collapsed .mirror-actions {
+    display: none;
+  }
   .mirror-card-top {
     display: flex;
     justify-content: space-between;
     gap: 16px;
     align-items: flex-start;
+  }
+  .mirror-card-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+  }
+  .mirror-card-header:hover .collapse-icon {
+    color: var(--text);
+  }
+  .collapse-icon {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    transition: transform 0.2s ease, color 0.2s ease;
+  }
+  .mirror-card.collapsed .collapse-icon {
+    transform: rotate(-90deg);
+  }
+  .mirror-summary {
+    display: none;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .mirror-card.collapsed .mirror-summary {
+    display: grid;
+  }
+  .summary-item {
+    font-size: 0.7rem;
+  }
+  .summary-label {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  .summary-value {
+    color: var(--text);
+    font-size: 0.76rem;
   }
   .mirror-title { font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
   .mirror-id { font-size: 0.72rem; color: var(--text-dim); }
@@ -653,13 +737,21 @@
 
     <section class="panel" style="margin-bottom: 18px;">
       <div class="toolbar">
-        <div>
+        <div class="toolbar-left">
           <div class="section-title" id="configured-title">Configured Mirrors</div>
           <div class="section-subtitle" id="configured-copy">Activation uploads DDL and locks the configuration until the table is deactivated.</div>
         </div>
-        <div class="search-wrap">
-          <span class="search-icon">🔍</span>
-          <input id="search-input" type="text" placeholder="Search table mirrors..." />
+        <div class="toolbar-right">
+          <div class="filter-group">
+            <button class="filter-btn active" data-filter="all" onclick="setMirrorsFilter('all')" id="filter-all">All</button>
+            <button class="filter-btn" data-filter="active" onclick="setMirrorsFilter('active')" id="filter-active">Active</button>
+            <button class="filter-btn" data-filter="inactive" onclick="setMirrorsFilter('inactive')" id="filter-inactive">Inactive</button>
+            <button class="filter-btn" data-filter="error" onclick="setMirrorsFilter('error')" id="filter-error">On Error</button>
+          </div>
+          <div class="search-wrap">
+            <span class="search-icon">🔍</span>
+            <input id="search-input" type="text" placeholder="Search table mirrors..." />
+          </div>
         </div>
       </div>
       <div id="mirrors-container" class="table-grid"></div>
@@ -820,7 +912,11 @@ const UI_STRINGS = [
   'Retrying BC task',
   'BC task retry succeeded',
   'BC task retry failed',
-  'resuming polling...'
+  'resuming polling...',
+  'All',
+  'Active',
+  'Inactive',
+  'On Error'
 ];
 
 const CONFIG = {
@@ -853,6 +949,8 @@ const state = {
   runningConfigs: new Map(),   // configId → { startedAt: Date, ac: AbortController }
   durationTicker: null,        // setInterval id for updating running durations
   dropdownSelection: false,    // true when a dropdown option was just clicked — suppresses change event
+  mirrorsFilter: 'all',        // 'all', 'active', 'inactive', 'error'
+  collapsedCards: new Set(),   // configIds of collapsed cards
 };
 
 function t(key) {
@@ -891,6 +989,30 @@ function formatRunAt(iso) {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function setMirrorsFilter(filter) {
+  state.mirrorsFilter = filter;
+  
+  // Update button active states
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  const activeBtn = document.querySelector(`.filter-btn[onclick*="'${filter}'"]`);
+  if (activeBtn) {
+    activeBtn.classList.add('active');
+  }
+  
+  renderTables();
+}
+
+function toggleCardCollapse(configId) {
+  if (state.collapsedCards.has(configId)) {
+    state.collapsedCards.delete(configId);
+  } else {
+    state.collapsedCards.add(configId);
+  }
+  renderTables();
 }
 
 function readFirstProperty(source, keys) {
@@ -1040,6 +1162,10 @@ function applyTranslations() {
   document.getElementById('search-input').placeholder = t('Search table mirrors...');
   document.getElementById('log-title').textContent = t('Run Log');
   document.getElementById('log-copy').textContent = t('Session-scoped events appear here while the page is open.');
+  document.getElementById('filter-all').textContent = t('All');
+  document.getElementById('filter-active').textContent = t('Active');
+  document.getElementById('filter-inactive').textContent = t('Inactive');
+  document.getElementById('filter-error').textContent = t('On Error');
   document.querySelectorAll('#input-data-per-company option').forEach(opt => {
     const key = opt.getAttribute('data-t');
     if (key) opt.textContent = t(key);
@@ -1434,7 +1560,26 @@ function renderTables() {
   const container = document.getElementById('mirrors-container');
   const filtered = state.tables.filter((table) => {
     const hay = `${table.tableName} ${table.tableId}`.toLowerCase();
-    return hay.includes(searchText);
+    const matchesSearch = hay.includes(searchText);
+    
+    // Apply filter
+    let matchesFilter = true;
+    switch (state.mirrorsFilter) {
+      case 'active':
+        matchesFilter = table.active === true;
+        break;
+      case 'inactive':
+        matchesFilter = table.active === false;
+        break;
+      case 'error':
+        matchesFilter = (table.errorCount || 0) > 0;
+        break;
+      case 'all':
+      default:
+        matchesFilter = true;
+    }
+    
+    return matchesSearch && matchesFilter;
   });
 
   if (!filtered.length) {
@@ -1452,33 +1597,53 @@ function renderTables() {
     const cid = escapeHtml(table.configId);
     const running = state.runningConfigs.has(table.configId);
     const runInfo = running ? state.runningConfigs.get(table.configId) : null;
-    const cardClass = running ? 'mirror-card locked' : 'mirror-card';
+    const collapsed = state.collapsedCards.has(table.configId);
+    const cardClass = `mirror-card ${running ? 'locked' : ''} ${collapsed ? 'collapsed' : ''}`;
     const durationStr = runInfo ? formatDuration(Date.now() - runInfo.startedAt.getTime()) : '';
     const startStr = runInfo ? runInfo.startedAt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '';
+    const errorCountColor = (table.errorCount || 0) > 0 ? 'var(--red)' : 'var(--text-dim)';
+    
     return `
       <div class="${cardClass}">
-        <div class="mirror-card-top">
+        <div class="mirror-card-header" onclick="toggleCardCollapse('${cid}')">
           <div>
             <div class="mirror-title">${escapeHtml(table.tableName)}</div>
             <div class="mirror-id">${t('Table ID')}: ${table.tableId}</div>
           </div>
-          <div class="pill-row">
-            ${running ? `<span class="pill running">${t('Running')}</span>` : ''}
-            <span class="pill ${statusClass}">${table.active ? t('Active') : t('Inactive')}</span>
-            <span class="pill">${table.intervalMin} ${t('min')}</span>
-            <span class="pill">${t('Field Count')}: ${table.fieldNumbers && table.fieldNumbers.length ? table.fieldNumbers.length : t('Fields')}</span>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div class="pill-row">
+              ${running ? `<span class="pill running">${t('Running')}</span>` : ''}
+              <span class="pill ${statusClass}">${table.active ? t('Active') : t('Inactive')}</span>
+              <span class="pill">${table.intervalMin} ${t('min')}</span>
+              <span class="pill">${t('Field Count')}: ${table.fieldNumbers && table.fieldNumbers.length ? table.fieldNumbers.length : t('All')}</span>
+              ${(table.errorCount || 0) > 0 ? `<span class="pill" style="color: var(--red); border-color: rgba(242,95,92,0.3); background: rgba(242,95,92,0.08);">${t('Error Count')}: ${table.errorCount}</span>` : ''}
+            </div>
+            <span class="collapse-icon">▾</span>
           </div>
         </div>
-        ${running ? `<div class="mirror-running-info"><span>${t('Started')}: ${startStr}</span><span>${t('Duration')}: ${durationStr}</span></div>` : ''}
-        <div class="mirror-meta-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
-          <div class="meta-box"><div class="meta-label">${t('Table View')}</div><div class="meta-value">${escapeHtml(table.tableView || '—')}</div></div>
-          <div class="meta-box"><div class="meta-label">${t('Data Per Company')}</div><div class="meta-value">${table.dataPerCompany}</div></div>
-          <div class="meta-box"><div class="meta-label">${t('Last Run At')}</div><div class="meta-value">${escapeHtml(formatRunAt(table.lastRunAt) || '—')}</div></div>
-          <div class="meta-box"><div class="meta-label">${t('Fields')}</div><div class="meta-value">${table.fieldNumbers && table.fieldNumbers.length ? escapeHtml(table.fieldNumbers.join(', ')) : escapeHtml(t('Mirror all supported fields'))}</div></div>
-          <div class="meta-box"><div class="meta-label">${t('Error Count')}</div><div class="meta-value" style="color: ${(table.errorCount || 0) > 0 ? 'var(--red)' : 'var(--text)'};">${table.errorCount || 0}</div></div>
-          <div class="meta-box"><div class="meta-label">${t('Last Error')}</div><div class="meta-value" style="color: var(--text-dim); font-size: 0.68rem; line-height: 1.3;">${escapeHtml(table.lastError ? (table.lastError.length > 100 ? table.lastError.substring(0, 100) + '...' : table.lastError) : '—')}</div></div>
+        <div class="mirror-summary">
+          <div class="summary-item">
+            <div class="summary-label">${t('Last Run At')}</div>
+            <div class="summary-value">${escapeHtml(formatRunAt(table.lastRunAt) || '—')}</div>
+          </div>
+          ${(table.errorCount || 0) > 0 ? `
+          <div class="summary-item">
+            <div class="summary-label">${t('Last Error')}</div>
+            <div class="summary-value" style="color: var(--red); font-size: 0.68rem;">${escapeHtml(table.lastError ? (table.lastError.length > 60 ? table.lastError.substring(0, 60) + '...' : table.lastError) : '—')}</div>
+          </div>` : ''}
         </div>
-        ${table.disabledReason ? `<div style="padding: 10px 14px; background: rgba(242,95,92,0.12); border: 1px solid rgba(242,95,92,0.3); border-radius: 8px; color: var(--red); font-size: 0.74rem; margin-top: 10px;">⚠️ ${escapeHtml(table.disabledReason)}</div>` : ''}
+        <div class="mirror-card-details">
+          ${running ? `<div class="mirror-running-info"><span>${t('Started')}: ${startStr}</span><span>${t('Duration')}: ${durationStr}</span></div>` : ''}
+          <div class="mirror-meta-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+            <div class="meta-box"><div class="meta-label">${t('Table View')}</div><div class="meta-value">${escapeHtml(table.tableView || '—')}</div></div>
+            <div class="meta-box"><div class="meta-label">${t('Data Per Company')}</div><div class="meta-value">${table.dataPerCompany}</div></div>
+            <div class="meta-box"><div class="meta-label">${t('Last Run At')}</div><div class="meta-value">${escapeHtml(formatRunAt(table.lastRunAt) || '—')}</div></div>
+            <div class="meta-box"><div class="meta-label">${t('Fields')}</div><div class="meta-value">${table.fieldNumbers && table.fieldNumbers.length ? escapeHtml(table.fieldNumbers.join(', ')) : escapeHtml(t('Mirror all supported fields'))}</div></div>
+            <div class="meta-box"><div class="meta-label">${t('Error Count')}</div><div class="meta-value" style="color: ${errorCountColor};">${table.errorCount || 0}</div></div>
+            <div class="meta-box"><div class="meta-label">${t('Last Error')}</div><div class="meta-value" style="color: var(--text-dim); font-size: 0.68rem; line-height: 1.3;">${escapeHtml(table.lastError ? (table.lastError.length > 100 ? table.lastError.substring(0, 100) + '...' : table.lastError) : '—')}</div></div>
+          </div>
+          ${table.disabledReason ? `<div style="padding: 10px 14px; background: rgba(242,95,92,0.12); border: 1px solid rgba(242,95,92,0.3); border-radius: 8px; color: var(--red); font-size: 0.74rem; margin-top: 10px;">⚠️ ${escapeHtml(table.disabledReason)}</div>` : ''}
+        </div>
         <div class="mirror-actions">
           <button class="btn ${table.active ? 'secondary' : ''}" onclick="toggleActivation('${cid}', ${table.active})">${table.active ? t('Deactivate') : t('Activate')}</button>
           ${running
