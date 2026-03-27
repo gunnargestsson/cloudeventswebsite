@@ -410,27 +410,8 @@
   .mirror-card.collapsed .collapse-icon {
     transform: rotate(-90deg);
   }
-  .mirror-summary {
+  .mirror-card.collapsed .mirror-id {
     display: none;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 12px;
-    margin-top: 12px;
-  }
-  .mirror-card.collapsed .mirror-summary {
-    display: grid;
-  }
-  .summary-item {
-    font-size: 0.7rem;
-  }
-  .summary-label {
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 4px;
-  }
-  .summary-value {
-    color: var(--text);
-    font-size: 0.76rem;
   }
   .mirror-title { font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
   .mirror-id { font-size: 0.72rem; color: var(--text-dim); }
@@ -755,7 +736,7 @@
       </div>
     </section>
 
-    <section class="panel" style="margin-bottom: 18px;">
+    <section class="panel" id="configured-mirrors-panel" style="margin-bottom: 18px;">
       <div class="toolbar">
         <div class="toolbar-left">
           <div class="section-title collapsible" id="configured-title">
@@ -978,6 +959,7 @@ const state = {
   runningConfigs: new Map(),   // configId → { startedAt: Date, ac: AbortController }
   durationTicker: null,        // setInterval id for updating running durations
   dropdownSelection: false,    // true when a dropdown option was just clicked — suppresses change event
+  mirrorsPanelCollapsed: true, // Configured Mirrors section starts collapsed
   mirrorsFilter: 'all',        // 'all', 'active', 'inactive', 'error'
   collapsedCards: new Set(),   // configIds of collapsed cards
 };
@@ -1239,6 +1221,11 @@ function setConnectionPanelCollapsed(collapsed) {
 function setTablePanelCollapsed(collapsed) {
   state.tablePanelCollapsed = collapsed;
   document.getElementById('table-config-panel').classList.toggle('collapsed', collapsed);
+}
+
+function setMirrorsPanelCollapsed(collapsed) {
+  state.mirrorsPanelCollapsed = collapsed;
+  document.getElementById('configured-mirrors-panel').classList.toggle('collapsed', collapsed);
 }
 
 function refreshConnectionIndicators() {
@@ -1657,21 +1644,11 @@ function renderTables() {
               <span class="pill ${statusClass}">${table.active ? t('Active') : t('Inactive')}</span>
               <span class="pill">${table.intervalMin} ${t('min')}</span>
               <span class="pill">${t('Field Count')}: ${table.fieldNumbers && table.fieldNumbers.length ? table.fieldNumbers.length : t('All')}</span>
-              ${(table.errorCount || 0) > 0 ? `<span class="pill" style="color: var(--red); border-color: rgba(242,95,92,0.3); background: rgba(242,95,92,0.08);">${t('Error Count')}: ${table.errorCount}</span>` : ''}
+              <span class="pill">${t('Last Run At')}: ${escapeHtml(formatRunAt(table.lastRunAt) || '—')}</span>
+              <span class="pill" style="${(table.errorCount || 0) > 0 ? 'color: var(--red); border-color: rgba(242,95,92,0.3); background: rgba(242,95,92,0.08);' : ''}">${t('Error Count')}: ${table.errorCount || 0}</span>
             </div>
             <span class="collapse-icon">▾</span>
           </div>
-        </div>
-        <div class="mirror-summary">
-          <div class="summary-item">
-            <div class="summary-label">${t('Last Run At')}</div>
-            <div class="summary-value">${escapeHtml(formatRunAt(table.lastRunAt) || '—')}</div>
-          </div>
-          ${(table.errorCount || 0) > 0 ? `
-          <div class="summary-item">
-            <div class="summary-label">${t('Last Error')}</div>
-            <div class="summary-value" style="color: var(--red); font-size: 0.68rem;">${escapeHtml(table.lastError ? (table.lastError.length > 60 ? table.lastError.substring(0, 60) + '...' : table.lastError) : '—')}</div>
-          </div>` : ''}
         </div>
         <div class="mirror-card-details">
           ${running ? `<div class="mirror-running-info"><span>${t('Started')}: ${startStr}</span><span>${t('Duration')}: ${durationStr}</span></div>` : ''}
@@ -2237,6 +2214,7 @@ async function loadSettings() {
   if (state.tablePanelCollapsed === null) {
     setTablePanelCollapsed(state.tables.length > 0);
   }
+  setMirrorsPanelCollapsed(state.mirrorsPanelCollapsed);
   populateConnectionForm();
   renderTables();
   refreshMetrics();
@@ -2610,6 +2588,9 @@ function bindEvents() {
   });
   document.getElementById('tables-title').addEventListener('click', () => {
     setTablePanelCollapsed(!state.tablePanelCollapsed);
+  });
+  document.getElementById('configured-title').addEventListener('click', () => {
+    setMirrorsPanelCollapsed(!state.mirrorsPanelCollapsed);
   });
   document.getElementById('btn-save-connection').addEventListener('click', () => saveConnection().catch(handleUiError));
   document.getElementById('btn-verify-connection').addEventListener('click', () => verifyConnection().catch(handleUiError));
