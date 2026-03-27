@@ -1664,9 +1664,10 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
       runInfo.deletedQueueId = deletedQueueId;
     }
     const maxWaitMs = 12 * 60 * 60 * 1000; // 12 hours max
-    let elapsedMs = 0;
+    const pollStartTime = Date.now();
     // Adaptive polling: 10s for first 2 min, 30s up to 10 min, 60s after that
-    function getPollInterval(elapsed) {
+    function getPollInterval() {
+      const elapsed = Date.now() - pollStartTime;
       if (elapsed < 2 * 60 * 1000) return 10000;   // first 2 min: 10s
       if (elapsed < 10 * 60 * 1000) return 30000;   // 2–10 min: 30s
       return 60000;                                  // 10 min+: 60s
@@ -1679,13 +1680,13 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     let csvCancelled = false;
     let deletedCancelled = !deletedQueueId ? false : false;
     
-    while (elapsedMs < maxWaitMs) {
+    while ((Date.now() - pollStartTime) < maxWaitMs) {
       // Check if we were told to stop (scheduler stopped, abort signal fired)
       if (runAc.signal.aborted) {
         addLog(`Mirror run aborted for: ${tableName}`, 'warn');
         return null;
       }
-      const interval = getPollInterval(elapsedMs);
+      const interval = getPollInterval();
       await new Promise((resolve) => {
         const timer = setTimeout(resolve, interval);
         const onAbort = () => { clearTimeout(timer); resolve(); };
@@ -1695,7 +1696,6 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
         addLog(`Mirror run aborted for: ${tableName}`, 'warn');
         return null;
       }
-      elapsedMs += interval;
       
       // Poll both queues in parallel
       const polls = [];
@@ -1736,13 +1736,16 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
       }
       
       if (csvDone && deletedDone) {
-        addLog(`${t('CSV generation completed after')} ${Math.floor(elapsedMs / 1000)}s`, 'ok');
+        const elapsedSec = Math.floor((Date.now() - pollStartTime) / 1000);
+        addLog(`${t('CSV generation completed after')} ${elapsedSec}s`, 'ok');
         break;
       }
       
       // Log progress every ~60 seconds
+      const elapsedMs = Date.now() - pollStartTime;
       const logEvery = interval < 60000 ? Math.max(1, Math.round(60000 / interval)) : 1;
-      if (Math.round(elapsedMs / interval) % logEvery === 0) {
+      const pollCount = Math.round(elapsedMs / interval);
+      if (pollCount % logEvery === 0) {
         const mins = Math.floor(elapsedMs / 60000);
         const secs = Math.floor((elapsedMs % 60000) / 1000);
         const pending = [!csvDone ? 'records' : null, !deletedDone ? 'deleted' : null].filter(Boolean).join(', ');
@@ -1752,7 +1755,7 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     
     if (runAc.signal.aborted) return null;
     
-    if (elapsedMs >= maxWaitMs) {
+    if ((Date.now() - pollStartTime) >= maxWaitMs) {
       throw new Error(`CSV generation timed out after ${maxWaitMs / 3600000} hours`);
     }
     
@@ -1999,6 +2002,7 @@ function startSchedulerForTable(table) {
 function startScheduler() {
   stopScheduler(true); // silent stop to avoid double "stopped" log
   state.schedulerRunning = true;
+  _lastVisibleAt = Date.now();
   state.tables.filter((table) => table.active).forEach(startSchedulerForTable);
   addLog(t('Scheduler started'), 'ok');
 }
@@ -2018,6 +2022,39 @@ function stopScheduler(silent = false) {
   if (state.durationTicker) { clearInterval(state.durationTicker); state.durationTicker = null; }
   if (!silent) addLog(t('Scheduler stopped'), 'warn');
 }
+
+// ── Browser wake detection ──────────────────────────────────────────────────
+// When the browser sleeps (tab backgrounded, lid closed, OS sleep), all
+// setTimeout timers freeze. On wake, stale timers may fire very late or
+// the scheduler sits idle. We detect wake-ups via visibilitychange and
+// restart idle table timers whose runs are overdue.
+let _lastVisibleAt = Date.now();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  const sleepDuration = Date.now() - _lastVisibleAt;
+  _lastVisibleAt = Date.now();
+
+  // Only act if the browser was hidden for >2 minutes (indicates real sleep)
+  if (sleepDuration < 2 * 60 * 1000) return;
+  if (!state.schedulerRunning) return;
+
+  const sleepMin = Math.floor(sleepDuration / 60000);
+  addLog(`${t('Browser woke up after')} ${sleepMin}m — ${t('checking scheduler')}`, 'info');
+
+  // Restart timers for tables that aren't currently running
+  for (const table of state.tables.filter(t => t.active)) {
+    if (state.runningConfigs.has(table.configId)) continue;  // already running
+    if (state.schedulerAbort.has(table.configId)) continue;  // already has a run queued
+
+    // Clear any stale timer and re-evaluate from lastRunAt
+    const oldTimer = state.schedulerTimers.get(table.configId);
+    if (oldTimer) clearTimeout(oldTimer);
+    state.schedulerTimers.delete(table.configId);
+
+    startSchedulerForTable(table);
+    addLog(`${t('Re-scheduled')}: ${table.tableName}`, 'info');
+  }
+});
 
 async function runActiveTables() {
   const result = await api('runAllActive');
