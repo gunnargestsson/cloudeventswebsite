@@ -1403,7 +1403,7 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
     const hasUrl = dataUrl && String(dataUrl).startsWith("https://");
 
     if (ct === "text/json" || ct === "application/json") {
-      // BC had an error — retry once, then wait 1 minute before checking
+      // BC had an error — retry once, check status after 5 seconds
       logs.push(`BC ${label} error detected, initiating retry...`);
       
       // Attempt to retry the task in BC
@@ -1412,27 +1412,37 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
         // Can't retry (task already running or doesn't exist)
         logs.push(`Retry not possible: ${retryResult.message}`);
       } else {
-        logs.push(`Retry task initiated, waiting 1 minute for BC to recover...`);
+        logs.push(`Retry task initiated, checking status in 5 seconds...`);
         
-        // Wait 1 full minute to give BC time to retry and recover
-        await new Promise(r => setTimeout(r, 60000));
+        // Wait 5 seconds then check if task is running
+        await new Promise(r => setTimeout(r, 5000));
         
-        // Check if the retry succeeded
-        const recheckRecord = await httpsJson(BC_HOST, `${queueBasePath}(${queueId})`, "GET", authHeaders, null);
-        const recheckCt = (recheckRecord.datacontenttype || "").toLowerCase();
+        const statusCheck = await checkQueueStatus(conn, token, companyId, queueId);
+        logs.push(`BC task status after retry: ${statusCheck.status}`);
         
-        if (recheckCt === "text/csv") {
-          logs.push(`BC ${label} retry succeeded after 1 minute`);
-          return { hasData: true, record: recheckRecord }; // Success!
+        if (statusCheck.status === "running") {
+          // Task is now running — return a special status so the caller can continue polling
+          logs.push(`BC ${label} task restarted and running, continue polling...`);
+          return { hasData: false, retrying: true }; // Signal to keep polling
+        } else if (statusCheck.status === "completed") {
+          // Task completed immediately — check the result
+          const recheckRecord = await httpsJson(BC_HOST, `${queueBasePath}(${queueId})`, "GET", authHeaders, null);
+          const recheckCt = (recheckRecord.datacontenttype || "").toLowerCase();
+          
+          if (recheckCt === "text/csv") {
+            logs.push(`BC ${label} retry succeeded`);
+            return { hasData: true, record: recheckRecord }; // Success!
+          }
+          
+          if (!recheckCt) {
+            logs.push(`BC ${label} retry completed with no data`);
+            return { hasData: false }; // No error, just no data
+          }
+          
+          // Still an error after retry
+          logs.push(`BC ${label} still in error state after retry`);
         }
-        
-        if (!recheckCt) {
-          logs.push(`BC ${label} retry completed with no data`);
-          return { hasData: false }; // No error, just no data
-        }
-        
-        // Still an error after retry — will count toward error tracking
-        logs.push(`BC ${label} still in error state after retry`);
+        // If status is "deleted" or "error", fall through to error handling
       }
       
       // Download the error details for logging/display
@@ -1459,6 +1469,17 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
 
   const csvCheck = await validateQueueResult(queueRecord, "CSV", queueId);
   const deletedCheck = await validateQueueResult(deletedQueueRecord, "deleted records", deletedQueueId);
+  
+  // Check if either queue was retried and is now running
+  if (csvCheck.retrying || deletedCheck.retrying) {
+    // Task is running again after retry — return status to tell frontend to continue polling
+    return {
+      status: "retrying",
+      message: "Task was retried and is now running, continue polling",
+      logs,
+    };
+  }
+  
   const hasCsvData = csvCheck.hasData;
   const hasDeletedData = deletedCheck.hasData;
   // Use the potentially updated record from retry

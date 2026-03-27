@@ -819,7 +819,8 @@ const UI_STRINGS = [
   'errors since last success',
   'Retrying BC task',
   'BC task retry succeeded',
-  'BC task retry failed'
+  'BC task retry failed',
+  'resuming polling...'
 ];
 
 const CONFIG = {
@@ -1806,10 +1807,109 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
       configId,
     });
 
-    if (!transfer.transferId) throw new Error('Failed to start data transfer');
+    let transferId;
+    // Check if backend retried and task is running again
+    if (transfer.status === 'retrying') {
+      if (transfer.logs) transfer.logs.forEach(log => addLog(log, 'info'));
+      addLog(`${t('BC task retry succeeded')}, resuming polling...`, 'info');
+      
+      // Go back to polling the queue(s) until complete
+      csvDone = false;
+      deletedDone = !deletedQueueId;
+      pollStartTime = Date.now(); // Reset poll timer
+      
+      // Continue with the existing polling loop
+      while ((Date.now() - pollStartTime) < maxWaitMs) {
+        if (runAc.signal.aborted) {
+          addLog(`Mirror run aborted for: ${tableName}`, 'warn');
+          return null;
+        }
+        const interval = getPollInterval();
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, interval);
+          const onAbort = () => { clearTimeout(timer); resolve(); };
+          runAc.signal.addEventListener('abort', onAbort, { once: true });
+        });
+        if (runAc.signal.aborted) {
+          addLog(`Mirror run aborted for: ${tableName}`, 'warn');
+          return null;
+        }
+        
+        // Poll both queues in parallel
+        const polls = [];
+        if (!csvDone) polls.push(api('checkQueueStatus', { queueId }).then(r => ({ key: 'csv', ...r })).catch(e => ({ key: 'csv', error: e })));
+        if (!deletedDone) polls.push(api('checkQueueStatus', { queueId: deletedQueueId }).then(r => ({ key: 'deleted', ...r })).catch(e => ({ key: 'deleted', error: e })));
+        
+        const results = await Promise.all(polls);
+        
+        for (const r of results) {
+          if (r.error) {
+            addLog(`${t('Status check failed, retrying')}: ${r.error.message}`, 'warn');
+            continue;
+          }
+          if (r.status === 'deleted') {
+            addLog(`${t('Queue cancelled in BC')} (${r.key}): ${r.message || 'cancelled or never started'}`, 'warn');
+            if (r.key === 'csv') { csvDone = true; csvCancelled = true; }
+            if (r.key === 'deleted') { deletedDone = true; deletedCancelled = true; }
+            continue;
+          }
+          if (r.status === 'completed') {
+            if (r.key === 'csv') csvDone = true;
+            if (r.key === 'deleted') deletedDone = true;
+          }
+        }
+        
+        if (csvCancelled && (deletedCancelled || !deletedQueueId)) {
+          addLog(`${t('All queues cancelled in BC for')}: ${tableName}`, 'warn');
+          return {
+            tableId,
+            tableName,
+            skipped: true,
+            reason: 'All BC queue tasks were cancelled or never started',
+            mirroredRecords: 0,
+            deletedRecords: 0,
+          };
+        }
+        
+        if (csvDone && deletedDone) {
+          const elapsedSec = Math.floor((Date.now() - pollStartTime) / 1000);
+          addLog(`${t('CSV generation completed after')} ${elapsedSec}s`, 'ok');
+          break;
+        }
+        
+        const elapsedMs = Date.now() - pollStartTime;
+        const logEvery = interval < 60000 ? Math.max(1, Math.round(60000 / interval)) : 1;
+        const pollCount = Math.round(elapsedMs / interval);
+        if (pollCount % logEvery === 0) {
+          const mins = Math.floor(elapsedMs / 60000);
+          const secs = Math.floor((elapsedMs % 60000) / 1000);
+          const pending = [!csvDone ? 'records' : null, !deletedDone ? 'deleted' : null].filter(Boolean).join(', ');
+          addLog(`${t('Still generating CSV')}... (${mins > 0 ? mins + 'm ' : ''}${secs}s elapsed, waiting for: ${pending})`, 'info');
+        }
+      }
+      
+      if (runAc.signal.aborted) return null;
+      
+      if ((Date.now() - pollStartTime) >= maxWaitMs) {
+        throw new Error(`CSV generation timed out after ${maxWaitMs / 3600000} hours`);
+      }
+      
+      // Now retry the transfer call
+      addLog(`${t('Fetching and uploading CSV data')}...`, 'info');
+      const retryTransfer = await api('startTransfer', {
+        queueId: csvCancelled ? null : queueId,
+        deletedQueueId: deletedCancelled ? null : deletedQueueId,
+        configId,
+      });
+      
+      if (!retryTransfer.transferId) throw new Error('Failed to start data transfer after retry');
+      transferId = retryTransfer.transferId;
+    } else {
+      if (!transfer.transferId) throw new Error('Failed to start data transfer');
+      transferId = transfer.transferId;
+    }
 
     // Step 4: Poll transfer status until complete
-    const transferId = transfer.transferId;
     let transferElapsed = 0;
     const transferMaxWait = 10 * 60 * 1000; // 10 min max for download+upload
 
