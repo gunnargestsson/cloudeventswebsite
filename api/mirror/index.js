@@ -1288,7 +1288,9 @@ async function checkQueueStatus(conn, token, companyId, queueId) {
     if (err.message && err.message.includes("status code '0'")) {
       return { status: "deleted", message: "Queue task was cancelled or never started (BC status 0)" };
     }
-    throw err;
+    // Any other BC error (404, 400, etc.) means the queue entry is gone or invalid.
+    // Return "error" instead of throwing so the frontend can handle it gracefully.
+    return { status: "error", message: `BC queue check failed: ${(err.message || "").slice(0, 200)}` };
   }
 
   // BC returns status as HTTP status codes:

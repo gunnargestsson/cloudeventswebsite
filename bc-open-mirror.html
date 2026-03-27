@@ -810,7 +810,9 @@ const UI_STRINGS = [
   'Still transferring data',
   'Resumed transfer failed',
   'Resumed queues all cancelled',
-  'Resumed poll failed'
+  'Resumed poll failed',
+  'Resumed poll giving up',
+  'consecutive errors'
 ];
 
 const CONFIG = {
@@ -1882,10 +1884,10 @@ async function resumePendingQueues() {
     // Skip if this table is already running
     if (state.runningConfigs.has(configId)) continue;
 
-    const bothDone = (csvStatus === 'completed' || csvStatus === 'deleted' || csvStatus === 'n/a')
-      && (deletedStatus === 'completed' || deletedStatus === 'deleted' || deletedStatus === 'n/a');
-    const bothCancelled = (csvStatus === 'deleted' || csvStatus === 'n/a')
-      && (deletedStatus === 'deleted' || deletedStatus === 'n/a');
+    const isTerminal = s => s === 'completed' || s === 'deleted' || s === 'error' || s === 'n/a';
+    const isCancelled = s => s === 'deleted' || s === 'error' || s === 'n/a';
+    const bothDone = isTerminal(csvStatus) && isTerminal(deletedStatus);
+    const bothCancelled = isCancelled(csvStatus) && isCancelled(deletedStatus);
 
     if (bothCancelled) {
       addLog(`${t('Clearing stale queue state for')} ${tableName} (${t('all cancelled')})`, 'info');
@@ -1908,10 +1910,12 @@ async function resumePendingQueues() {
 }
 
 async function resumeTransfer(configId, tableName, queueId, deletedQueueId, csvStatus, deletedStatus) {
+  if (state.runningConfigs.has(configId)) return;
+  state.runningConfigs.set(configId, { startedAt: new Date() });
   try {
     const transfer = await api('startTransfer', {
-      queueId: csvStatus === 'deleted' ? null : queueId,
-      deletedQueueId: deletedStatus === 'deleted' ? null : deletedQueueId,
+      queueId: csvStatus === 'deleted' || csvStatus === 'error' ? null : queueId,
+      deletedQueueId: deletedStatus === 'deleted' || deletedStatus === 'error' ? null : deletedQueueId,
       configId,
     });
     if (!transfer.transferId) throw new Error('Failed to start resumed transfer');
@@ -1941,28 +1945,36 @@ async function resumeTransfer(configId, tableName, queueId, deletedQueueId, csvS
     throw new Error('Resumed transfer timed out');
   } catch (err) {
     addLog(`${t('Resumed transfer failed')}: ${tableName} - ${err.message}`, 'error');
+  } finally {
+    state.runningConfigs.delete(configId);
+    api('clearQueueState', { configId }).catch(() => {});
   }
 }
 
 async function resumePolling(configId, tableName, queueId, deletedQueueId, csvStatus, deletedStatus) {
-  let csvDone = csvStatus === 'completed' || csvStatus === 'deleted' || !queueId;
-  let deletedDone = deletedStatus === 'completed' || deletedStatus === 'deleted' || !deletedQueueId;
-  let csvCancelled = csvStatus === 'deleted';
-  let deletedCancelled = deletedStatus === 'deleted';
+  if (state.runningConfigs.has(configId)) return;
+  state.runningConfigs.set(configId, { startedAt: new Date() });
+  let csvDone = csvStatus === 'completed' || csvStatus === 'deleted' || csvStatus === 'error' || !queueId;
+  let deletedDone = deletedStatus === 'completed' || deletedStatus === 'deleted' || deletedStatus === 'error' || !deletedQueueId;
+  let csvCancelled = csvStatus === 'deleted' || csvStatus === 'error';
+  let deletedCancelled = deletedStatus === 'deleted' || deletedStatus === 'error';
   const pollStart = Date.now();
   const maxWait = 12 * 60 * 60 * 1000;
+  let consecutiveErrors = 0;
 
   try {
     while ((Date.now() - pollStart) < maxWait) {
       if (!csvDone || !deletedDone) {
         await new Promise(r => setTimeout(r, 30000));
         const polls = [];
-        if (!csvDone) polls.push(api('checkQueueStatus', { queueId }).then(r => ({ key: 'csv', ...r })).catch(e => ({ key: 'csv', error: e })));
-        if (!deletedDone) polls.push(api('checkQueueStatus', { queueId: deletedQueueId }).then(r => ({ key: 'deleted', ...r })).catch(e => ({ key: 'deleted', error: e })));
+        if (!csvDone) polls.push(api('checkQueueStatus', { queueId }).then(r => ({ key: 'csv', ...r })).catch(e => ({ key: 'csv', apiError: e })));
+        if (!deletedDone) polls.push(api('checkQueueStatus', { queueId: deletedQueueId }).then(r => ({ key: 'deleted', ...r })).catch(e => ({ key: 'deleted', apiError: e })));
         const results = await Promise.all(polls);
+        let anySuccess = false;
         for (const r of results) {
-          if (r.error) continue;
-          if (r.status === 'deleted') {
+          if (r.apiError) continue;
+          anySuccess = true;
+          if (r.status === 'deleted' || r.status === 'error') {
             if (r.key === 'csv') { csvDone = true; csvCancelled = true; }
             if (r.key === 'deleted') { deletedDone = true; deletedCancelled = true; }
           }
@@ -1970,6 +1982,11 @@ async function resumePolling(configId, tableName, queueId, deletedQueueId, csvSt
             if (r.key === 'csv') csvDone = true;
             if (r.key === 'deleted') deletedDone = true;
           }
+        }
+        consecutiveErrors = anySuccess ? 0 : consecutiveErrors + 1;
+        if (consecutiveErrors >= 5) {
+          addLog(`${t('Resumed poll giving up')}: ${tableName} (${consecutiveErrors} ${t('consecutive errors')})`, 'warn');
+          break;
         }
       }
 
@@ -1983,11 +2000,13 @@ async function resumePolling(configId, tableName, queueId, deletedQueueId, csvSt
 
     if (csvCancelled && (deletedCancelled || !deletedQueueId)) {
       addLog(`${t('Resumed queues all cancelled')}: ${tableName}`, 'warn');
-      api('clearQueueState', { configId }).catch(() => {});
       return;
     }
 
+    if (consecutiveErrors >= 5) return;
+
     // Both done — start transfer
+    state.runningConfigs.delete(configId);
     await resumeTransfer(configId, tableName,
       csvCancelled ? null : queueId,
       deletedCancelled ? null : deletedQueueId,
@@ -1995,6 +2014,9 @@ async function resumePolling(configId, tableName, queueId, deletedQueueId, csvSt
       deletedCancelled ? 'deleted' : 'completed');
   } catch (err) {
     addLog(`${t('Resumed poll failed')}: ${tableName} - ${err.message}`, 'error');
+  } finally {
+    state.runningConfigs.delete(configId);
+    api('clearQueueState', { configId }).catch(() => {});
   }
 }
 
