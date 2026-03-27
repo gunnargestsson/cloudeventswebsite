@@ -156,6 +156,26 @@
     cursor: pointer;
     user-select: none;
   }
+  .section-counts {
+    display: flex;
+    gap: 12px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-dim);
+    font-family: 'DM Mono', monospace;
+  }
+  .section-counts .count-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .section-counts .count-value {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .section-counts .count-value.error {
+    color: var(--red);
+  }
   .section-title.collapsible::after {
     content: '▾';
     font-family: 'DM Mono', monospace;
@@ -738,7 +758,14 @@
     <section class="panel" style="margin-bottom: 18px;">
       <div class="toolbar">
         <div class="toolbar-left">
-          <div class="section-title collapsible" id="configured-title">Configured Mirrors</div>
+          <div class="section-title collapsible" id="configured-title">
+            <span>Configured Mirrors</span>
+            <span class="section-counts" id="mirror-counts">
+              <span class="count-item"><span class="count-value" id="count-total">0</span> <span id="label-count-total">Total</span></span>
+              <span class="count-item"><span class="count-value" id="count-active">0</span> <span id="label-count-active">Active</span></span>
+              <span class="count-item"><span class="count-value error" id="count-error">0</span> <span id="label-count-error">Error</span></span>
+            </span>
+          </div>
           <div class="section-subtitle" id="configured-copy">Activation uploads DDL and locks the configuration until the table is deactivated.</div>
         </div>
         <div class="toolbar-right">
@@ -916,7 +943,9 @@ const UI_STRINGS = [
   'All',
   'Active',
   'Inactive',
-  'On Error'
+  'On Error',
+  'Total',
+  'Error'
 ];
 
 const CONFIG = {
@@ -1157,7 +1186,7 @@ function applyTranslations() {
   document.getElementById('label-field-picker').textContent = t('Field Picker');
   document.getElementById('btn-add-table').textContent = t('Add Table');
   document.getElementById('btn-reset-form').textContent = t('Reset Form');
-  document.getElementById('configured-title').textContent = t('Configured Mirrors');
+  document.getElementById('configured-title').querySelector('span:first-child').textContent = t('Configured Mirrors');
   document.getElementById('configured-copy').textContent = t('Activation uploads DDL and locks the configuration until the table is deactivated.');
   document.getElementById('search-input').placeholder = t('Search table mirrors...');
   document.getElementById('log-title').textContent = t('Run Log');
@@ -1166,6 +1195,9 @@ function applyTranslations() {
   document.getElementById('filter-active').textContent = t('Active');
   document.getElementById('filter-inactive').textContent = t('Inactive');
   document.getElementById('filter-error').textContent = t('On Error');
+  document.getElementById('label-count-total').textContent = t('Total');
+  document.getElementById('label-count-active').textContent = t('Active');
+  document.getElementById('label-count-error').textContent = t('Error');
   document.querySelectorAll('#input-data-per-company option').forEach(opt => {
     const key = opt.getAttribute('data-t');
     if (key) opt.textContent = t(key);
@@ -1558,6 +1590,15 @@ async function saveTable() {
 function renderTables() {
   const searchText = document.getElementById('search-input').value.toLowerCase();
   const container = document.getElementById('mirrors-container');
+  
+  // Update section counts
+  const totalCount = state.tables.length;
+  const activeCount = state.tables.filter(t => t.active === true).length;
+  const errorCount = state.tables.filter(t => (t.errorCount || 0) > 0).length;
+  document.getElementById('count-total').textContent = totalCount;
+  document.getElementById('count-active').textContent = activeCount;
+  document.getElementById('count-error').textContent = errorCount;
+  
   const filtered = state.tables.filter((table) => {
     const hay = `${table.tableName} ${table.tableId}`.toLowerCase();
     const matchesSearch = hay.includes(searchText);
