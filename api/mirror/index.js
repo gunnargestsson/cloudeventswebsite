@@ -1375,6 +1375,7 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
       reason: "No records to mirror",
       mirroredRecords: 0,
       deletedRecords: 0,
+      endDateTime: new Date().toISOString(),
       logs,
     };
   }
@@ -1468,6 +1469,15 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
 // ── Async transfer: fire-and-forget download+upload with polling ─────────────
 // Transfer state is persisted to Cloud Events Storage so checkTransferStatus
 // works even when SWA routes the poll to a different Azure Function instance.
+// A per-process mutex serializes read-modify-write to prevent concurrent
+// saveTransferState calls from overwriting each other's entries.
+let _transferStateMutex = Promise.resolve();
+function withTransferLock(fn) {
+  const prev = _transferStateMutex;
+  let unlock;
+  _transferStateMutex = new Promise(r => { unlock = r; });
+  return prev.then(fn).finally(unlock);
+}
 
 async function getTransferState(conn, token, companyId) {
   const raw = await getConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID);
@@ -1476,15 +1486,19 @@ async function getTransferState(conn, token, companyId) {
 }
 
 async function saveTransferState(conn, token, companyId, configId, entry) {
-  const state = await getTransferState(conn, token, companyId);
-  state[configId] = entry;
-  await setConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID, JSON.stringify(state));
+  return withTransferLock(async () => {
+    const state = await getTransferState(conn, token, companyId);
+    state[configId] = entry;
+    await setConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID, JSON.stringify(state));
+  });
 }
 
 async function clearTransferState(conn, token, companyId, configId) {
-  const state = await getTransferState(conn, token, companyId);
-  delete state[configId];
-  await setConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID, JSON.stringify(state));
+  return withTransferLock(async () => {
+    const state = await getTransferState(conn, token, companyId);
+    delete state[configId];
+    await setConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID, JSON.stringify(state));
+  });
 }
 
 async function startTransfer(conn, token, companyId, queueId, deletedQueueId, configId, lcid) {
@@ -1517,6 +1531,7 @@ async function startTransfer(conn, token, companyId, queueId, deletedQueueId, co
 async function checkTransferStatus(conn, token, companyId, transferId, configId) {
   if (!transferId && !configId) throw new Error("transferId or configId is required");
 
+  // Read current state (no lock needed for the initial read)
   const state = await getTransferState(conn, token, companyId);
 
   // Find by configId (preferred) or by scanning for transferId
@@ -1529,19 +1544,16 @@ async function checkTransferStatus(conn, token, companyId, transferId, configId)
   const t = state[key];
   // Discard entries older than 30 minutes (stale)
   if (new Date() - new Date(t.createdAt) > 30 * 60 * 1000) {
-    delete state[key];
-    await setConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID, JSON.stringify(state));
+    await clearTransferState(conn, token, companyId, key);
     return { status: "not_found" };
   }
 
   if (t.status === "completed") {
-    delete state[key];
-    await setConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID, JSON.stringify(state));
+    await clearTransferState(conn, token, companyId, key);
     return { status: "completed", ...(t.result || {}) };
   }
   if (t.status === "error") {
-    delete state[key];
-    await setConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID, JSON.stringify(state));
+    await clearTransferState(conn, token, companyId, key);
     return { status: "error", error: t.error };
   }
   return { status: "running" };

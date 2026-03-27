@@ -1805,14 +1805,16 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
         if (result.logs && Array.isArray(result.logs)) {
           result.logs.forEach(log => addLog(log, 'info'));
         }
+        // Always update lastRunAt — even for skipped runs — so the scheduler
+        // doesn't re-fire this table before the full interval has elapsed.
+        const runEndTime = result.endDateTime || new Date().toISOString();
+        const idx = state.tables.findIndex((row) => row.configId === configId);
+        if (idx >= 0) state.tables[idx].lastRunAt = runEndTime;
+        state.lastRunAt = runEndTime;
         if (result.skipped) {
           addLog(`${t('Mirror run skipped')}: ${result.tableName || tableName} - ${result.reason || 'No records to mirror'}`, 'warn');
+          renderTables();
           return result;
-        }
-        if (result.endDateTime) {
-          const idx = state.tables.findIndex((row) => row.configId === configId);
-          if (idx >= 0) state.tables[idx].lastRunAt = result.endDateTime;
-          state.lastRunAt = result.endDateTime;
         }
         renderTables();
         refreshMetrics();
