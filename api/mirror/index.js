@@ -80,6 +80,9 @@ module.exports = async function (context, req) {
       case "cancelQueueMirror":
         result = await cancelQueueMirror(conn, token, companyId, req.body?.queueId);
         break;
+      case "retryQueueMirror":
+        result = await retryQueueMirror(conn, token, companyId, req.body?.queueId);
+        break;
       case "fetchQueueData":
         result = await fetchQueueData(conn, token, companyId, req.body?.queueId, req.body?.deletedQueueId, req.body?.configId, lcid);
         break;
@@ -1340,6 +1343,24 @@ async function cancelQueueMirror(conn, token, companyId, queueId) {
   return { status: "none", message: "No task to cancel or cancellation failed" };
 }
 
+async function retryQueueMirror(conn, token, companyId, queueId) {
+  if (!queueId) throw new Error("queueId is required");
+
+  const { tenantId, environment } = conn;
+  const retryPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})/Microsoft.NAV.RetryTask`;
+
+  const retryResponse = await httpsJsonWithStatus(BC_HOST, retryPath, "POST", { Authorization: `Bearer ${token}` }, null);
+
+  // BC returns:
+  // 200 OK (Updated) = task was retried successfully
+  // 204 No Content = no task to retry or already running
+  if (retryResponse.statusCode === 200) {
+    return { status: "retried", message: "Queue task retry initiated" };
+  }
+
+  return { status: "none", message: "No task to retry or already running" };
+}
+
 async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, configId, lcid = 1033) {
   if (!queueId && !deletedQueueId) throw new Error("At least one queueId is required");
   if (!configId) throw new Error("configId is required");
@@ -1375,15 +1396,51 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
   //   "text/csv"  → normal CSV export data
   //   ""          → success but no content (0 records)
   //   "text/json" → BC error during CSV generation, data URL contains error JSON
-  async function validateQueueResult(record, label) {
+  async function validateQueueResult(record, label, queueId) {
     if (!record) return { hasData: false };
     const ct = (record.datacontenttype || "").toLowerCase();
     const dataUrl = record.data;
     const hasUrl = dataUrl && String(dataUrl).startsWith("https://");
 
     if (ct === "text/json" || ct === "application/json") {
-      // BC had an error generating CSV — download the error details
-      let errorMsg = `BC ${label} generation failed`;
+      // BC had an error — retry for up to 1 minute before giving up
+      const retryStart = Date.now();
+      const maxRetryDuration = 60000; // 1 minute
+      let retryCount = 0;
+      
+      while (Date.now() - retryStart < maxRetryDuration) {
+        retryCount++;
+        logs.push(`BC ${label} error detected, retrying (attempt ${retryCount})...`);
+        
+        // Retry the task in BC
+        const retryResult = await retryQueueMirror(conn, token, companyId, queueId);
+        if (retryResult.status !== "retried") {
+          logs.push(`Retry failed: ${retryResult.message}`);
+          break; // Can't retry, exit loop
+        }
+        
+        // Wait 10 seconds before checking result
+        await new Promise(r => setTimeout(r, 10000));
+        
+        // Check if the retry succeeded
+        const recheckRecord = await httpsJson(BC_HOST, `${queueBasePath}(${queueId})`, "GET", authHeaders, null);
+        const recheckCt = (recheckRecord.datacontenttype || "").toLowerCase();
+        
+        if (recheckCt === "text/csv") {
+          logs.push(`BC ${label} retry succeeded after ${retryCount} attempt(s)`);
+          return { hasData: true, record: recheckRecord }; // Success!
+        }
+        
+        if (!recheckCt) {
+          logs.push(`BC ${label} retry completed with no data`);
+          return { hasData: false }; // No error, just no data
+        }
+        
+        // Still an error, continue retrying
+      }
+      
+      // All retries exhausted — download the error details
+      let errorMsg = `BC ${label} generation failed after ${retryCount} retry attempt(s)`;
       if (hasUrl) {
         try {
           const url = new URL(dataUrl);
@@ -1404,12 +1461,13 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
     return { hasData: true };
   }
 
-  const csvCheck = await validateQueueResult(queueRecord, "CSV");
-  const deletedCheck = await validateQueueResult(deletedQueueRecord, "deleted records");
+  const csvCheck = await validateQueueResult(queueRecord, "CSV", queueId);
+  const deletedCheck = await validateQueueResult(deletedQueueRecord, "deleted records", deletedQueueId);
   const hasCsvData = csvCheck.hasData;
   const hasDeletedData = deletedCheck.hasData;
-  const csvDataUrl = hasCsvData ? queueRecord.data : null;
-  const deletedDataUrl = hasDeletedData ? deletedQueueRecord.data : null;
+  // Use the potentially updated record from retry
+  const csvDataUrl = hasCsvData ? (csvCheck.record || queueRecord).data : null;
+  const deletedDataUrl = hasDeletedData ? (deletedCheck.record || deletedQueueRecord).data : null;
 
   if (!hasCsvData && !hasDeletedData) {
     logs.push("No records to mirror");
