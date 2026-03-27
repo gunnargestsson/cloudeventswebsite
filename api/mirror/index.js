@@ -1243,7 +1243,8 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
   // Get last sync timestamp from integration table
   const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableName, tableCfg.configId).catch(() => null);
 
-  const endDt = new Date();
+  const endDt = new Date(Date.now() - 5000);
+  endDt.setMilliseconds(0);
   const endIso = isoNoMs(endDt);
 
   // Build payloads for both CSV queues
@@ -1740,7 +1741,8 @@ async function runMirror(conn, token, companyId, configId, lcid = 1033) {
 
   // Get last sync timestamp from integration table
   const previousTs = await getIntegrationTimestamp(conn, token, companyId, tableCfg.tableName, tableCfg.configId).catch(() => null);
-  const endDt = new Date();
+  const endDt = new Date(Date.now() - 5000);
+  endDt.setMilliseconds(0);
   const endIso = isoNoMs(endDt);
   const runTableView = buildRunTableView(tableCfg);
 
