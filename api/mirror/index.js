@@ -1403,31 +1403,26 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
     const hasUrl = dataUrl && String(dataUrl).startsWith("https://");
 
     if (ct === "text/json" || ct === "application/json") {
-      // BC had an error — retry for up to 1 minute before giving up
-      const retryStart = Date.now();
-      const maxRetryDuration = 60000; // 1 minute
-      let retryCount = 0;
+      // BC had an error — retry once, then wait 1 minute before checking
+      logs.push(`BC ${label} error detected, initiating retry...`);
       
-      while (Date.now() - retryStart < maxRetryDuration) {
-        retryCount++;
-        logs.push(`BC ${label} error detected, retrying (attempt ${retryCount})...`);
+      // Attempt to retry the task in BC
+      const retryResult = await retryQueueMirror(conn, token, companyId, queueId);
+      if (retryResult.status !== "retried") {
+        // Can't retry (task already running or doesn't exist)
+        logs.push(`Retry not possible: ${retryResult.message}`);
+      } else {
+        logs.push(`Retry task initiated, waiting 1 minute for BC to recover...`);
         
-        // Retry the task in BC
-        const retryResult = await retryQueueMirror(conn, token, companyId, queueId);
-        if (retryResult.status !== "retried") {
-          logs.push(`Retry failed: ${retryResult.message}`);
-          break; // Can't retry, exit loop
-        }
-        
-        // Wait 10 seconds before checking result
-        await new Promise(r => setTimeout(r, 10000));
+        // Wait 1 full minute to give BC time to retry and recover
+        await new Promise(r => setTimeout(r, 60000));
         
         // Check if the retry succeeded
         const recheckRecord = await httpsJson(BC_HOST, `${queueBasePath}(${queueId})`, "GET", authHeaders, null);
         const recheckCt = (recheckRecord.datacontenttype || "").toLowerCase();
         
         if (recheckCt === "text/csv") {
-          logs.push(`BC ${label} retry succeeded after ${retryCount} attempt(s)`);
+          logs.push(`BC ${label} retry succeeded after 1 minute`);
           return { hasData: true, record: recheckRecord }; // Success!
         }
         
@@ -1436,11 +1431,12 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
           return { hasData: false }; // No error, just no data
         }
         
-        // Still an error, continue retrying
+        // Still an error after retry — will count toward error tracking
+        logs.push(`BC ${label} still in error state after retry`);
       }
       
-      // All retries exhausted — download the error details
-      let errorMsg = `BC ${label} generation failed after ${retryCount} retry attempt(s)`;
+      // Download the error details for logging/display
+      let errorMsg = `BC ${label} generation failed`;
       if (hasUrl) {
         try {
           const url = new URL(dataUrl);
