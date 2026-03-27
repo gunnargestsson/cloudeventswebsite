@@ -188,7 +188,15 @@
     padding-top: 18px;
     padding-bottom: 18px;
   }
-  .panel.collapsed > :not(.section-title) {
+  .panel.collapsed > :not(.section-title):not(.toolbar) {
+    display: none;
+  }
+  .panel.collapsed .toolbar {
+    margin-bottom: 0;
+  }
+  .panel.collapsed .toolbar-right,
+  .panel.collapsed .section-subtitle,
+  .panel.collapsed #mirrors-container {
     display: none;
   }
   .panel.collapsed .section-title {
