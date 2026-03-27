@@ -934,7 +934,10 @@ const UI_STRINGS = [
   'Inactive',
   'On Error',
   'Total',
-  'Error'
+  'Error',
+  'Queue error in BC',
+  'Giving up after',
+  'consecutive poll errors for'
 ];
 
 const CONFIG = {
@@ -1896,6 +1899,8 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
     }
     const maxWaitMs = 12 * 60 * 60 * 1000; // 12 hours max
     const pollStartTime = Date.now();
+    let consecutiveErrors = 0; // Track consecutive API/status errors to detect stale queues
+    const maxConsecutiveErrors = 5; // Give up after 5 consecutive errors
     // Adaptive polling: 10s for first 2 min, 30s up to 10 min, 60s after that
     function getPollInterval() {
       const elapsed = Date.now() - pollStartTime;
@@ -1935,8 +1940,10 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
       
       const results = await Promise.all(polls);
       
+      let hasError = false;
       for (const r of results) {
         if (r.error) {
+          consecutiveErrors++;
           addLog(`${t('Status check failed, retrying')}: ${r.error.message}`, 'warn');
           continue;
         }
@@ -1947,23 +1954,41 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
           if (r.key === 'deleted') { deletedDone = true; deletedCancelled = true; }
           continue;
         }
+        if (r.status === 'error') {
+          // BC task completed with an error or queue record unreadable — treat as failed
+          addLog(`${t('Queue error in BC')} (${r.key}): ${r.message || 'task completed with error'}`, 'error');
+          if (r.key === 'csv') { csvDone = true; csvCancelled = true; }
+          if (r.key === 'deleted') { deletedDone = true; deletedCancelled = true; }
+          hasError = true;
+          continue;
+        }
         if (r.status === 'completed') {
+          consecutiveErrors = 0;
           if (r.key === 'csv') csvDone = true;
           if (r.key === 'deleted') deletedDone = true;
         }
+        if (r.status === 'running') {
+          consecutiveErrors = 0;
+        }
       }
       
-      // If both queues were cancelled, abort this mirror run immediately
+      // If both queues were cancelled or errored, abort this mirror run immediately
       if (csvCancelled && (deletedCancelled || !deletedQueueId)) {
         addLog(`${t('All queues cancelled in BC for')}: ${tableName}`, 'warn');
         return {
           tableId,
           tableName,
           skipped: true,
-          reason: 'All BC queue tasks were cancelled or never started',
+          reason: hasError ? 'BC queue tasks completed with errors' : 'All BC queue tasks were cancelled or never started',
           mirroredRecords: 0,
           deletedRecords: 0,
         };
+      }
+      
+      // If we've had too many consecutive errors, give up (stale/stuck queue)
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        addLog(`${t('Giving up after')} ${consecutiveErrors} ${t('consecutive poll errors for')}: ${tableName}`, 'error');
+        throw new Error(`Giving up after ${consecutiveErrors} consecutive poll errors`);
       }
       
       if (csvDone && deletedDone) {
@@ -2033,8 +2058,10 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
         
         const results = await Promise.all(polls);
         
+        let hasRetryError = false;
         for (const r of results) {
           if (r.error) {
+            consecutiveErrors++;
             addLog(`${t('Status check failed, retrying')}: ${r.error.message}`, 'warn');
             continue;
           }
@@ -2044,9 +2071,20 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
             if (r.key === 'deleted') { deletedDone = true; deletedCancelled = true; }
             continue;
           }
+          if (r.status === 'error') {
+            addLog(`${t('Queue error in BC')} (${r.key}): ${r.message || 'task completed with error'}`, 'error');
+            if (r.key === 'csv') { csvDone = true; csvCancelled = true; }
+            if (r.key === 'deleted') { deletedDone = true; deletedCancelled = true; }
+            hasRetryError = true;
+            continue;
+          }
           if (r.status === 'completed') {
+            consecutiveErrors = 0;
             if (r.key === 'csv') csvDone = true;
             if (r.key === 'deleted') deletedDone = true;
+          }
+          if (r.status === 'running') {
+            consecutiveErrors = 0;
           }
         }
         
@@ -2056,10 +2094,15 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
             tableId,
             tableName,
             skipped: true,
-            reason: 'All BC queue tasks were cancelled or never started',
+            reason: hasRetryError ? 'BC queue tasks completed with errors' : 'All BC queue tasks were cancelled or never started',
             mirroredRecords: 0,
             deletedRecords: 0,
           };
+        }
+        
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          addLog(`${t('Giving up after')} ${consecutiveErrors} ${t('consecutive poll errors for')}: ${tableName}`, 'error');
+          throw new Error(`Giving up after ${consecutiveErrors} consecutive poll errors`);
         }
         
         if (csvDone && deletedDone) {
