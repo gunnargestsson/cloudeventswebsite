@@ -1522,7 +1522,10 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
   const deletedDataUrl = hasDeletedData ? (deletedCheck.record || deletedQueueRecord).data : null;
 
   // Read continueFromRecordId from the CSV queue response (top-level envelope attribute)
-  const continueFromRecordId = effectiveCsvRecord ? (effectiveCsvRecord.continueFromRecordId || null) : null;
+  // BC returns 00000000-0000-0000-0000-000000000000 when there is no continuation
+  const NULL_GUID = '00000000-0000-0000-0000-000000000000';
+  const rawContinueId = effectiveCsvRecord ? (effectiveCsvRecord.continueFromRecordId || null) : null;
+  const continueFromRecordId = (rawContinueId && rawContinueId !== NULL_GUID) ? rawContinueId : null;
   if (continueFromRecordId) {
     logs.push(`Continuation detected — more records pending (continueFromRecordId: ${continueFromRecordId})`);
   }
