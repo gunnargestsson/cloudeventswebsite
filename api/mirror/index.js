@@ -17,6 +17,7 @@ const CS_TABLE = "Cloud Events Storage";
 const CI_TABLE = "Cloud Events Integration";
 const CONFIG_CONN_ID = "11111111-1111-1111-1111-000000000001";
 const CONFIG_TABLES_ID = "11111111-1111-1111-1111-000000000002";
+const CONFIG_QUEUE_STATE_ID = "11111111-1111-1111-1111-000000000003";
 
 
 
@@ -95,6 +96,13 @@ module.exports = async function (context, req) {
         break;
       case "checkTransferStatus":
         result = checkTransferStatus(req.body?.transferId);
+        break;
+      case "getPendingQueues":
+        result = await getPendingQueues(conn, token, companyId);
+        break;
+      case "clearQueueState":
+        await clearQueueState(conn, token, companyId, req.body?.configId);
+        result = { cleared: true };
         break;
       case "runAllActive":
         result = await runAllActive(conn, token, companyId, lcid);
@@ -519,6 +527,77 @@ async function getStoredTables(conn, token, companyId) {
 
 async function setStoredTables(conn, token, companyId, tables) {
   await setConfig(conn, token, companyId, CONFIG_TABLES_ID, JSON.stringify(tables));
+}
+
+// ── Queue state persistence (resume after failure/sleep) ────────────────────
+// Stores active queue submissions per configId so the frontend can resume
+// polling after page reload, browser sleep, or backend restart.
+// Shape: { [configId]: { queueId, deletedQueueId, tableName, submittedAt } }
+
+async function getQueueState(conn, token, companyId) {
+  const raw = await getConfig(conn, token, companyId, CONFIG_QUEUE_STATE_ID);
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { return {}; }
+}
+
+async function saveQueueState(conn, token, companyId, configId, entry) {
+  const state = await getQueueState(conn, token, companyId);
+  state[configId] = { ...entry, submittedAt: new Date().toISOString() };
+  await setConfig(conn, token, companyId, CONFIG_QUEUE_STATE_ID, JSON.stringify(state));
+}
+
+async function clearQueueState(conn, token, companyId, configId) {
+  const state = await getQueueState(conn, token, companyId);
+  delete state[configId];
+  await setConfig(conn, token, companyId, CONFIG_QUEUE_STATE_ID, JSON.stringify(state));
+}
+
+async function getPendingQueues(conn, token, companyId) {
+  const state = await getQueueState(conn, token, companyId);
+  const entries = Object.entries(state);
+  if (!entries.length) return { pending: [] };
+
+  // Check status of each pending queue pair in parallel
+  const pending = [];
+  const stale = [];
+
+  await Promise.all(entries.map(async ([configId, entry]) => {
+    // Discard entries older than 24 hours — BC queue data expires
+    const ageMs = Date.now() - new Date(entry.submittedAt).getTime();
+    if (ageMs > 24 * 60 * 60 * 1000) {
+      stale.push(configId);
+      return;
+    }
+
+    // Check both queues
+    const checks = {};
+    try {
+      if (entry.queueId) {
+        checks.csv = await checkQueueStatus(conn, token, companyId, entry.queueId);
+      }
+    } catch { checks.csv = { status: "error" }; }
+    try {
+      if (entry.deletedQueueId) {
+        checks.deleted = await checkQueueStatus(conn, token, companyId, entry.deletedQueueId);
+      }
+    } catch { checks.deleted = { status: "error" }; }
+
+    pending.push({
+      configId,
+      ...entry,
+      csvStatus: checks.csv ? checks.csv.status : "n/a",
+      deletedStatus: checks.deleted ? checks.deleted.status : "n/a",
+      ageMin: Math.floor(ageMs / 60000),
+    });
+  }));
+
+  // Clean up stale entries
+  if (stale.length) {
+    for (const id of stale) delete state[id];
+    await setConfig(conn, token, companyId, CONFIG_QUEUE_STATE_ID, JSON.stringify(state));
+  }
+
+  return { pending };
 }
 
 function normalizeWhereFilter(raw) {
@@ -1101,6 +1180,14 @@ async function startQueueMirror(conn, token, companyId, configId, lcid = 1033) {
     bcQueueSubmit(conn, token, companyId, "CSV.DeletedRecords.Get", null, deletedPayload),
   ]);
 
+  // Persist queue state so the frontend can resume after failure/sleep/reload
+  await saveQueueState(conn, token, companyId, configId, {
+    queueId,
+    deletedQueueId,
+    tableName: tableCfg.tableName,
+    tableId: tableCfg.tableId,
+  });
+
   logs.push(`CSV queue started: ${queueId}`);
   logs.push(`Deleted records queue started: ${deletedQueueId}`);
 
@@ -1206,6 +1293,7 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
 
   if (!hasCsvData && !hasDeletedData) {
     logs.push("No records to mirror");
+    await clearQueueState(conn, token, companyId, configId).catch(() => {});
     return {
       tableId: tableCfg.tableId,
       tableName: tableCfg.tableName,
@@ -1275,6 +1363,9 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
   if (tsToSave) {
     await setIntegrationTimestamp(conn, token, companyId, tableCfg, tsToSave);
   }
+
+  // Clear persisted queue state — this run completed successfully
+  await clearQueueState(conn, token, companyId, configId).catch(() => {});
 
   return {
     tableId: tableCfg.tableId,

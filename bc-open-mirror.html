@@ -802,7 +802,17 @@ const UI_STRINGS = [
   'Initialize table?',
   'This will reverse all integration timestamps and reset the last run date. The next run will mirror all records from the beginning.',
   'Table initialized',
-  'Initializing table'
+  'Initializing table',
+  'Clearing stale queue state for',
+  'all cancelled',
+  'Resuming completed transfer for',
+  'ago',
+  'Resuming poll for',
+  'Resumed transfer completed',
+  'Still transferring data',
+  'Resumed transfer failed',
+  'Resumed queues all cancelled',
+  'Resumed poll failed'
 ];
 
 const CONFIG = {
@@ -1863,6 +1873,136 @@ async function loadSettings() {
   refreshMetrics();
 }
 
+// ── Resume pending BC queues after page reload, browser sleep, or failure ────
+async function resumePendingQueues() {
+  let result;
+  try { result = await api('getPendingQueues'); } catch { return; }
+
+  const entries = result.pending || [];
+  if (!entries.length) return;
+
+  for (const entry of entries) {
+    const { configId, queueId, deletedQueueId, tableName, csvStatus, deletedStatus, ageMin } = entry;
+
+    // Skip if this table is already running
+    if (state.runningConfigs.has(configId)) continue;
+
+    const bothDone = (csvStatus === 'completed' || csvStatus === 'deleted' || csvStatus === 'n/a')
+      && (deletedStatus === 'completed' || deletedStatus === 'deleted' || deletedStatus === 'n/a');
+    const bothCancelled = (csvStatus === 'deleted' || csvStatus === 'n/a')
+      && (deletedStatus === 'deleted' || deletedStatus === 'n/a');
+
+    if (bothCancelled) {
+      addLog(`${t('Clearing stale queue state for')} ${tableName} (${t('all cancelled')})`, 'info');
+      api('clearQueueState', { configId }).catch(() => {});
+      continue;
+    }
+
+    if (bothDone) {
+      // Both queues finished — go straight to data transfer
+      addLog(`${t('Resuming completed transfer for')} ${tableName} (${ageMin}m ${t('ago')})`, 'ok');
+      // Run the transfer in the background (don't block the loop)
+      resumeTransfer(configId, tableName, queueId, deletedQueueId, csvStatus, deletedStatus);
+      continue;
+    }
+
+    // Still running — resume polling
+    addLog(`${t('Resuming poll for')} ${tableName} (${csvStatus}/${deletedStatus}, ${ageMin}m ${t('ago')})`, 'info');
+    resumePolling(configId, tableName, queueId, deletedQueueId, csvStatus, deletedStatus);
+  }
+}
+
+async function resumeTransfer(configId, tableName, queueId, deletedQueueId, csvStatus, deletedStatus) {
+  try {
+    const transfer = await api('startTransfer', {
+      queueId: csvStatus === 'deleted' ? null : queueId,
+      deletedQueueId: deletedStatus === 'deleted' ? null : deletedQueueId,
+      configId,
+    });
+    if (!transfer.transferId) throw new Error('Failed to start resumed transfer');
+
+    // Poll transfer until done
+    let elapsed = 0;
+    while (elapsed < 10 * 60 * 1000) {
+      await new Promise(r => setTimeout(r, 5000));
+      elapsed += 5000;
+      const status = await api('checkTransferStatus', { transferId: transfer.transferId });
+      if (status.status === 'completed') {
+        if (status.logs) status.logs.forEach(l => addLog(l, 'info'));
+        if (status.endDateTime) {
+          const idx = state.tables.findIndex(r => r.configId === configId);
+          if (idx >= 0) state.tables[idx].lastRunAt = status.endDateTime;
+          state.lastRunAt = status.endDateTime;
+        }
+        renderTables();
+        refreshMetrics();
+        addLog(`${t('Resumed transfer completed')}: ${status.tableName || tableName} - ${status.mirroredRecords || 0} records`, 'ok');
+        return;
+      }
+      if (status.status === 'error') throw new Error(status.error);
+      if (status.status === 'not_found') throw new Error('Transfer lost');
+      if (elapsed % 30000 === 0) addLog(`${t('Still transferring data')}... (${Math.floor(elapsed / 1000)}s)`, 'info');
+    }
+    throw new Error('Resumed transfer timed out');
+  } catch (err) {
+    addLog(`${t('Resumed transfer failed')}: ${tableName} - ${err.message}`, 'error');
+  }
+}
+
+async function resumePolling(configId, tableName, queueId, deletedQueueId, csvStatus, deletedStatus) {
+  let csvDone = csvStatus === 'completed' || csvStatus === 'deleted' || !queueId;
+  let deletedDone = deletedStatus === 'completed' || deletedStatus === 'deleted' || !deletedQueueId;
+  let csvCancelled = csvStatus === 'deleted';
+  let deletedCancelled = deletedStatus === 'deleted';
+  const pollStart = Date.now();
+  const maxWait = 12 * 60 * 60 * 1000;
+
+  try {
+    while ((Date.now() - pollStart) < maxWait) {
+      if (!csvDone || !deletedDone) {
+        await new Promise(r => setTimeout(r, 30000));
+        const polls = [];
+        if (!csvDone) polls.push(api('checkQueueStatus', { queueId }).then(r => ({ key: 'csv', ...r })).catch(e => ({ key: 'csv', error: e })));
+        if (!deletedDone) polls.push(api('checkQueueStatus', { queueId: deletedQueueId }).then(r => ({ key: 'deleted', ...r })).catch(e => ({ key: 'deleted', error: e })));
+        const results = await Promise.all(polls);
+        for (const r of results) {
+          if (r.error) continue;
+          if (r.status === 'deleted') {
+            if (r.key === 'csv') { csvDone = true; csvCancelled = true; }
+            if (r.key === 'deleted') { deletedDone = true; deletedCancelled = true; }
+          }
+          if (r.status === 'completed') {
+            if (r.key === 'csv') csvDone = true;
+            if (r.key === 'deleted') deletedDone = true;
+          }
+        }
+      }
+
+      if (csvDone && deletedDone) break;
+
+      const elapsed = Date.now() - pollStart;
+      if (elapsed % 60000 < 30000) {
+        addLog(`${t('Resumed poll for')} ${tableName}... (${Math.floor(elapsed / 60000)}m)`, 'info');
+      }
+    }
+
+    if (csvCancelled && (deletedCancelled || !deletedQueueId)) {
+      addLog(`${t('Resumed queues all cancelled')}: ${tableName}`, 'warn');
+      api('clearQueueState', { configId }).catch(() => {});
+      return;
+    }
+
+    // Both done — start transfer
+    await resumeTransfer(configId, tableName,
+      csvCancelled ? null : queueId,
+      deletedCancelled ? null : deletedQueueId,
+      csvCancelled ? 'deleted' : 'completed',
+      deletedCancelled ? 'deleted' : 'completed');
+  } catch (err) {
+    addLog(`${t('Resumed poll failed')}: ${tableName} - ${err.message}`, 'error');
+  }
+}
+
 function getConnectionForm() {
   const maxConcurrent = Math.max(1, Number(document.getElementById('mirror-max-concurrent').value) || 3);
   state.maxConcurrentMirrors = maxConcurrent;
@@ -2054,6 +2194,9 @@ document.addEventListener('visibilitychange', () => {
     startSchedulerForTable(table);
     addLog(`${t('Re-scheduled')}: ${table.tableName}`, 'info');
   }
+
+  // Also check for pending queues from before the sleep
+  resumePendingQueues().catch(e => addLog('Resume check failed: ' + e.message, 'warn'));
 });
 
 async function runActiveTables() {
@@ -2158,6 +2301,7 @@ async function init() {
   renderLog();
   resetForm();
   await loadSettings();
+  resumePendingQueues().catch(e => addLog('Resume check failed: ' + e.message, 'warn'));
 }
 
 document.addEventListener('DOMContentLoaded', () => {
