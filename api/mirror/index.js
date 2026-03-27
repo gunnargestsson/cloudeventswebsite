@@ -1317,7 +1317,24 @@ async function checkQueueStatus(conn, token, companyId, queueId) {
   }
 
   if (statusResponse.statusCode === 200) {
-    return { status: "completed", message: "Queue task completed" };
+    // Queue task completed - check if it completed successfully or with an error
+    // Fetch the queue record to read datacontenttype
+    const queueRecordPath = `/v2.0/${tenantId}/${environment}/api/origo/cloudEvent/v1.0/companies(${companyId})/queues(${queueId})`;
+    try {
+      const queueRecord = await httpsJson(BC_HOST, queueRecordPath, "GET", { Authorization: `Bearer ${token}` }, null);
+      const dataContentType = (queueRecord.datacontenttype || "").toLowerCase();
+      
+      // text/json or application/json = BC encountered an error during CSV generation
+      if (dataContentType.includes("json")) {
+        return { status: "error", message: "Queue task completed with error (BC CSV generation failed)" };
+      }
+      
+      // text/csv or empty = success
+      return { status: "completed", message: "Queue task completed successfully" };
+    } catch (err) {
+      // If we can't read the record, treat as error
+      return { status: "error", message: `Failed to read queue result: ${err.message}` };
+    }
   }
 
   // 201 = still running
