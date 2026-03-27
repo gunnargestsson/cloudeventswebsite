@@ -18,23 +18,15 @@ const CI_TABLE = "Cloud Events Integration";
 const CONFIG_CONN_ID = "11111111-1111-1111-1111-000000000001";
 const CONFIG_TABLES_ID = "11111111-1111-1111-1111-000000000002";
 const CONFIG_QUEUE_STATE_ID = "11111111-1111-1111-1111-000000000003";
+const CONFIG_TRANSFER_STATE_ID = "11111111-1111-1111-1111-000000000004";
 
 
 
 const _tokenCache = new Map();
 
-// ── In-memory transfer tracker for async download+upload operations ──────────
-// Survives across requests within the same function process.
-// Auto-cleaned after 15 minutes to prevent memory leaks.
-const _transfers = new Map();
-const TRANSFER_TTL_MS = 15 * 60 * 1000;
-
-function cleanupTransfers() {
-  const now = Date.now();
-  for (const [id, t] of _transfers) {
-    if (now - t.createdAt > TRANSFER_TTL_MS) _transfers.delete(id);
-  }
-}
+// Transfer state is persisted to Cloud Events Storage so it survives across
+// Azure Function instances (SWA load-balances across multiple processes).
+// Shape: { [configId]: { status, transferId, createdAt, result?, error? } }
 
 module.exports = async function (context, req) {
   try {
@@ -92,10 +84,10 @@ module.exports = async function (context, req) {
         result = await fetchQueueData(conn, token, companyId, req.body?.queueId, req.body?.deletedQueueId, req.body?.configId, lcid);
         break;
       case "startTransfer":
-        result = startTransfer(conn, token, companyId, req.body?.queueId, req.body?.deletedQueueId, req.body?.configId, lcid);
+        result = await startTransfer(conn, token, companyId, req.body?.queueId, req.body?.deletedQueueId, req.body?.configId, lcid);
         break;
       case "checkTransferStatus":
-        result = checkTransferStatus(req.body?.transferId);
+        result = await checkTransferStatus(conn, token, companyId, req.body?.transferId, req.body?.configId);
         break;
       case "getPendingQueues":
         result = await getPendingQueues(conn, token, companyId);
@@ -1379,48 +1371,82 @@ async function fetchQueueData(conn, token, companyId, queueId, deletedQueueId, c
 }
 
 // ── Async transfer: fire-and-forget download+upload with polling ─────────────
+// Transfer state is persisted to Cloud Events Storage so checkTransferStatus
+// works even when SWA routes the poll to a different Azure Function instance.
 
-function startTransfer(conn, token, companyId, queueId, deletedQueueId, configId, lcid) {
+async function getTransferState(conn, token, companyId) {
+  const raw = await getConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID);
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { return {}; }
+}
+
+async function saveTransferState(conn, token, companyId, configId, entry) {
+  const state = await getTransferState(conn, token, companyId);
+  state[configId] = entry;
+  await setConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID, JSON.stringify(state));
+}
+
+async function clearTransferState(conn, token, companyId, configId) {
+  const state = await getTransferState(conn, token, companyId);
+  delete state[configId];
+  await setConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID, JSON.stringify(state));
+}
+
+async function startTransfer(conn, token, companyId, queueId, deletedQueueId, configId, lcid) {
   if (!queueId && !deletedQueueId) throw new Error("At least one queueId is required");
   if (!configId) throw new Error("configId is required");
 
-  cleanupTransfers();
-
   const transferId = crypto.randomUUID();
-  _transfers.set(transferId, { status: "running", createdAt: Date.now() });
+
+  // Persist running state to Cloud Events Storage before starting work
+  await saveTransferState(conn, token, companyId, configId, {
+    transferId, status: "running", createdAt: new Date().toISOString(),
+  });
 
   // Fire-and-forget: start the actual download+upload in the background
   fetchQueueData(conn, token, companyId, queueId, deletedQueueId, configId, lcid)
-    .then(result => {
-      const t = _transfers.get(transferId);
-      if (t) {
-        t.status = "completed";
-        t.result = result;
-      }
+    .then(async (result) => {
+      await saveTransferState(conn, token, companyId, configId, {
+        transferId, status: "completed", createdAt: new Date().toISOString(), result,
+      });
     })
-    .catch(err => {
-      const t = _transfers.get(transferId);
-      if (t) {
-        t.status = "error";
-        t.error = err.message;
-      }
+    .catch(async (err) => {
+      await saveTransferState(conn, token, companyId, configId, {
+        transferId, status: "error", createdAt: new Date().toISOString(), error: err.message,
+      });
     });
 
   return { transferId, status: "running" };
 }
 
-function checkTransferStatus(transferId) {
-  if (!transferId) throw new Error("transferId is required");
+async function checkTransferStatus(conn, token, companyId, transferId, configId) {
+  if (!transferId && !configId) throw new Error("transferId or configId is required");
 
-  const t = _transfers.get(transferId);
-  if (!t) return { status: "not_found" };
+  const state = await getTransferState(conn, token, companyId);
+
+  // Find by configId (preferred) or by scanning for transferId
+  let key = configId;
+  if (!key) {
+    key = Object.keys(state).find(k => state[k].transferId === transferId);
+  }
+  if (!key || !state[key]) return { status: "not_found" };
+
+  const t = state[key];
+  // Discard entries older than 30 minutes (stale)
+  if (new Date() - new Date(t.createdAt) > 30 * 60 * 1000) {
+    delete state[key];
+    await setConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID, JSON.stringify(state));
+    return { status: "not_found" };
+  }
 
   if (t.status === "completed") {
-    _transfers.delete(transferId);
-    return { status: "completed", ...t.result };
+    delete state[key];
+    await setConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID, JSON.stringify(state));
+    return { status: "completed", ...(t.result || {}) };
   }
   if (t.status === "error") {
-    _transfers.delete(transferId);
+    delete state[key];
+    await setConfig(conn, token, companyId, CONFIG_TRANSFER_STATE_ID, JSON.stringify(state));
     return { status: "error", error: t.error };
   }
   return { status: "running" };

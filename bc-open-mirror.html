@@ -1797,7 +1797,7 @@ window.runTableNow = async function runTableNow(configId, { signal } = {}) {
       if (runAc.signal.aborted) return null;
       transferElapsed += 5000;
 
-      const status = await api('checkTransferStatus', { transferId });
+      const status = await api('checkTransferStatus', { transferId, configId });
 
       if (status.status === 'completed') {
         // Process the completed result
@@ -1926,7 +1926,7 @@ async function resumeTransfer(configId, tableName, queueId, deletedQueueId, csvS
     while (elapsed < 10 * 60 * 1000) {
       await new Promise(r => setTimeout(r, 5000));
       elapsed += 5000;
-      const status = await api('checkTransferStatus', { transferId: transfer.transferId });
+      const status = await api('checkTransferStatus', { transferId: transfer.transferId, configId });
       if (status.status === 'completed') {
         if (status.logs) status.logs.forEach(l => addLog(l, 'info'));
         if (status.endDateTime) {
