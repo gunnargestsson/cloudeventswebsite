@@ -1140,10 +1140,23 @@ async function api(action, payload = {}) {
 
 async function loadUiTranslations() {
   const headers = bcSettingsHeaders();
-  if (!headers || !state.companyId || state.lcid === 1033) return;
+  console.log('[loadUiTranslations] headers:', headers ? 'present' : 'missing');
+  console.log('[loadUiTranslations] companyId:', state.companyId);
+  console.log('[loadUiTranslations] lcid:', state.lcid);
+  
+  if (!headers || !state.companyId || state.lcid === 1033) {
+    console.log('[loadUiTranslations] Skipping translation load (English or missing requirements)');
+    return;
+  }
+  
   await bcLoadTranslations(state.companyId, state.lcid, UI_STRINGS, headers);
+  
   if (typeof _uiTranslations === 'object' && _uiTranslations) {
+    const count = Object.keys(_uiTranslations).length;
+    console.log(`[loadUiTranslations] Setting state.uiTranslations with ${count} translations`);
     state.uiTranslations = _uiTranslations;
+  } else {
+    console.warn('[loadUiTranslations] _uiTranslations is not available');
   }
 }
 

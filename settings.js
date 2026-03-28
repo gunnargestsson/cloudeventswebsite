@@ -143,6 +143,7 @@ async function bcLoadTranslations(companyId, lcid, uiStrings, headers) {
   _uiTranslations = {};
   if (!lcid || lcid === 1033) return;  // English — no fetch needed
   try {
+    console.log(`[bcLoadTranslations] Fetching translations for lcid ${lcid}, ${uiStrings.length} strings`);
     const res = await fetch('/api/explorer', {
       method: 'POST',
       headers: { ...headers, 'x-bc-endpoint': 'tasks', 'Content-Type': 'application/json' },
@@ -156,17 +157,28 @@ async function bcLoadTranslations(companyId, lcid, uiStrings, headers) {
       }),
     }).then(r => r.json());
 
+    if (res.error) {
+      console.error('[bcLoadTranslations] BC returned error:', res.error);
+      return;
+    }
+
     const rows = res.result || [];
+    console.log(`[bcLoadTranslations] Loaded ${rows.length} translation records from BC`);
+    
     for (const rec of rows) {
       const src = (rec.primaryKey || {}).SourceText;
       const tgt = (rec.fields    || {}).TargetText;
       if (src && tgt) _uiTranslations[src] = tgt;
     }
+    
+    const translatedCount = Object.keys(_uiTranslations).length;
+    console.log(`[bcLoadTranslations] Applied ${translatedCount} translations`);
 
     // Auto-create placeholder records for strings not yet in the translation table
     const existing = new Set(rows.map(r => (r.primaryKey || {}).SourceText));
     const missing  = uiStrings.filter(s => !existing.has(s));
     if (missing.length) {
+      console.log(`[bcLoadTranslations] Creating ${missing.length} placeholder records for missing strings`);
       await fetch('/api/explorer', {
         method: 'POST',
         headers: { ...headers, 'x-bc-endpoint': 'tasks', 'Content-Type': 'application/json' },
@@ -182,5 +194,8 @@ async function bcLoadTranslations(companyId, lcid, uiStrings, headers) {
         }),
       });
     }
-  } catch (_) { /* silently fall back to English on any error */ }
+  } catch (err) {
+    console.error('[bcLoadTranslations] Failed to load translations:', err);
+    /* Fall back to English on any error */
+  }
 }
