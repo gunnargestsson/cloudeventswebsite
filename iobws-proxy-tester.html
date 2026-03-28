@@ -996,14 +996,14 @@ function updateTopBar() {
 // ── TRANSLATIONS ──────────────────────────────────────────────────────────────
 async function loadUiTranslations() {
   const settings = bcSettingsLoad();
-  const headers  = bcSettingsHeaders();
-  if (settings.companyId && headers) {
-    await bcLoadTranslations(
-      settings.companyId,
-      parseInt(settings.lcid || '1033', 10),
-      UI_STRINGS,
-      headers
-    );
+  const companyId = settings.companyId || 'CRONUS IS';
+  const lcid = parseInt(settings.lcid || '1033', 10);
+  const headers = bcSettingsTranslationHeaders();
+  
+  try {
+    await bcLoadTranslations(companyId, lcid, UI_STRINGS, headers);
+  } catch (err) {
+    console.warn('Failed to load UI translations:', err);
   }
 }
 

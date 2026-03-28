@@ -109,6 +109,18 @@ function bcSettingsHeaders() {
 }
 
 /**
+ * Returns headers for translation loading.
+ * ALWAYS uses server mode (only x-bc-company header) regardless of the user's connection mode.
+ * Translations are stored in BC and should always be fetched via server configuration.
+ * Falls back to 'CRONUS IS' if no company is selected yet.
+ */
+function bcSettingsTranslationHeaders() {
+  const s = bcSettingsLoad();
+  const companyId = s.companyId || 'CRONUS IS';
+  return { 'x-bc-company': companyId };
+}
+
+/**
  * Returns BC connection parameters as an object suitable for passing as MCP tool arguments.
  * In server mode: returns only companyId (credentials come from server env vars).
  * In custom mode: returns tenantId, clientId, clientSecret, environment, companyId.

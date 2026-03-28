@@ -1139,24 +1139,29 @@ async function api(action, payload = {}) {
 }
 
 async function loadUiTranslations() {
-  const headers = bcSettingsHeaders();
-  console.log('[loadUiTranslations] headers:', headers ? 'present' : 'missing');
-  console.log('[loadUiTranslations] companyId:', state.companyId);
+  const companyId = state.companyId || 'CRONUS IS';
+  const headers = bcSettingsTranslationHeaders();
+  
+  console.log('[loadUiTranslations] companyId:', companyId);
   console.log('[loadUiTranslations] lcid:', state.lcid);
   
-  if (!headers || !state.companyId || state.lcid === 1033) {
-    console.log('[loadUiTranslations] Skipping translation load (English or missing requirements)');
+  if (state.lcid === 1033) {
+    console.log('[loadUiTranslations] Skipping translation load (English)');
     return;
   }
   
-  await bcLoadTranslations(state.companyId, state.lcid, UI_STRINGS, headers);
-  
-  if (typeof _uiTranslations === 'object' && _uiTranslations) {
-    const count = Object.keys(_uiTranslations).length;
-    console.log(`[loadUiTranslations] Setting state.uiTranslations with ${count} translations`);
-    state.uiTranslations = _uiTranslations;
-  } else {
-    console.warn('[loadUiTranslations] _uiTranslations is not available');
+  try {
+    await bcLoadTranslations(companyId, state.lcid, UI_STRINGS, headers);
+    
+    if (typeof _uiTranslations === 'object' && _uiTranslations) {
+      const count = Object.keys(_uiTranslations).length;
+      console.log(`[loadUiTranslations] Setting state.uiTranslations with ${count} translations`);
+      state.uiTranslations = _uiTranslations;
+    } else {
+      console.warn('[loadUiTranslations] _uiTranslations is not available');
+    }
+  } catch (err) {
+    console.error('[loadUiTranslations] Failed to load translations:', err);
   }
 }
 

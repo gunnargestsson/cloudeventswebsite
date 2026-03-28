@@ -343,11 +343,8 @@ const UI_STRINGS = [
 async function loadUiTranslations() {
   const settings = bcSettingsLoad();
   const lcid = parseInt(settings.lcid || '1033', 10);
-  
-  // Always try to load translations in server mode using a default company
-  // Translations table is shared across all companies
   const companyId = settings.companyId || 'CRONUS IS';
-  const headers = { 'x-bc-company': companyId };
+  const headers = bcSettingsTranslationHeaders();
   
   try {
     await bcLoadTranslations(companyId, lcid, UI_STRINGS, headers);

@@ -320,8 +320,10 @@ function onLcidSelect() {
   bcSettingsSave({ lcid: selectedLcid });
   fieldsCache = {};
   permissionsCache = {};
-  const h = bcSettingsHeaders();
-  if (h) bcLoadTranslations(h['x-bc-company'], selectedLcid, UI_STRINGS, h).then(() => applyUiTranslations());
+  const s = bcSettingsLoad();
+  const companyId = s.companyId || 'CRONUS IS';
+  const headers = bcSettingsTranslationHeaders();
+  bcLoadTranslations(companyId, selectedLcid, UI_STRINGS, headers).then(() => applyUiTranslations());
   if (allTables.length) loadTables();
 }
 
@@ -416,8 +418,10 @@ async function loadTables(){
     document.getElementById('mbody').innerHTML=`<div class="est"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg><div>${allTables.length} tables loaded.<br>Select one to view its fields.</div></div>`;
     document.getElementById('statsBar').style.display='none';
     if(btn) btn.textContent='↺ Refresh';
-    const h = bcSettingsHeaders();
-    if (h) bcLoadTranslations(h['x-bc-company'], selectedLcid, UI_STRINGS, h).then(() => applyUiTranslations());
+    const s = bcSettingsLoad();
+    const companyId = s.companyId || 'CRONUS IS';
+    const headers = bcSettingsTranslationHeaders();
+    bcLoadTranslations(companyId, selectedLcid, UI_STRINGS, headers).then(() => applyUiTranslations());
   } catch(e){
     setStatus('err','Error');
     document.getElementById('sbTables').innerHTML=`<div class="sb-empty"><span style="color:var(--red)">${esc(e.message)}</span></div>`;
