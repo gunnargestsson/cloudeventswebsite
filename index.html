@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Origo BC Portal – My Pages</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
-<script src="settings.js?v=5"></script>
+<script src="settings.js?v=6"></script>
 <style>
   :root {
     --bg: #0a0d14;
@@ -192,47 +192,47 @@
 
   <main>
     <div class="conn-card">
-      <div class="section-title">Connection</div>
+      <div class="section-title" data-t="Connection">Connection</div>
 
       <!-- Mode selector -->
       <div class="mode-row">
-        <label><input type="radio" name="mode" value="server" onchange="setMode('server')"> Server configuration</label>
-        <label><input type="radio" name="mode" value="custom" onchange="setMode('custom')"> Custom configuration</label>
+        <label><input type="radio" name="mode" value="server" onchange="setMode('server')"> <span data-t="Server configuration">Server configuration</span></label>
+        <label><input type="radio" name="mode" value="custom" onchange="setMode('custom')"> <span data-t="Custom configuration">Custom configuration</span></label>
       </div>
 
       <!-- Server info panel -->
       <div id="server-info" class="config-panel" style="display:none">
-        <div class="config-row"><span class="config-key">Tenant</span><span class="config-val" id="cfg-tenant">—</span></div>
+        <div class="config-row"><span class="config-key" data-t="Tenant">Tenant</span><span class="config-val" id="cfg-tenant">—</span></div>
         <div class="config-divider"></div>
-        <div class="config-row"><span class="config-key">Environment</span><span class="config-val" id="cfg-env">—</span></div>
+        <div class="config-row"><span class="config-key" data-t="ENVIRONMENT">Environment</span><span class="config-val" id="cfg-env">—</span></div>
         <div class="config-divider"></div>
-        <div class="config-row"><span class="config-key">Client ID</span><span class="config-val" id="cfg-client-id">—</span></div>
+        <div class="config-row"><span class="config-key" data-t="CLIENT ID">Client ID</span><span class="config-val" id="cfg-client-id">—</span></div>
         <div class="config-divider"></div>
-        <div class="config-row"><span class="config-key">Secret</span><span id="cfg-secret">—</span></div>
+        <div class="config-row"><span class="config-key" data-t="Secret">Secret</span><span id="cfg-secret">—</span></div>
       </div>
 
       <!-- Custom credential fields -->
       <div id="custom-fields" style="display:none">
-        <div class="field-row"><label>Tenant host</label><input id="s-tenant" type="text" placeholder="dynamics.is" oninput="onCredInput()"></div>
-        <div class="field-row"><label>Environment</label><input id="s-env" type="text" placeholder="Production" oninput="onCredInput()"></div>
-        <div class="field-row"><label>Client ID</label><input id="s-client-id" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" oninput="onCredInput()"></div>
-        <div class="field-row"><label>Client Secret</label><input id="s-client-secret" type="password" oninput="onCredInput()"></div>
+        <div class="field-row"><label data-t="TENANT HOST">Tenant host</label><input id="s-tenant" type="text" placeholder="dynamics.is" oninput="onCredInput()"></div>
+        <div class="field-row"><label data-t="ENVIRONMENT">Environment</label><input id="s-env" type="text" placeholder="Production" oninput="onCredInput()"></div>
+        <div class="field-row"><label data-t="CLIENT ID">Client ID</label><input id="s-client-id" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" oninput="onCredInput()"></div>
+        <div class="field-row"><label data-t="CLIENT SECRET">Client Secret</label><input id="s-client-secret" type="password" oninput="onCredInput()"></div>
       </div>
 
       <!-- Company + Language (both modes) -->
       <div class="field-row">
-        <label>Company</label>
+        <label data-t="COMPANY">Company</label>
         <select id="s-company" onchange="onCompanyChange()">
-          <option value="">— loading… —</option>
+          <option value="" data-t="Loading">— loading… —</option>
         </select>
       </div>
       <div class="field-row">
-        <label>Language</label>
+        <label data-t="LANGUAGE">Language</label>
         <select id="s-lang" onchange="onLangChange()"></select>
       </div>
 
       <div class="form-actions">
-        <button class="btn-connect" onclick="connect()">Connect</button>
+        <button class="btn-connect" data-t="Connect" onclick="connect()">Connect</button>
       </div>
       <div id="connect-status" class="connect-status"></div>
     </div>
@@ -320,14 +320,19 @@ const UI_STRINGS = [
   'Connection',
   'Server configuration',
   'Custom configuration',
+  'Tenant',
   'TENANT HOST',
   'ENVIRONMENT',
   'CLIENT ID',
   'CLIENT SECRET',
+  'Secret',
   'COMPANY',
   'LANGUAGE',
+  'Loading',
   'Connect',
   'Connected as',
+  'Icelandic',
+  'English',
 ];
 
 async function loadUiTranslations() {
