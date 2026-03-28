@@ -653,112 +653,267 @@ async function toolSetRecords({ table, data, mode = "upsert", companyId, tenantI
   return { company: company.name, table: String(table), mode, written: data.length, records };
 }
 
-async function toolSearchCustomers({ query, take = 10, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+// ── Multi-field search engine ──────────────────────────────────────────────────
+// Searches N fields in parallel using Data.RecordIds.Get, deduplicates SystemIds
+// (capped at 100), then fetches full records in a single Data.Records.Get call.
+
+function escapeBcFilter(q) {
+  return String(q).replace(/[*|&<>='"/\\()@]/g, "?");
+}
+
+async function multiFieldSearch({ tableName, query, searchFields, fieldNumbers, baseFilter, conn, companyId }) {
+  const escaped = escapeBcFilter(query);
+  if (!escaped.trim()) return [];
+
+  // Fire parallel RecordIds.Get — one per search field
+  const idRequests = searchFields.map(fieldName =>
+    bcTask(conn, companyId, {
+      specversion: "1.0",
+      type:        "Data.RecordIds.Get",
+      source:      "BC Metadata MCP v1.0",
+      data:        JSON.stringify({
+        tableName,
+        tableView: baseFilter
+          ? `WHERE(${baseFilter},${fieldName}=FILTER(@*${escaped}*))`
+          : `WHERE(${fieldName}=FILTER(@*${escaped}*))`,
+        take: 2000,
+      }),
+    }).catch(() => ({ result: [] }))
+  );
+
+  const results = await Promise.all(idRequests);
+
+  // Collect unique SystemIds — cap at 100
+  const idSet = new Set();
+  for (const res of results) {
+    for (const rec of (res.result || [])) {
+      if (rec.id) {
+        idSet.add(rec.id);
+        if (idSet.size >= 100) break;
+      }
+    }
+    if (idSet.size >= 100) break;
+  }
+
+  if (idSet.size === 0) return [];
+
+  // Fetch full records by System Id
+  const ids = [...idSet];
+  const fetchData = {
+    tableName,
+    tableView: `WHERE(System Id=FILTER(${ids.join("|")}))`,
+    take: ids.length,
+  };
+  if (fieldNumbers) fetchData.fieldNumbers = fieldNumbers;
+
+  const res = await bcTask(conn, companyId, {
+    specversion: "1.0",
+    type:        "Data.Records.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(fetchData),
+  });
+
+  return res.result || res.value || [];
+}
+
+// ── Tier 1 search tools ────────────────────────────────────────────────────────
+
+async function toolSearchCustomers({ query, take = 50, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!query) throw new Error("Parameter 'query' is required");
-  take = Math.min(Number(take) || 10, 50);
+  take = Math.min(Number(take) || 50, 100);
 
   const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
-  const isNo = /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20;
+  const records = await multiFieldSearch({
+    tableName:    "Customer",
+    query,
+    searchFields: ["No.", "Name", "Address", "Post Code", "City", "Registration No.", "Contact", "Phone No.", "E-Mail"],
+    fieldNumbers: [1, 2, 5, 7, 8, 9, 23, 35, 86, 91, 102],
+    conn,
+    companyId:    company.id,
+  });
 
-  // BC does not support OR across different fields in a table view.
-  // When the query could be a No., run two separate queries and merge.
-  let records;
-  if (isNo) {
-    const [byNo, byName] = await Promise.all([
-      bcTask(conn, company.id, {
-        specversion: "1.0",
-        type:        "Data.Records.Get",
-        source:      "BC Metadata MCP v1.0",
-        data:        JSON.stringify({ tableName: "Customer", tableView: `WHERE(No.=FILTER(${query}*))`, fieldNumbers: [1, 2, 5, 8, 23, 35], take }),
-      }),
-      bcTask(conn, company.id, {
-        specversion: "1.0",
-        type:        "Data.Records.Get",
-        source:      "BC Metadata MCP v1.0",
-        data:        JSON.stringify({ tableName: "Customer", tableView: `WHERE(Name=FILTER(*${query}*))`, fieldNumbers: [1, 2, 5, 8, 23, 35], take }),
-      }),
-    ]);
-    const seen = new Set();
-    records = [...(byNo.result || byNo.value || []), ...(byName.result || byName.value || [])]
-      .filter(r => { const k = (r.primaryKey || {}).No || JSON.stringify(r); return seen.has(k) ? false : seen.add(k); })
-      .slice(0, take);
-  } else {
-    const result = await bcTask(conn, company.id, {
-      specversion: "1.0",
-      type:        "Data.Records.Get",
-      source:      "BC Metadata MCP v1.0",
-      data:        JSON.stringify({ tableName: "Customer", tableView: `WHERE(Name=FILTER(*${query}*))`, fieldNumbers: [1, 2, 5, 8, 23, 35], take }),
-    });
-    records = result.result || result.value || [];
-  }
-
-  return { company: company.name, query, count: records.length, customers: records };
+  return { company: company.name, query, count: records.length, customers: records.slice(0, take) };
 }
 
-async function toolSearchItems({ query, take = 10, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+async function toolSearchItems({ query, take = 50, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!query) throw new Error("Parameter 'query' is required");
-  take = Math.min(Number(take) || 10, 50);
+  take = Math.min(Number(take) || 50, 100);
 
   const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
-  const isNo = /^[\w\-]+$/.test(String(query).trim()) && query.length <= 20;
+  const records = await multiFieldSearch({
+    tableName:    "Item",
+    query,
+    searchFields: ["No.", "Description", "Description 2", "Vendor Item No.", "Base Unit of Measure", "Item Category Code"],
+    fieldNumbers: [1, 3, 4, 8, 18, 21, 54, 5702, 5704],
+    conn,
+    companyId:    company.id,
+  });
 
-  // BC does not support OR across different fields in a table view.
-  // When the query could be a No., run two separate queries and merge.
-  let records;
-  if (isNo) {
-    const [byNo, byDesc] = await Promise.all([
-      bcTask(conn, company.id, {
-        specversion: "1.0",
-        type:        "Data.Records.Get",
-        source:      "BC Metadata MCP v1.0",
-        data:        JSON.stringify({ tableName: "Item", tableView: `WHERE(No.=FILTER(${query}*))`, fieldNumbers: [1, 3, 8, 18, 21, 54], take }),
-      }),
-      bcTask(conn, company.id, {
-        specversion: "1.0",
-        type:        "Data.Records.Get",
-        source:      "BC Metadata MCP v1.0",
-        data:        JSON.stringify({ tableName: "Item", tableView: `WHERE(Description=FILTER(*${query}*))`, fieldNumbers: [1, 3, 8, 18, 21, 54], take }),
-      }),
-    ]);
-    const seen = new Set();
-    records = [...(byNo.result || byNo.value || []), ...(byDesc.result || byDesc.value || [])]
-      .filter(r => { const k = (r.primaryKey || {}).No || JSON.stringify(r); return seen.has(k) ? false : seen.add(k); })
-      .slice(0, take);
-  } else {
-    const result = await bcTask(conn, company.id, {
-      specversion: "1.0",
-      type:        "Data.Records.Get",
-      source:      "BC Metadata MCP v1.0",
-      data:        JSON.stringify({ tableName: "Item", tableView: `WHERE(Description=FILTER(*${query}*))`, fieldNumbers: [1, 3, 8, 18, 21, 54], take }),
-    });
-    records = result.result || result.value || [];
-  }
-
-  return { company: company.name, query, count: records.length, items: records };
+  return { company: company.name, query, count: records.length, items: records.slice(0, take) };
 }
 
-/**
- * Generic table search. Accepts any table readable via Data.Records.Get.
- * When codeField is supplied and the query looks like a code (short, word-characters only),
- * two parallel requests are made — one by codeField prefix, one by nameField substring —
- * and the results are merged and deduplicated.  Only a nameField substring search is
- * performed when the query contains spaces or non-word characters.
- */
-async function toolSearchRecords({ table, query, codeField, nameField, fields, take = 20, lcid = 1033, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
-  if (!table)     throw new Error("Parameter 'table' is required");
-  if (!query)     throw new Error("Parameter 'query' is required");
-  if (!nameField) throw new Error("Parameter 'nameField' is required");
+async function toolSearchVendors({ query, take = 50, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!query) throw new Error("Parameter 'query' is required");
+  take = Math.min(Number(take) || 50, 100);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const records = await multiFieldSearch({
+    tableName:    "Vendor",
+    query,
+    searchFields: ["No.", "Name", "Address", "Post Code", "City", "Phone No.", "Contact", "VAT Registration No."],
+    fieldNumbers: [1, 2, 5, 7, 9, 22, 39, 54, 86, 91],
+    conn,
+    companyId:    company.id,
+  });
+
+  return { company: company.name, query, count: records.length, vendors: records.slice(0, take) };
+}
+
+async function toolSearchContacts({ query, take = 50, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!query) throw new Error("Parameter 'query' is required");
+  take = Math.min(Number(take) || 50, 100);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const records = await multiFieldSearch({
+    tableName:    "Contact",
+    query,
+    searchFields: ["No.", "Name", "Company Name", "Phone No.", "Mobile Phone No.", "E-Mail", "City", "Post Code"],
+    conn,
+    companyId:    company.id,
+  });
+
+  return { company: company.name, query, count: records.length, contacts: records.slice(0, take) };
+}
+
+async function toolSearchEmployees({ query, take = 50, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!query) throw new Error("Parameter 'query' is required");
+  take = Math.min(Number(take) || 50, 100);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const records = await multiFieldSearch({
+    tableName:    "Employee",
+    query,
+    searchFields: ["First Name", "Middle Name", "Last Name", "Job Title", "Phone No.", "Mobile Phone No.", "E-Mail", "Company E-Mail"],
+    baseFilter:   "Status=CONST(Active)",
+    conn,
+    companyId:    company.id,
+  });
+
+  return { company: company.name, query, count: records.length, employees: records.slice(0, take) };
+}
+
+// ── Tier 2 search tools ────────────────────────────────────────────────────────
+
+async function toolSearchGlAccounts({ query, take = 50, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!query) throw new Error("Parameter 'query' is required");
+  take = Math.min(Number(take) || 50, 100);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const records = await multiFieldSearch({
+    tableName:    "G/L Account",
+    query,
+    searchFields: ["No.", "Name", "Search Name", "Account Category"],
+    conn,
+    companyId:    company.id,
+  });
+
+  return { company: company.name, query, count: records.length, accounts: records.slice(0, take) };
+}
+
+async function toolSearchBankAccounts({ query, take = 50, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!query) throw new Error("Parameter 'query' is required");
+  take = Math.min(Number(take) || 50, 100);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const records = await multiFieldSearch({
+    tableName:    "Bank Account",
+    query,
+    searchFields: ["No.", "Name", "Bank Account No.", "IBAN", "Bank Branch No."],
+    conn,
+    companyId:    company.id,
+  });
+
+  return { company: company.name, query, count: records.length, bankAccounts: records.slice(0, take) };
+}
+
+async function toolSearchResources({ query, take = 50, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!query) throw new Error("Parameter 'query' is required");
+  take = Math.min(Number(take) || 50, 100);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const records = await multiFieldSearch({
+    tableName:    "Resource",
+    query,
+    searchFields: ["No.", "Name", "Type", "Resource Group No.", "Base Unit of Measure"],
+    conn,
+    companyId:    company.id,
+  });
+
+  return { company: company.name, query, count: records.length, resources: records.slice(0, take) };
+}
+
+async function toolSearchFixedAssets({ query, take = 50, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!query) throw new Error("Parameter 'query' is required");
+  take = Math.min(Number(take) || 50, 100);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const records = await multiFieldSearch({
+    tableName:    "Fixed Asset",
+    query,
+    searchFields: ["No.", "Description", "Serial No.", "FA Class Code", "FA Subclass Code", "FA Location Code"],
+    conn,
+    companyId:    company.id,
+  });
+
+  return { company: company.name, query, count: records.length, fixedAssets: records.slice(0, take) };
+}
+
+// ── Generic multi-field search tool ────────────────────────────────────────────
+
+async function toolSearchRecords({ table, query, searchFields, codeField, nameField, fields, take = 50, lcid = 1033, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required");
+  if (!query) throw new Error("Parameter 'query' is required");
   validateTableName(table);
-  take = Math.min(Number(take) || 20, 200);
+  take = Math.min(Number(take) || 50, 200);
 
   const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
   const fieldNumbers = Array.isArray(fields) && fields.length ? fields.map(Number) : undefined;
+
+  // New path: multi-field parallel search via RecordIds when searchFields is provided
+  if (Array.isArray(searchFields) && searchFields.length) {
+    const records = await multiFieldSearch({
+      tableName:    String(table),
+      query,
+      searchFields,
+      fieldNumbers,
+      conn,
+      companyId:    company.id,
+    });
+    return { company: company.name, table: String(table), query, count: records.length, records: records.slice(0, take) };
+  }
+
+  // Legacy path: 2-field search (codeField prefix + nameField substring)
+  if (!nameField) throw new Error("Parameter 'nameField' or 'searchFields' is required");
   const baseData = (view) => JSON.stringify({
     tableName: String(table),
     tableView: view,
@@ -771,7 +926,6 @@ async function toolSearchRecords({ table, query, codeField, nameField, fields, t
 
   let records;
   if (looksLikeCode) {
-    // BC does not support OR across different fields — run two separate requests.
     const [byCode, byName] = await Promise.all([
       bcTask(conn, company.id, {
         specversion: "1.0",
@@ -1066,18 +1220,77 @@ function extractTotalNumber(raw) {
   return tryRead(raw);
 }
 
-async function toolGetDecimalTotal({ table, decimalField, filter, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+async function toolGetDecimalTotal({ table, decimalField, decimalFields, filter, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   validateTableName(table);
-
-  const { fieldNo, fieldName, normalized } = normalizeDecimalFieldRef(decimalField);
 
   const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
 
+  // Support both single decimalField and array decimalFields
+  const fieldRefs = [];
+  if (Array.isArray(decimalFields) && decimalFields.length) {
+    for (const f of decimalFields) fieldRefs.push(normalizeDecimalFieldRef(f));
+  } else if (decimalField !== undefined && decimalField !== null) {
+    fieldRefs.push(normalizeDecimalFieldRef(decimalField));
+  } else {
+    throw new Error("Parameter 'decimalField' or 'decimalFields' is required");
+  }
+
+  // When multiple fields, request using fieldNumbers array
+  if (fieldRefs.length > 1) {
+    const data = { tableName: String(table) };
+    const fieldNumbers = [];
+    const fieldNames   = [];
+    for (const ref of fieldRefs) {
+      if (ref.fieldNo !== null) { fieldNumbers.push(ref.fieldNo); fieldNames.push(String(ref.fieldNo)); }
+      else                      { fieldNames.push(ref.fieldName); }
+    }
+    if (fieldNumbers.length === fieldRefs.length) data.fieldNumbers = fieldNumbers;
+    if (filter) data.tableView = String(filter);
+
+    const result = await bcTask(conn, company.id, {
+      specversion: "1.0",
+      type:        "Data.Totals.Get",
+      source:      "BC Metadata MCP v1.0",
+      data:        JSON.stringify(data),
+    });
+
+    // Parse response: may be array of {fieldNo, total} or object with named totals
+    const totals = {};
+    if (Array.isArray(result)) {
+      for (const item of result) {
+        const key = item.fieldNo || item.fieldName || item.field;
+        totals[key] = extractTotalNumber(item);
+      }
+    } else if (result && typeof result === "object") {
+      // Try result.totals (array) or result.result (array)
+      const arr = result.totals || result.result || result.value;
+      if (Array.isArray(arr)) {
+        for (const item of arr) {
+          const key = item.fieldNo || item.fieldName || item.field;
+          totals[key] = extractTotalNumber(item);
+        }
+      } else {
+        // Single result — fall back to extracting a single total
+        for (const ref of fieldRefs) totals[ref.normalized] = extractTotalNumber(result);
+      }
+    }
+
+    return {
+      company: company.name,
+      table: String(table),
+      decimalFields: fieldRefs.map(r => r.normalized),
+      filter: filter || null,
+      totals,
+    };
+  }
+
+  // Single-field path (original behavior)
+  const { fieldNo, fieldName, normalized } = fieldRefs[0];
+
   const data = {
     tableName: String(table),
-    // Keep both aliases for compatibility with implementations that expect one naming style.
     field: fieldNo !== null ? fieldNo : fieldName,
   };
   if (fieldNo !== null) {
@@ -1643,6 +1856,117 @@ async function toolReverseIntegrationTimestamp({ source, tableId, companyId, ten
   });
 
   return { company: company.name, source, tableId: Number(tableId), reversed: true, dateTime };
+}
+
+// ── get_next_line_no ─────────────────────────────────────────────────────────
+
+async function toolGetNextLineNo({ table, primaryKey, id, increment = 10000, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required");
+  validateTableName(table);
+  increment = Number(increment) || 10000;
+  if (increment < 1) throw new Error("Parameter 'increment' must be >= 1");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = { tableName: String(table), increment };
+  if (primaryKey && typeof primaryKey === "object") data.primaryKey = primaryKey;
+  if (id) data.id = String(id);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Help.NextLineNo.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(data),
+  });
+
+  const lineNo = typeof result === "number" ? result
+    : (result && typeof result === "object") ? (result.lineNo ?? result.nextLineNo ?? result.result ?? result.value) : null;
+
+  return {
+    company: company.name,
+    table: String(table),
+    primaryKey: primaryKey || null,
+    id: id || null,
+    increment,
+    nextLineNo: lineNo,
+  };
+}
+
+// ── batch_records ────────────────────────────────────────────────────────────
+
+async function toolBatchRecords({ requests, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!Array.isArray(requests) || requests.length === 0) throw new Error("Parameter 'requests' must be a non-empty array");
+  if (requests.length > 10) throw new Error("Maximum 10 requests per batch");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const results = await Promise.all(requests.map(async (req, idx) => {
+    try {
+      if (!req.table) throw new Error(`Request [${idx}]: 'table' is required`);
+      validateTableName(req.table);
+      const take = Math.min(Number(req.take) || 50, 200);
+      const data = { tableName: String(req.table), skip: 0, take };
+      if (req.filter) data.tableView = String(req.filter);
+      if (Array.isArray(req.fieldNumbers) && req.fieldNumbers.length) data.fieldNumbers = req.fieldNumbers.map(Number);
+
+      const result = await bcTask(conn, company.id, {
+        specversion: "1.0",
+        type:        "Data.Records.Get",
+        source:      "BC Metadata MCP v1.0",
+        data:        JSON.stringify(data),
+      });
+
+      const records = result.result || result.value || (Array.isArray(result) ? result : []);
+      const ret = { table: String(req.table), count: records.length, records };
+      if (result.noOfRecords !== undefined) ret.noOfRecords = result.noOfRecords;
+      return ret;
+    } catch (err) {
+      return { table: req.table || `request[${idx}]`, error: err.message };
+    }
+  }));
+
+  return { company: company.name, results };
+}
+
+// ── get_document_lines ───────────────────────────────────────────────────────
+
+const DOC_LINE_TABLE_MAP = {
+  "sales order":      { table: "Sales Line",      docTypeFilter: "Order" },
+  "sales invoice":    { table: "Sales Line",      docTypeFilter: "Invoice" },
+  "sales quote":      { table: "Sales Line",      docTypeFilter: "Quote" },
+  "sales credit memo":{ table: "Sales Line",      docTypeFilter: "Credit Memo" },
+  "purchase order":   { table: "Purchase Line",   docTypeFilter: "Order" },
+  "purchase invoice": { table: "Purchase Line",   docTypeFilter: "Invoice" },
+  "purchase quote":   { table: "Purchase Line",   docTypeFilter: "Quote" },
+  "purchase credit memo": { table: "Purchase Line", docTypeFilter: "Credit Memo" },
+};
+
+async function toolGetDocumentLines({ documentType, documentNo, table, fields, take = 200, lcid = 1033, format = "json", companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!documentNo) throw new Error("Parameter 'documentNo' is required");
+  take = Math.min(Number(take) || 200, 200);
+
+  let targetTable, docTypeFilter;
+  if (table) {
+    targetTable = String(table);
+  } else if (documentType) {
+    const key = String(documentType).toLowerCase().trim();
+    const mapped = DOC_LINE_TABLE_MAP[key];
+    if (!mapped) throw new Error(`Unknown documentType '${documentType}'. Use one of: ${Object.keys(DOC_LINE_TABLE_MAP).join(", ")} — or pass 'table' directly.`);
+    targetTable = mapped.table;
+    docTypeFilter = mapped.docTypeFilter;
+  } else {
+    throw new Error("Either 'documentType' or 'table' is required");
+  }
+
+  const filterParts = [];
+  if (docTypeFilter) filterParts.push(`Document Type=CONST(${docTypeFilter})`);
+  filterParts.push(`Document No.=CONST(${String(documentNo)})`);
+  const filter = `WHERE(${filterParts.join(",")})`;
+
+  // Delegate to toolGetRecords for field resolution, format support, etc.
+  return await toolGetRecords({ table: targetTable, filter, fields, take, lcid, format, companyId, tenantId, clientId, clientSecret, environment, encryptedConn });
 }
 
 const CS_TABLE = "Cloud Events Storage";
@@ -2874,15 +3198,16 @@ const TOOLS = [
   },
   {
     name:        "get_decimal_total",
-    description: "Returns the aggregated total for a decimal field in a Business Central table using Data.Totals.Get. Supports optional tableView filtering.",
+    description: "Returns the aggregated total for one or more decimal fields in a Business Central table using Data.Totals.Get. Supports optional tableView filtering. Pass 'decimalField' for a single field or 'decimalFields' (array) for multiple fields in one call.",
     inputSchema: {
       type:       "object",
       properties: {
-        table:        { type: "string", description: "BC table name (e.g. 'Customer', 'G/L Entry', 'Sales Line')." },
-        decimalField: { type: "string", description: "Decimal field to total. Accepts BC field name (e.g. 'Amount') or field number as text (e.g. '15')." },
-        filter:       { type: "string", description: "Optional BC tableView filter, e.g. \"WHERE(Posting Date=FILTER(>=2026-01-01&<=2026-12-31))\"." },
+        table:         { type: "string", description: "BC table name (e.g. 'Customer', 'G/L Entry', 'Sales Line')." },
+        decimalField:  { type: "string", description: "Single decimal field to total. Accepts BC field name (e.g. 'Amount') or field number as text (e.g. '15')." },
+        decimalFields: { type: "array",  items: { type: "string" }, description: "Array of decimal fields to total in one call. Each item is a field name or field number as text." },
+        filter:        { type: "string", description: "Optional BC tableView filter, e.g. \"WHERE(Posting Date=FILTER(>=2026-01-01&<=2026-12-31))\"." },
       },
-      required: ["table", "decimalField"],
+      required: ["table"],
     },
   },
   {
@@ -2947,24 +3272,108 @@ const TOOLS = [
   },
   {
     name:        "search_customers",
-    description: "Search for customers in Business Central by name or customer number. Returns key fields (No., Name, Address, Phone, Contact, Country).",
+    description: "Multi-field search for customers in Business Central. Searches across No., Name, Address, Post Code, City, Registration No., Contact, Phone No., and E-Mail in parallel. Returns deduplicated results capped at 100 IDs.",
     inputSchema: {
       type:       "object",
       properties: {
-        query: { type: "string",  description: "Customer name or number to search for (partial match supported)." },
-        take:  { type: "integer", description: "Max results to return (default 10, max 50)." },
+        query: { type: "string",  description: "Search string — matched against 9 customer fields simultaneously (partial match, case-insensitive)." },
+        take:  { type: "integer", description: "Max results to return (default 50, max 100)." },
       },
       required: ["query"],
     },
   },
   {
     name:        "search_items",
-    description: "Search for items/products in Business Central by description or item number. Returns No., Description, Unit of Measure, Unit Price, Inventory, and Blocked status.",
+    description: "Multi-field search for items/products in Business Central. Searches across No., Description, Description 2, Vendor Item No., Base Unit of Measure, and Item Category Code in parallel.",
     inputSchema: {
       type:       "object",
       properties: {
-        query: { type: "string",  description: "Item description or number to search for (partial match supported)." },
-        take:  { type: "integer", description: "Max results to return (default 10, max 50)." },
+        query: { type: "string",  description: "Search string — matched against 6 item fields simultaneously (partial match, case-insensitive)." },
+        take:  { type: "integer", description: "Max results to return (default 50, max 100)." },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name:        "search_vendors",
+    description: "Multi-field search for vendors in Business Central. Searches across No., Name, Address, Post Code, City, Phone No., Contact, and VAT Registration No. in parallel.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        query: { type: "string",  description: "Search string — matched against 8 vendor fields simultaneously (partial match, case-insensitive)." },
+        take:  { type: "integer", description: "Max results to return (default 50, max 100)." },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name:        "search_contacts",
+    description: "Multi-field search for contacts in Business Central. Searches across No., Name, Company Name, Phone No., Mobile Phone No., E-Mail, City, and Post Code in parallel.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        query: { type: "string",  description: "Search string — matched against 8 contact fields simultaneously (partial match, case-insensitive)." },
+        take:  { type: "integer", description: "Max results to return (default 50, max 100)." },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name:        "search_employees",
+    description: "Multi-field search for active employees in Business Central. Searches across First Name, Middle Name, Last Name, Job Title, Phone No., Mobile Phone No., E-Mail, and Company E-Mail in parallel. Only returns employees with Status = Active.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        query: { type: "string",  description: "Search string — matched against 8 employee fields simultaneously (partial match, case-insensitive)." },
+        take:  { type: "integer", description: "Max results to return (default 50, max 100)." },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name:        "search_gl_accounts",
+    description: "Multi-field search for G/L accounts in Business Central. Searches across No., Name, Search Name, and Account Category in parallel.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        query: { type: "string",  description: "Search string — matched against 4 G/L account fields simultaneously (partial match, case-insensitive)." },
+        take:  { type: "integer", description: "Max results to return (default 50, max 100)." },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name:        "search_bank_accounts",
+    description: "Multi-field search for bank accounts in Business Central. Searches across No., Name, Bank Account No., IBAN, and Bank Branch No. in parallel.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        query: { type: "string",  description: "Search string — matched against 5 bank account fields simultaneously (partial match, case-insensitive)." },
+        take:  { type: "integer", description: "Max results to return (default 50, max 100)." },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name:        "search_resources",
+    description: "Multi-field search for resources in Business Central. Searches across No., Name, Type, Resource Group No., and Base Unit of Measure in parallel.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        query: { type: "string",  description: "Search string — matched against 5 resource fields simultaneously (partial match, case-insensitive)." },
+        take:  { type: "integer", description: "Max results to return (default 50, max 100)." },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name:        "search_fixed_assets",
+    description: "Multi-field search for fixed assets in Business Central. Searches across No., Description, Serial No., FA Class Code, FA Subclass Code, and FA Location Code in parallel.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        query: { type: "string",  description: "Search string — matched against 6 fixed asset fields simultaneously (partial match, case-insensitive)." },
+        take:  { type: "integer", description: "Max results to return (default 50, max 100)." },
       },
       required: ["query"],
     },
@@ -2984,19 +3393,20 @@ const TOOLS = [
   },
   {
     name:        "search_records",
-    description: "Generic search across any Business Central table that is readable via Data.Records.Get. Searches a name/description field by substring and optionally a code field by prefix. When 'codeField' is provided and the query is a short alphanumeric string, two parallel queries are executed (code prefix + name substring) and results are merged — because BC does not support OR filters across different fields. Supply 'fields' as an array of field numbers to limit the returned columns.",
+    description: "Generic search across any Business Central table. Preferred mode: supply 'searchFields' as an array of field names — each field is searched in parallel via Data.RecordIds.Get, IDs are deduplicated (max 100), and full records are fetched in one call. Legacy mode: supply 'nameField' (and optionally 'codeField') for the older 2-field approach. Supply 'fields' as an array of field numbers to limit the returned columns.",
     inputSchema: {
       type:       "object",
       properties: {
-        table:      { type: "string",  description: "BC table name to search (e.g. 'Customer', 'G/L Account', 'Vendor')." },
-        query:      { type: "string",  description: "Search string — used as a code prefix on 'codeField' and a substring match on 'nameField'." },
-        nameField:  { type: "string",  description: "Field name to match with a wildcard substring filter (e.g. 'Name', 'Description')." },
-        codeField:  { type: "string",  description: "Optional field name for prefix matching when the query looks like a code (e.g. 'No.', 'Code'). Omit when the table has no code/number key." },
-        fields:     { type: "array", items: { type: "integer" }, description: "Optional array of field numbers to include in the results. Omit to return all default fields." },
-        take:       { type: "integer", description: "Max records to return (default 20, max 200)." },
-        lcid:       { type: "integer", description: "Language LCID for translated captions (default 1033 = English)." },
+        table:        { type: "string",  description: "BC table name to search (e.g. 'Customer', 'G/L Account', 'Vendor')." },
+        query:        { type: "string",  description: "Search string — matched as a case-insensitive substring against every field in searchFields." },
+        searchFields: { type: "array", items: { type: "string" }, description: "Array of BC field names to search in parallel (e.g. ['No.', 'Name', 'Address']). Preferred over nameField/codeField." },
+        nameField:    { type: "string",  description: "(Legacy) Field name for wildcard substring filter. Use searchFields instead for multi-field search." },
+        codeField:    { type: "string",  description: "(Legacy) Optional field name for prefix matching. Use searchFields instead." },
+        fields:       { type: "array", items: { type: "integer" }, description: "Optional array of field numbers to include in the results. Omit to return all default fields." },
+        take:         { type: "integer", description: "Max records to return (default 50, max 200)." },
+        lcid:         { type: "integer", description: "Language LCID for translated captions (default 1033 = English)." },
       },
-      required: ["table", "query", "nameField"],
+      required: ["table", "query"],
     },
   },
   {
@@ -3512,6 +3922,61 @@ const TOOLS = [
       },
     },
   },
+  {
+    name:        "get_next_line_no",
+    description: "Returns the next available Line No. for a BC table that uses an integer last primary key field (e.g. Sales Line, Purchase Line, Gen. Journal Line). Uses the Help.NextLineNo.Get Cloud Event message type. The increment controls the step size (default 10000).",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:      { type: "string",  description: "BC table name (e.g. 'Sales Line', 'Purchase Line', 'Gen. Journal Line')." },
+        primaryKey: { type: "object",  description: "Partial primary key values to scope the line number (e.g. {\"Document Type\": \"Order\", \"Document No.\": \"S-ORD101001\"})." },
+        id:         { type: "string",  description: "Record GUID (SystemId) — alternative to primaryKey for scoping." },
+        increment:  { type: "integer", description: "Step size for Line No. (default 10000). BC standard is 10000." },
+      },
+      required: ["table"],
+    },
+  },
+  {
+    name:        "batch_records",
+    description: "Reads records from multiple Business Central tables in parallel in a single call. Each request specifies its own table, filter, and field selection. Returns an array of results (one per request). Max 10 requests per batch.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        requests: {
+          type:  "array",
+          description: "Array of record read requests (max 10).",
+          items: {
+            type: "object",
+            properties: {
+              table:        { type: "string",  description: "BC table name." },
+              filter:       { type: "string",  description: "Optional BC tableView filter." },
+              fieldNumbers: { type: "array",   items: { type: "integer" }, description: "Field numbers to return (omit for all)." },
+              take:         { type: "integer", description: "Max records (default 50, max 200)." },
+            },
+            required: ["table"],
+          },
+        },
+      },
+      required: ["requests"],
+    },
+  },
+  {
+    name:        "get_document_lines",
+    description: "Convenience tool that reads document lines (Sales Line, Purchase Line, etc.) for a given document number. Automatically resolves the correct line table and applies Document Type + Document No. filters. Supports field selection and markdown output.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        documentType: { type: "string", description: "Document type: 'sales order', 'sales invoice', 'sales quote', 'sales credit memo', 'purchase order', 'purchase invoice', 'purchase quote', or 'purchase credit memo'." },
+        documentNo:   { type: "string", description: "The document number (e.g. 'S-ORD101001')." },
+        table:        { type: "string", description: "Explicit line table name — overrides documentType auto-detection." },
+        fields:       { type: "array",  items: { type: "integer" }, description: "Field numbers to return (omit for all)." },
+        take:         { type: "integer", description: "Max lines to return (default 200)." },
+        lcid:         { type: "integer", description: "Language LCID for field name resolution (default 1033)." },
+        format:       { type: "string",  enum: ["json", "markdown"], description: "Output format (default 'json')." },
+      },
+      required: ["documentNo"],
+    },
+  },
 ];
 
 // ── JSON-RPC 2.0 dispatcher ────────────────────────────────────────────────────
@@ -3606,9 +4071,16 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "post_general_journal":         content = await toolPostGeneralJournal(args);        break;
           case "get_records":           content = await toolGetRecords(args);              break;
           case "set_records":           content = await toolSetRecords(args);              break;
-          case "search_customers":   content = await toolSearchCustomers(args);   break;
-          case "search_items":        content = await toolSearchItems(args);        break;
-          case "search_records":      content = await toolSearchRecords(args);      break;
+          case "search_customers":    content = await toolSearchCustomers(args);    break;
+          case "search_items":         content = await toolSearchItems(args);         break;
+          case "search_vendors":       content = await toolSearchVendors(args);       break;
+          case "search_contacts":      content = await toolSearchContacts(args);      break;
+          case "search_employees":     content = await toolSearchEmployees(args);     break;
+          case "search_gl_accounts":   content = await toolSearchGlAccounts(args);    break;
+          case "search_bank_accounts": content = await toolSearchBankAccounts(args);  break;
+          case "search_resources":     content = await toolSearchResources(args);     break;
+          case "search_fixed_assets":  content = await toolSearchFixedAssets(args);   break;
+          case "search_records":       content = await toolSearchRecords(args);       break;
           case "list_translations":            content = await toolListTranslations(args);            break;
           case "set_translations":             content = await toolSetTranslations(args);             break;
           case "get_field_translation":        content = await toolGetFieldTranslation(args);         break;
@@ -3629,6 +4101,9 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "check_standards_status":        content = await toolCheckStandardsStatus(args);        break;
           case "update_bc_standards":           content = await toolUpdateBcStandards(args);           break;
           case "setup_origo_bc_environment":    content = await toolSetupOrigoEnv(args);               break;
+          case "get_next_line_no":               content = await toolGetNextLineNo(args);               break;
+          case "batch_records":                  content = await toolBatchRecords(args);                break;
+          case "get_document_lines":             content = await toolGetDocumentLines(args);            break;
           default:
             return {
               jsonrpc: "2.0", id,
@@ -3653,6 +4128,10 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
               { uri: "bc://companies",     name: "Companies",     mimeType: "application/json" },
               { uri: "bc://message-types", name: "Message Types", mimeType: "application/json" },
               { uri: "bc://tables",        name: "Tables",        mimeType: "application/json" },
+            ],
+            resourceTemplates: [
+              { uriTemplate: "bc://tables/{tableName}",        name: "Table Fields",         mimeType: "application/json", description: "Returns all fields for a BC table (e.g. bc://tables/Customer)." },
+              { uriTemplate: "bc://message-types/{typeName}",  name: "Message Type Help",    mimeType: "application/json", description: "Returns help/documentation for a Cloud Event message type (e.g. bc://message-types/Customer.Create)." },
             ],
           },
         };
@@ -3725,6 +4204,45 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
                 arguments: [
                   { name: "type", description: "Message type name (e.g. 'Customer.Create')", required: true },
                   { name: "lcid", description: "Language LCID for content (default 1033)",    required: false },
+                ],
+              },
+              {
+                name: "vendor_lookup_pattern",
+                description: "Returns a vendor lookup guide with the complete live Vendor field table for this BC instance.",
+                arguments: [],
+              },
+              {
+                name: "gl_account_lookup_pattern",
+                description: "Returns a G/L account lookup guide with the complete live G/L Account field table for this BC instance.",
+                arguments: [],
+              },
+              {
+                name: "bank_account_lookup_pattern",
+                description: "Returns a bank account lookup guide with the complete live Bank Account field table for this BC instance.",
+                arguments: [],
+              },
+              {
+                name: "resource_lookup_pattern",
+                description: "Returns a resource lookup guide with the complete live Resource field table for this BC instance.",
+                arguments: [],
+              },
+              {
+                name: "employee_lookup_pattern",
+                description: "Returns an employee lookup guide with the complete live Employee field table for this BC instance.",
+                arguments: [],
+              },
+              {
+                name: "purchase_order_creation_workflow",
+                description: "Returns a step-by-step purchase order creation recipe pre-populated with the live Purchase Header and Purchase Line field names for this BC instance.",
+                arguments: [
+                  { name: "lcid", description: "Language LCID for field captions (default 1033)", required: false },
+                ],
+              },
+              {
+                name: "general_journal_creation_workflow",
+                description: "Returns a step-by-step general journal line creation recipe pre-populated with the live Gen. Journal Line field names for this BC instance.",
+                arguments: [
+                  { name: "lcid", description: "Language LCID for field captions (default 1033)", required: false },
                 ],
               },
             ],
@@ -3809,6 +4327,108 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
             `---\n\n` +
             `## All available message types in this BC instance\n\n` +
             typesData.types.map(t => `- **${t.name}** (${t.direction || ""})${t.description ? " — " + t.description : ""}`).join("\n");
+        } else if (promptName === "vendor_lookup_pattern") {
+          const data = await toolGetTableFields({ table: "Vendor", format: "markdown" });
+          text = `## Vendor Lookup Pattern\n\n` +
+            `Company: **${data.company}**\n\n` +
+            `Use \`Data.Records.Get\` with \`tableName: "Vendor"\`.\n\n` +
+            `**tableView filter examples:**\n` +
+            `- By No. (exact): \`WHERE(No.=FILTER(V00001))\`\n` +
+            `- By name (wildcard): \`WHERE(Name=FILTER(*World*))\`\n` +
+            `- Either: \`WHERE(No.=FILTER(V*)|Name=FILTER(*World*))\`\n` +
+            `- Unblocked only: \`WHERE(Blocked=CONST( ))\`\n\n` +
+            `To limit fields returned, pass a \`fieldNumbers\` array (e.g. \`[1,2,5,8,23,35]\` for No., Name, Address, Phone, Contact, Country).\n\n` +
+            `**All Vendor fields in this BC instance:**\n${data.markdown}`;
+        } else if (promptName === "gl_account_lookup_pattern") {
+          const data = await toolGetTableFields({ table: "G/L Account", format: "markdown" });
+          text = `## G/L Account Lookup Pattern\n\n` +
+            `Company: **${data.company}**\n\n` +
+            `Use \`Data.Records.Get\` with \`tableName: "G/L Account"\`.\n\n` +
+            `**tableView filter examples:**\n` +
+            `- By No. (exact): \`WHERE(No.=FILTER(6110))\`\n` +
+            `- By No. range: \`WHERE(No.=FILTER(6000..6999))\`\n` +
+            `- By name (wildcard): \`WHERE(Name=FILTER(*Sales*))\`\n` +
+            `- Income statement only: \`WHERE(Income/Balance=CONST(Income Statement))\`\n` +
+            `- Not blocked: \`WHERE(Blocked=CONST(No))\`\n` +
+            `- Posting accounts only: \`WHERE(Account Type=CONST(Posting))\`\n\n` +
+            `To limit fields returned, pass a \`fieldNumbers\` array (e.g. \`[1,2,4,6,9,43]\` for No., Name, Account Type, Income/Balance, Balance, Blocked).\n\n` +
+            `**All G/L Account fields in this BC instance:**\n${data.markdown}`;
+        } else if (promptName === "bank_account_lookup_pattern") {
+          const data = await toolGetTableFields({ table: "Bank Account", format: "markdown" });
+          text = `## Bank Account Lookup Pattern\n\n` +
+            `Company: **${data.company}**\n\n` +
+            `Use \`Data.Records.Get\` with \`tableName: "Bank Account"\`.\n\n` +
+            `**tableView filter examples:**\n` +
+            `- By No. (exact): \`WHERE(No.=FILTER(CHECKING))\`\n` +
+            `- By name (wildcard): \`WHERE(Name=FILTER(*Savings*))\`\n` +
+            `- By currency: \`WHERE(Currency Code=CONST(USD))\`\n` +
+            `- Not blocked: \`WHERE(Blocked=CONST( ))\`\n\n` +
+            `To limit fields returned, pass a \`fieldNumbers\` array (e.g. \`[1,2,3,5,7,22,24]\` for No., Name, Bank Account No., Contact, Phone No., Currency Code, Balance).\n\n` +
+            `**All Bank Account fields in this BC instance:**\n${data.markdown}`;
+        } else if (promptName === "resource_lookup_pattern") {
+          const data = await toolGetTableFields({ table: "Resource", format: "markdown" });
+          text = `## Resource Lookup Pattern\n\n` +
+            `Company: **${data.company}**\n\n` +
+            `Use \`Data.Records.Get\` with \`tableName: "Resource"\`.\n\n` +
+            `**tableView filter examples:**\n` +
+            `- By No. (exact): \`WHERE(No.=FILTER(R00001))\`\n` +
+            `- By name (wildcard): \`WHERE(Name=FILTER(*Design*))\`\n` +
+            `- People only: \`WHERE(Type=CONST(Person))\`\n` +
+            `- Machines only: \`WHERE(Type=CONST(Machine))\`\n` +
+            `- Not blocked: \`WHERE(Blocked=CONST(No))\`\n\n` +
+            `To limit fields returned, pass a \`fieldNumbers\` array (e.g. \`[1,2,3,8,10,14,20]\` for No., Type, Name, Base Unit of Measure, Direct Unit Cost, Unit Price, Blocked).\n\n` +
+            `**All Resource fields in this BC instance:**\n${data.markdown}`;
+        } else if (promptName === "employee_lookup_pattern") {
+          const data = await toolGetTableFields({ table: "Employee", format: "markdown" });
+          text = `## Employee Lookup Pattern\n\n` +
+            `Company: **${data.company}**\n\n` +
+            `Use \`Data.Records.Get\` with \`tableName: "Employee"\`.\n\n` +
+            `**tableView filter examples:**\n` +
+            `- By No. (exact): \`WHERE(No.=FILTER(E00001))\`\n` +
+            `- By name (wildcard): \`WHERE(First Name=FILTER(*John*))\`\n` +
+            `- By last name: \`WHERE(Last Name=FILTER(*Smith*))\`\n` +
+            `- Active only: \`WHERE(Status=CONST(Active))\`\n` +
+            `- By department: \`WHERE(Department Code=FILTER(SALES))\`\n\n` +
+            `To limit fields returned, pass a \`fieldNumbers\` array (e.g. \`[1,2,3,4,5,11,18,25,90]\` for No., First Name, Middle Name, Last Name, Address, Phone No., E-Mail, Status).\n\n` +
+            `**All Employee fields in this BC instance:**\n${data.markdown}`;
+        } else if (promptName === "purchase_order_creation_workflow") {
+          const lcid = Number(promptArgs.lcid) || 1033;
+          const [headerData, lineData] = await Promise.all([
+            toolGetTableFields({ table: "Purchase Header", lcid, format: "markdown" }),
+            toolGetTableFields({ table: "Purchase Line",   lcid, format: "markdown" }),
+          ]);
+          text = `## Purchase Order Creation Workflow\n\n` +
+            `Company: **${headerData.company}**\n\n` +
+            `This requires three \`Data.Records.Set\` calls via the Cloud Events API.\n\n` +
+            `### Step 1 — Create the Purchase Header\n` +
+            `Send \`Data.Records.Set\` with \`tableName: "Purchase Header"\` and \`mode: "insert"\`.\n` +
+            `Key fields: \`buyFromVendorNo\` (vendor No.), \`orderDate\`, \`documentType\` = \`"Order"\`.\n\n` +
+            `**All Purchase Header fields (${headerData.company}):**\n${headerData.markdown}\n\n` +
+            `### Step 2 — Read back the assigned No.\n` +
+            `The response record contains the full header. Read \`fields.no\` — this is the document number used in steps 3+.\n\n` +
+            `### Step 3 — Create Purchase Lines\n` +
+            `For each product line, send \`Data.Records.Set\` with \`tableName: "Purchase Line"\`, \`mode: "insert"\`.\n` +
+            `Key fields: \`documentType\` = \`"Order"\`, \`documentNo\` (from step 2), \`lineNo\` (10000, 20000, …), \`type\` = \`"Item"\`, \`no\` (item No.), \`quantity\`.\n` +
+            `Use \`get_next_line_no\` tool to determine the correct lineNo if appending to an existing order.\n\n` +
+            `**All Purchase Line fields (${headerData.company}):**\n${lineData.markdown}`;
+        } else if (promptName === "general_journal_creation_workflow") {
+          const lcid = Number(promptArgs.lcid) || 1033;
+          const lineData = await toolGetTableFields({ table: "Gen. Journal Line", lcid, format: "markdown" });
+          text = `## General Journal Line Creation Workflow\n\n` +
+            `Company: **${lineData.company}**\n\n` +
+            `General journal lines are created via \`Data.Records.Set\` with \`tableName: "Gen. Journal Line"\` and \`mode: "insert"\`.\n\n` +
+            `### Key Concepts\n` +
+            `- Each line belongs to a **Journal Template** + **Journal Batch** (primary key fields)\n` +
+            `- Line No. is an auto-incrementing integer — use \`get_next_line_no\` tool to get the next available value\n` +
+            `- After creating lines, use \`check_general_journal\` to validate, then \`post_general_journal\` to post\n\n` +
+            `### Step 1 — Create the Journal Line\n` +
+            `Key fields: \`journalTemplateName\`, \`journalBatchName\`, \`lineNo\`, \`postingDate\`, \`documentNo\`, \`accountType\`, \`accountNo\`, \`amount\`.\n` +
+            `For balanced entries, create two lines: one debit and one credit.\n\n` +
+            `### Step 2 — Validate\n` +
+            `Call \`check_general_journal\` with the template and batch name to verify the journal is balanced.\n\n` +
+            `### Step 3 — Post\n` +
+            `Call \`post_general_journal\` with the template and batch name.\n\n` +
+            `**All Gen. Journal Line fields (${lineData.company}):**\n${lineData.markdown}`;
         } else {
           return { jsonrpc: "2.0", id, error: { code: -32602, message: `Unknown prompt: ${promptName}` } };
         }

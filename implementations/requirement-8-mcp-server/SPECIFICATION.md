@@ -263,14 +263,23 @@ async function toolGetRecords({ table, filter, fields, skip = 0, take = 50, lcid
 
 ---
 
-### 5. New Tool: `search_customers`
+### 5. Enhanced Tool: `search_customers` — Multi-field parallel search
 **Status:** ✅ Implemented  
 **Priority:** 🟡 Medium  
 **File:** `api/mcp/index.js`
 
-**Description:** Convenience wrapper for AI assistants to find customers by name or number without needing to know BC filter syntax. If the query looks like a customer number (all digits or typical BC format), an exact `No.` match is attempted first; otherwise a wildcard `Name` filter is used.
+**Description:** Upgraded from a 2-field OR search to a multi-field parallel search engine. Searches 9 fields simultaneously using `Data.RecordIds.Get` per field, deduplicates SystemIds (capped at 100), then fetches full records in a single `Data.Records.Get` call.
 
-**Fields returned:** No. (1), Name (2), Address (5), Phone No. (8), Contact (23), Country/Region Code (35).
+**Search fields:** No., Name, Address, Post Code, City, Registration No., Contact, Phone No., E-Mail
+
+**Result field numbers:** 1, 2, 5, 7, 8, 9, 23, 35, 86, 91, 102
+
+**Algorithm:**
+1. Escape BC filter characters in user input (`*|&<>='"\()@` → `?`)
+2. Fire 9 parallel `Data.RecordIds.Get` calls — one per search field — with `@*escaped*` filter (case-insensitive)
+3. Collect SystemIds into a `Set` (automatic deduplication, capped at 100)
+4. If any IDs found, fetch full records with `WHERE(System Id=FILTER(id1|id2|...))`
+5. Return up to `take` records (default 50, max 100)
 
 **Implementation — add tool function:**
 ```js
@@ -317,14 +326,18 @@ async function toolSearchCustomers({ query, take = 10 } = {}) {
 
 ---
 
-### 6. New Tool: `search_items`
+### 6. Enhanced Tool: `search_items` — Multi-field parallel search
 **Status:** ✅ Implemented  
 **Priority:** 🟡 Medium  
 **File:** `api/mcp/index.js`
 
-**Description:** Same pattern as `search_customers` for the Item table. Useful for AI assistants composing sales orders.
+**Description:** Upgraded to the same multi-field parallel search engine as `search_customers`. Searches 6 fields simultaneously.
 
-**Fields returned:** No. (1), Description (3), Base Unit of Measure (8), Unit Price (18), Inventory (21), Blocked (54).
+**Search fields:** No., Description, Description 2, Vendor Item No., Base Unit of Measure, Item Category Code
+
+**Result field numbers:** 1, 3, 4, 8, 18, 21, 54, 5702, 5704
+
+**Algorithm:** Same as §5 — parallel `Data.RecordIds.Get` per field → deduplicated ID Set (max 100) → single `Data.Records.Get`.
 
 **Implementation — add tool function:**
 ```js
@@ -1012,6 +1025,19 @@ case "set_translations":  content = await toolSetTranslations(args);  break;
 | 🟡 Medium | §17 — `call_message_type` tool — generic Cloud Event caller | ~30 min |
 | ✅ Done | §18 — `x-encrypted-conn` header — workspace-level encrypted credentials | Done |
 | ✅ Done | §19 — `set_config` / `get_config` — BC-hosted JSON config via Cloud Events Storage | Done |
+| ✅ Done | §20 — `get_next_line_no` tool — next available Line No. via Help.NextLineNo.Get | Done |
+| ✅ Done | §21 — `batch_records` tool — multi-table parallel read | Done |
+| ✅ Done | §22 — `get_document_lines` tool — convenience document line reader | Done |
+| ✅ Done | §23 — Enhanced `get_decimal_total` — multi-field support | Done |
+| ✅ Done | §24 — `vendor_lookup_pattern` prompt | Done |
+| ✅ Done | §24b — `gl_account_lookup_pattern` prompt | Done |
+| ✅ Done | §24c — `bank_account_lookup_pattern` prompt | Done |
+| ✅ Done | §24d — `resource_lookup_pattern` prompt | Done |
+| ✅ Done | §24e — `employee_lookup_pattern` prompt | Done |
+| ✅ Done | §25 — `purchase_order_creation_workflow` prompt | Done |
+| ✅ Done | §26 — `general_journal_creation_workflow` prompt | Done |
+| ✅ Done | §27 — Resource templates for `bc://tables/{name}` and `bc://message-types/{name}` | Done |
+| ✅ Done | §28 — Multi-field search engine + 7 new search tools (Tier 1 + Tier 2) | Done |
 
 ---
 
@@ -1429,6 +1455,293 @@ This gives an AI assistant everything it needs to implement the message type wit
 
 ---
 
+### 20. New Tool: `get_next_line_no` — Next available Line No.
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Returns the next available Line No. for a BC table that uses an integer last primary key field (e.g. Sales Line, Purchase Line, Gen. Journal Line). Wraps the `Help.NextLineNo.Get` Cloud Event message type. The `increment` parameter controls the step size between line numbers (default 10000, matching BC standard).
+
+**Input parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `table` | string | ✅ | BC table name (e.g. `'Sales Line'`, `'Purchase Line'`, `'Gen. Journal Line'`) |
+| `primaryKey` | object | — | Partial primary key values to scope the line number (e.g. `{"Document Type": "Order", "Document No.": "S-ORD101001"}`) |
+| `id` | string | — | Record GUID (SystemId) — alternative to primaryKey for scoping |
+| `increment` | integer | — | Step size for Line No. (default 10000) |
+
+**Returns:**
+```jsonc
+{
+  "company": "CRONUS IS",
+  "table": "Sales Line",
+  "primaryKey": { "Document Type": "Order", "Document No.": "S-ORD101001" },
+  "id": null,
+  "increment": 10000,
+  "nextLineNo": 40000
+}
+```
+
+**AI workflow for creating document lines:**
+1. `get_next_line_no({ table: "Sales Line", primaryKey: { "Document Type": "Order", "Document No.": "S-ORD101001" } })` → `nextLineNo: 40000`
+2. Use 40000 as `lineNo` for a new `Data.Records.Set` call on Sales Line
+
+---
+
+### 21. New Tool: `batch_records` — Multi-table parallel read
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Reads records from multiple Business Central tables in a single call. Each request in the array specifies its own table, filter, and field selection. All requests execute in parallel against BC, reducing round trips. Max 10 requests per batch. Errors on individual requests are captured (not thrown) so other requests still succeed.
+
+**Input parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `requests` | array | ✅ | Array of record-read requests (max 10) |
+| `requests[].table` | string | ✅ | BC table name |
+| `requests[].filter` | string | — | BC tableView filter |
+| `requests[].fieldNumbers` | integer[] | — | Field numbers to return |
+| `requests[].take` | integer | — | Max records (default 50, max 200) |
+
+**Returns:**
+```jsonc
+{
+  "company": "CRONUS IS",
+  "results": [
+    { "table": "Customer", "count": 5, "records": [...] },
+    { "table": "Item", "count": 10, "records": [...] },
+    { "table": "Bad Table", "error": "Invalid table name..." }
+  ]
+}
+```
+
+**Use case:** An AI assistant collecting context for a sales order can fetch customers, items, and sales header data in a single round trip instead of three sequential `get_records` calls.
+
+---
+
+### 22. New Tool: `get_document_lines` — Convenience document line reader
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Convenience tool that reads document lines for a given document number. Automatically resolves the correct line table (Sales Line / Purchase Line) and applies Document Type + Document No. filters. Supports field selection, format (JSON or markdown), and language LCID for field name resolution. Delegates to `get_records` internally.
+
+**Supported document types:**
+
+| documentType | Resolved table | Document Type filter |
+|---|---|---|
+| `sales order` | Sales Line | Order |
+| `sales invoice` | Sales Line | Invoice |
+| `sales quote` | Sales Line | Quote |
+| `sales credit memo` | Sales Line | Credit Memo |
+| `purchase order` | Purchase Line | Order |
+| `purchase invoice` | Purchase Line | Invoice |
+| `purchase quote` | Purchase Line | Quote |
+| `purchase credit memo` | Purchase Line | Credit Memo |
+
+**Input parameters:**
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `documentNo` | string | ✅ | Document number |
+| `documentType` | string | — | Document type (see table above). Not needed if `table` is provided. |
+| `table` | string | — | Explicit line table name — overrides documentType. |
+| `fields` | integer[] | — | Field numbers to return |
+| `take` | integer | — | Max lines (default 200) |
+| `lcid` | integer | — | Language LCID (default 1033) |
+| `format` | string | — | `"json"` (default) or `"markdown"` |
+
+**Returns:** Same shape as `get_records`.
+
+---
+
+### 23. Enhanced `get_decimal_total` — Multi-field support
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** The `get_decimal_total` tool now accepts an optional `decimalFields` array parameter in addition to the existing `decimalField` string. When `decimalFields` is provided, all specified fields are totalled in a single call using `Data.Totals.Get` with a `fieldNumbers` array. This halves round trips when an AI assistant needs sums for multiple fields (e.g. Amount + "Amount Including VAT").
+
+**Changes:**
+- New optional parameter: `decimalFields` (array of strings — field names or numbers)
+- `decimalField` remains supported for backwards compatibility
+- Either `decimalField` or `decimalFields` must be provided (not both)
+- `table` is now the only required parameter
+
+**Multi-field response shape:**
+```jsonc
+{
+  "company": "CRONUS IS",
+  "table": "G/L Entry",
+  "decimalFields": ["Amount", "Debit Amount"],
+  "filter": "WHERE(Posting Date=FILTER(>=2026-01-01))",
+  "totals": { "Amount": 1234567.89, "Debit Amount": 9876543.21 }
+}
+```
+
+**Single-field response (unchanged):**
+```jsonc
+{ "company": "CRONUS IS", "table": "G/L Entry", "decimalField": "Amount", "filter": null, "total": 1234567.89 }
+```
+
+---
+
+### 24. New Prompt: `vendor_lookup_pattern`
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Analogous to `customer_lookup_pattern` but for the Vendor table. Returns a vendor lookup guide with tableView filter examples and the complete live Vendor field table for the connected BC instance. No parameters required.
+
+---
+
+### 24b. New Prompt: `gl_account_lookup_pattern`
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** G/L Account lookup guide with filter examples for No. ranges, Income/Balance classification, Account Type (Posting vs Heading/Total), and Blocked status. Returns the complete live G/L Account field table.
+
+---
+
+### 24c. New Prompt: `bank_account_lookup_pattern`
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Bank Account lookup guide with filter examples for No., Name, Currency Code, and Blocked status. Returns the complete live Bank Account field table.
+
+---
+
+### 24d. New Prompt: `resource_lookup_pattern`
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Resource lookup guide with filter examples for No., Name, Type (Person/Machine), and Blocked status. Returns the complete live Resource field table.
+
+---
+
+### 24e. New Prompt: `employee_lookup_pattern`
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Employee lookup guide with filter examples for No., First Name, Last Name, Status (Active/Inactive), and Department Code. Returns the complete live Employee field table.
+
+---
+
+### 25. New Prompt: `purchase_order_creation_workflow`
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Analogous to `sales_order_creation_workflow` but for purchase orders. Fetches Purchase Header and Purchase Line field schemas in parallel and returns a 3-step creation recipe. References `get_next_line_no` tool for determining line numbers on existing orders.
+
+**Arguments:** `lcid` (optional, default 1033)
+
+---
+
+### 26. New Prompt: `general_journal_creation_workflow`
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Returns a step-by-step guide for creating general journal lines in BC. Fetches the Gen. Journal Line field schema and explains template/batch scoping, balanced entries, and the validate → post workflow using `check_general_journal` and `post_general_journal` tools.
+
+**Arguments:** `lcid` (optional, default 1033)
+
+---
+
+### 27. Resource Templates: `bc://tables/{tableName}` and `bc://message-types/{typeName}`
+**Status:** ✅ Implemented  
+**Priority:** 🟢 Low  
+**File:** `api/mcp/index.js`
+
+**Description:** The `resources/list` response now includes `resourceTemplates` in addition to static resources. This exposes the parametric resources `bc://tables/{tableName}` and `bc://message-types/{typeName}` that were already handled by `resources/read` but were not discoverable by MCP clients.
+
+**Updated resources/list response:**
+```jsonc
+{
+  "resources": [
+    { "uri": "bc://companies", "name": "Companies", "mimeType": "application/json" },
+    { "uri": "bc://message-types", "name": "Message Types", "mimeType": "application/json" },
+    { "uri": "bc://tables", "name": "Tables", "mimeType": "application/json" }
+  ],
+  "resourceTemplates": [
+    { "uriTemplate": "bc://tables/{tableName}", "name": "Table Fields", "mimeType": "application/json" },
+    { "uriTemplate": "bc://message-types/{typeName}", "name": "Message Type Help", "mimeType": "application/json" }
+  ]
+}
+```
+
+---
+
+### 28. Multi-field search engine and 7 new search tools
+**Status:** ✅ Implemented  
+**Priority:** 🟡 Medium  
+**File:** `api/mcp/index.js`
+
+**Description:** Shared `multiFieldSearch` engine function inspired by the employee phonebook pattern. Searches N fields in parallel using `Data.RecordIds.Get`, deduplicates SystemIds (capped at 100), then fetches full records in a single `Data.Records.Get` call. BC filter special characters in the query are escaped to `?` wildcards.
+
+**Shared engine: `multiFieldSearch()`**
+```
+Parameters:
+  tableName    — BC table to search
+  query        — user search string
+  searchFields — array of BC field names to search in parallel
+  fieldNumbers — optional array of field numbers for the final record fetch
+  baseFilter   — optional extra WHERE clause (e.g. "Status=CONST(Active)")
+  conn         — resolved connection
+  companyId    — target company
+
+Flow:
+  1. escapeBcFilter(query) → replace *|&<>='"\()@ with ?
+  2. For each searchField, fire Data.RecordIds.Get with WHERE({field}=FILTER(@*escaped*))
+  3. Promise.all() — all requests run in parallel
+  4. Collect SystemIds into a Set (dedup), stop at 100
+  5. Single Data.Records.Get with WHERE(System Id=FILTER(id1|id2|...))
+  6. Return records array
+```
+
+#### Tier 1 tools (high-value master data)
+
+| Tool | Table | Search fields | Default take |
+|------|-------|---------------|-------------|
+| `search_customers` | Customer | No., Name, Address, Post Code, City, Registration No., Contact, Phone No., E-Mail | 50 |
+| `search_items` | Item | No., Description, Description 2, Vendor Item No., Base Unit of Measure, Item Category Code | 50 |
+| `search_vendors` | Vendor | No., Name, Address, Post Code, City, Phone No., Contact, VAT Registration No. | 50 |
+| `search_contacts` | Contact | No., Name, Company Name, Phone No., Mobile Phone No., E-Mail, City, Post Code | 50 |
+| `search_employees` | Employee | First Name, Middle Name, Last Name, Job Title, Phone No., Mobile Phone No., E-Mail, Company E-Mail | 50 |
+
+> `search_employees` adds `baseFilter: "Status=CONST(Active)"` so only active employees are searched.
+
+#### Tier 2 tools (commonly looked up)
+
+| Tool | Table | Search fields | Default take |
+|------|-------|---------------|-------------|
+| `search_gl_accounts` | G/L Account | No., Name, Search Name, Account Category | 50 |
+| `search_bank_accounts` | Bank Account | No., Name, Bank Account No., IBAN, Bank Branch No. | 50 |
+| `search_resources` | Resource | No., Name, Type, Resource Group No., Base Unit of Measure | 50 |
+| `search_fixed_assets` | Fixed Asset | No., Description, Serial No., FA Class Code, FA Subclass Code, FA Location Code | 50 |
+
+#### Enhanced `search_records` — generic multi-field search
+
+The generic `search_records` tool now supports a `searchFields` array parameter. When provided, it uses the `multiFieldSearch` engine instead of the legacy 2-field approach. The old `nameField`/`codeField` parameters still work as a fallback.
+
+**New parameters:**
+- `searchFields` (array of strings) — field names to search in parallel (preferred)
+- `nameField` (string) — legacy: single field for substring match
+- `codeField` (string) — legacy: optional prefix field
+- `table` and `query` are always required; `nameField` is only required in legacy mode
+
+**ID cap:** All multi-field search tools cap unique SystemIds at 100 to avoid oversized filter strings.
+
+---
+
 ## File Locations
 
 | File | Notes |
@@ -1496,9 +1809,38 @@ Configure in Claude Desktop (`claude_desktop_config.json`):
 - [ ] `list_message_types` returns available types
 - [ ] `get_records` on "Customer" with `take: 5` returns exactly 5 records
 - [ ] `get_records` with `take: 300` is capped to 200
-- [ ] `search_customers` with "Adatum" returns matching customers
+- [ ] `search_customers` with "Adatum" returns matching customers (multi-field)
+- [ ] `search_customers` with partial address returns matches
+- [ ] `search_items` with "bicycle" returns matching items (multi-field)
+- [ ] `search_vendors` with partial name returns matching vendors
+- [ ] `search_contacts` with email domain returns matching contacts
+- [ ] `search_employees` with first name returns matching active employees
+- [ ] `search_employees` does not return inactive employees
+- [ ] `search_gl_accounts` with account name returns matching G/L accounts
+- [ ] `search_bank_accounts` with IBAN fragment returns matching bank accounts
+- [ ] `search_resources` with name returns matching resources
+- [ ] `search_fixed_assets` with description returns matching fixed assets
+- [ ] `search_records` with `searchFields` array uses multi-field engine
+- [ ] `search_records` with `nameField` (no searchFields) uses legacy 2-field mode
+- [ ] Multi-field search caps SystemIds at 100 (no oversized filter strings)
 - [ ] Table parameter with injection characters (`{`, `"`) returns validation error
 - [ ] Batch request `[msg1, msg2]` returns two responses
 - [ ] `notifications/initialized` returns HTTP 202 with no body
 - [ ] Cold start (fresh function instance) completes first call successfully
 - [ ] `/.well-known/mcp.json` is reachable and returns valid JSON
+- [ ] `get_next_line_no` on "Sales Line" with valid primary key returns a numeric `nextLineNo`
+- [ ] `batch_records` with 2 requests returns 2 result entries
+- [ ] `batch_records` with >10 requests returns validation error
+- [ ] `get_document_lines` with `documentType: "sales order"` resolves to Sales Line table
+- [ ] `get_document_lines` with unknown `documentType` returns descriptive error
+- [ ] `get_decimal_total` with `decimalFields: ["Amount", "Debit Amount"]` returns `totals` object
+- [ ] `get_decimal_total` with single `decimalField` still returns `total` (backwards compatible)
+- [ ] `resources/list` includes `resourceTemplates` array with 2 entries
+- [ ] `prompts/list` returns 14 prompts (7 original + 7 new)
+- [ ] `prompts/get` for `vendor_lookup_pattern` returns Vendor field table
+- [ ] `prompts/get` for `gl_account_lookup_pattern` returns G/L Account field table
+- [ ] `prompts/get` for `bank_account_lookup_pattern` returns Bank Account field table
+- [ ] `prompts/get` for `resource_lookup_pattern` returns Resource field table
+- [ ] `prompts/get` for `employee_lookup_pattern` returns Employee field table
+- [ ] `prompts/get` for `purchase_order_creation_workflow` returns Purchase Header + Line fields
+- [ ] `prompts/get` for `general_journal_creation_workflow` returns Gen. Journal Line fields
