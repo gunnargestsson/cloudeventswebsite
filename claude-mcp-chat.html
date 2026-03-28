@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Origo BC Portal – Claude Chat</title>
-<script src="settings.js?v=4"></script>
+<script src="settings.js?v=5"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
 <style>
   :root {
@@ -370,8 +370,8 @@ function buildBcConfig() {
 async function loadTranslations() {
   const settings = bcSettingsLoad();
   const lcid = Number(settings.lcid) || 1033;
-  // Always use server's default company for translations
-  const companyId = 'CRONUS IS';
+  // Let bcLoadTranslations dynamically fetch the default company GUID from server
+  const companyId = null;
   
   try {
     await bcLoadTranslations(companyId, lcid, UI_STRINGS);

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Origo BC Portal – My Pages</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
-<script src="settings.js?v=4"></script>
+<script src="settings.js?v=5"></script>
 <style>
   :root {
     --bg: #0a0d14;
@@ -334,9 +334,8 @@ async function loadUiTranslations() {
   const settings = bcSettingsLoad();
   const lcid = parseInt(settings.lcid || '1033', 10);
   
-  // CRITICAL: Always use a hardcoded server company for translations
-  // Do NOT use settings.companyId - it may be from custom configuration
-  const companyId = 'CRONUS IS';
+  // Let bcLoadTranslations dynamically fetch the default company GUID from server
+  const companyId = null;
   
   try {
     await bcLoadTranslations(companyId, lcid, UI_STRINGS);

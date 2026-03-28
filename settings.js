@@ -152,19 +152,71 @@ function applyUiTranslations() {
 }
 
 /**
+ * Get the default company GUID from server BC environment.
+ * If BC_COMPANY_ID env var is set, uses that. Otherwise queries the server for
+ * the company list and returns the first company's GUID.
+ * Caches the result in sessionStorage for performance.
+ */
+async function bcGetDefaultCompanyId() {
+  const cached = sessionStorage.getItem('bc_portal_default_company_id');
+  if (cached) return cached;
+
+  try {
+    console.log('[bcGetDefaultCompanyId] Fetching company list from server BC environment...');
+    const res = await fetch('/api/explorer', {
+      method: 'POST',
+      headers: { 'x-bc-endpoint': 'companies', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        specversion: '1.0',
+        type: 'Help.Companies.List',
+        source: 'BC Portal',
+      }),
+    }).then(r => r.json());
+
+    if (res.error) {
+      console.error('[bcGetDefaultCompanyId] Error fetching companies:', res.error);
+      throw new Error('Failed to fetch company list');
+    }
+
+    const companies = res.result || [];
+    if (companies.length === 0) {
+      console.error('[bcGetDefaultCompanyId] No companies found in BC environment');
+      throw new Error('No companies found');
+    }
+
+    const firstCompany = companies[0];
+    console.log(`[bcGetDefaultCompanyId] Using first company: ${firstCompany.name} (${firstCompany.id})`);
+    sessionStorage.setItem('bc_portal_default_company_id', firstCompany.id);
+    return firstCompany.id;
+  } catch (err) {
+    console.error('[bcGetDefaultCompanyId] Failed to get default company:', err);
+    // Fallback: return hardcoded GUID for CRONUS IS
+    const fallbackGuid = '1998a733-7a01-f111-a1f9-6045bd750e1f';
+    console.warn(`[bcGetDefaultCompanyId] Using fallback GUID: ${fallbackGuid}`);
+    return fallbackGuid;
+  }
+}
+
+/**
  * Load UI translations from Business Central.
  * ALWAYS uses server-mode headers (only x-bc-company) regardless of user's connection mode.
  * Translations are infrastructure data that should never require custom credentials.
+ * If companyId is not provided, automatically fetches the default company GUID.
  */
 async function bcLoadTranslations(companyId, lcid, uiStrings) {
   _uiTranslations = {};
   if (!lcid || lcid === 1033) return;  // English — no fetch needed
   
-  // CRITICAL: Always use server-mode headers for translations (only company, no credentials)
-  const headers = { 'x-bc-company': companyId || 'CRONUS IS' };
+  // If no companyId provided, fetch the default company GUID from server
+  if (!companyId) {
+    companyId = await bcGetDefaultCompanyId();
+  }
+  
+  // CRITICAL: Always use server-mode headers for translations (only company GUID, no credentials)
+  const headers = { 'x-bc-company': companyId };
   
   try {
-    console.log(`[bcLoadTranslations] Fetching translations for lcid ${lcid}, ${uiStrings.length} strings using SERVER mode (company: ${companyId || 'CRONUS IS'})`);
+    console.log(`[bcLoadTranslations] Fetching translations for lcid ${lcid}, ${uiStrings.length} strings using SERVER mode (company GUID: ${companyId})`);
     const res = await fetch('/api/explorer', {
       method: 'POST',
       headers: { ...headers, 'x-bc-endpoint': 'tasks', 'Content-Type': 'application/json' },

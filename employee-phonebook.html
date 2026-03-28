@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Employee Phonebook – Origo BC Portal</title>
-<script src="settings.js?v=4"></script>
+<script src="settings.js?v=5"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
 <style>
   :root {
@@ -352,26 +352,21 @@ function applyUiTranslations() {
   document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
 }
 
+// Load UI translations from server's default company (never user's selected company)
 async function loadUiTranslations() {
   uiTranslations = {};
   if (selectedLcid === 1033) return;
   try {
-    const res = await cePost(selectedCompany.id, {
-      specversion: '1.0',
-      type:        'Data.Records.Get',
-      source:      'BC Portal',
-      subject:     'Cloud Event Translation',
-      data: JSON.stringify({
-        tableView: `WHERE(Windows Language ID=CONST(${selectedLcid}),Source=CONST(BC Portal))`,
-        take: UI_STRINGS.length + 50,
-      }),
-    });
-    for (const rec of (res.result || [])) {
-      const src = (rec.primaryKey || {}).SourceText;
-      const tgt = (rec.fields    || {}).TargetText;
-      if (src && tgt) uiTranslations[src] = tgt;
+    // Use bcLoadTranslations from settings.js to fetch from server's default company
+    await bcLoadTranslations(null, selectedLcid, UI_STRINGS);
+    // Copy from global _uiTranslations to local uiTranslations
+    if (typeof _uiTranslations === 'object' && _uiTranslations) {
+      uiTranslations = { ..._uiTranslations };
     }
-  } catch (e) { /* fall back to English */ }
+  } catch (e) { 
+    console.error('[loadUiTranslations] Failed to load translations:', e);
+    /* fall back to English */ 
+  }
 }
 
 // ── Status helpers ────────────────────────────────────────────────────────────
