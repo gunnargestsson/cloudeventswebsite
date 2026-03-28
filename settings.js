@@ -272,3 +272,25 @@ async function bcLoadTranslations(companyId, lcid, uiStrings) {
     /* Fall back to English on any error */
   }
 }
+
+// ── Loading Overlay Helpers ───────────────────────────────────────────────────
+/**
+ * Show a global loading overlay with an optional message.
+ * Requires a #loading-overlay element in the page HTML.
+ */
+function bcShowLoading(message) {
+  const overlay = document.getElementById('loading-overlay');
+  const text = overlay?.querySelector('.loading-text');
+  if (overlay) overlay.classList.add('show');
+  if (text && message && typeof _uiTranslations !== 'undefined') {
+    text.textContent = _uiTranslations[message] || message;
+  }
+}
+
+/**
+ * Hide the global loading overlay.
+ */
+function bcHideLoading() {
+  const overlay = document.getElementById('loading-overlay');
+  if (overlay) overlay.classList.remove('show');
+}

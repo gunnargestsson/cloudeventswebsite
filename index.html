@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Origo BC Portal – My Pages</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
-<script src="settings.js?v=7"></script>
+<script src="settings.js?v=8"></script>
 <style>
   :root {
     --bg: #0a0d14;
@@ -174,9 +174,38 @@
   /* SPINNER */
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  /* LOADING OVERLAY */
+  #loading-overlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 9999;
+    background: rgba(10, 13, 20, 0.85);
+    backdrop-filter: blur(8px);
+    justify-content: center; align-items: center;
+    flex-direction: column; gap: 16px;
+  }
+  #loading-overlay.show { display: flex; }
+  .loading-spinner {
+    width: 48px; height: 48px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  .loading-text {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.95rem; font-weight: 600;
+    color: var(--text-mid);
+  }
 </style>
 </head>
 <body>
+<!-- Loading overlay -->
+<div id="loading-overlay">
+  <div class="loading-spinner"></div>
+  <div class="loading-text" data-t="Loading, please wait...">Loading, please wait...</div>
+</div>
+
 <div id="app">
   <header>
     <a class="logo" href="index.html">
@@ -333,6 +362,9 @@ const UI_STRINGS = [
   'Connected as',
   'Icelandic',
   'English',
+  'Loading, please wait...',
+  'Fetching companies...',
+  'Loading translations...',
 ];
 
 async function loadUiTranslations() {
@@ -419,6 +451,19 @@ function updateTopBarConnection() {
   if (label) label.textContent = ready ? t('Connected') : t('Not connected');
 }
 
+// ── LOADING OVERLAY ───────────────────────────────────────────────────────────
+function showLoading(message) {
+  const overlay = document.getElementById('loading-overlay');
+  const text = document.querySelector('.loading-text');
+  if (overlay) overlay.classList.add('show');
+  if (text && message) text.textContent = t(message);
+}
+
+function hideLoading() {
+  const overlay = document.getElementById('loading-overlay');
+  if (overlay) overlay.classList.remove('show');
+}
+
 // ── MODE ───────────────────────────────────────────────────────────────────────
 function setMode(mode) {
   localStorage.setItem('bc_portal_mode', mode);
@@ -462,6 +507,7 @@ async function loadCompanies() {
   }
   const sel = document.getElementById('s-company');
   sel.innerHTML = '<option value="">— loading… —</option>';
+  showLoading('Fetching companies...');
   try {
     const r = await fetch('/api/companies', h ? { headers: h } : {});
     const j = await r.json();
@@ -476,6 +522,8 @@ async function loadCompanies() {
   } catch(e) {
     sel.innerHTML = '<option value="">— failed to load —</option>';
     showStatus('Could not load companies: ' + e.message, 'error');
+  } finally {
+    hideLoading();
   }
 }
 
@@ -556,28 +604,33 @@ function showStatus(msg, type) {
 
 // ── BOOT ──────────────────────────────────────────────────────────────────────
 window.onload = async () => {
-  await loadUiTranslations();
-  applyUiTranslations();
-  const mode = localStorage.getItem('bc_portal_mode') || 'server';
-  setMode(mode); // applies radio + shows/hides panels, triggers loadCompanies()
+  showLoading('Loading translations...');
+  try {
+    await loadUiTranslations();
+    applyUiTranslations();
+    const mode = localStorage.getItem('bc_portal_mode') || 'server';
+    setMode(mode); // applies radio + shows/hides panels, triggers loadCompanies()
 
-  if (mode === 'server') {
-    loadServerInfo();
-  } else {
-    const s = bcSettingsLoad();
-    document.getElementById('s-tenant').value        = s.tenant       || '';
-    document.getElementById('s-env').value           = s.env          || '';
-    document.getElementById('s-client-id').value     = s.clientId     || '';
-    document.getElementById('s-client-secret').value = s.clientSecret || '';
+    if (mode === 'server') {
+      loadServerInfo();
+    } else {
+      const s = bcSettingsLoad();
+      document.getElementById('s-tenant').value        = s.tenant       || '';
+      document.getElementById('s-env').value           = s.env          || '';
+      document.getElementById('s-client-id').value     = s.clientId     || '';
+      document.getElementById('s-client-secret').value = s.clientSecret || '';
+    }
+
+    populateLangDropdown();
+
+    if (bcSettingsReady()) {
+      showStatus('Connected as ' + (bcSettingsLoad().companyName || '…'), 'ok');
+      document.getElementById('nav-section').style.display = '';
+    }
+    updateTopBarConnection();
+  } finally {
+    hideLoading();
   }
-
-  populateLangDropdown();
-
-  if (bcSettingsReady()) {
-    showStatus('Connected as ' + (bcSettingsLoad().companyName || '…'), 'ok');
-    document.getElementById('nav-section').style.display = '';
-  }
-  updateTopBarConnection();
 };
 </script>
 </body>
