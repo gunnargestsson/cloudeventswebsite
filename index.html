@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Origo BC Portal – My Pages</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
-<script src="settings.js?v=6"></script>
+<script src="settings.js?v=7"></script>
 <style>
   :root {
     --bg: #0a0d14;
@@ -213,7 +213,7 @@
 
       <!-- Custom credential fields -->
       <div id="custom-fields" style="display:none">
-        <div class="field-row"><label data-t="TENANT HOST">Tenant host</label><input id="s-tenant" type="text" placeholder="dynamics.is" oninput="onCredInput()"></div>
+        <div class="field-row"><label data-t="DOMAIN NAME">Domain name</label><input id="s-tenant" type="text" placeholder="dynamics.is" oninput="onCredInput()"></div>
         <div class="field-row"><label data-t="ENVIRONMENT">Environment</label><input id="s-env" type="text" placeholder="Production" oninput="onCredInput()"></div>
         <div class="field-row"><label data-t="CLIENT ID">Client ID</label><input id="s-client-id" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" oninput="onCredInput()"></div>
         <div class="field-row"><label data-t="CLIENT SECRET">Client Secret</label><input id="s-client-secret" type="password" oninput="onCredInput()"></div>
@@ -321,7 +321,7 @@ const UI_STRINGS = [
   'Server configuration',
   'Custom configuration',
   'Tenant',
-  'TENANT HOST',
+  'DOMAIN NAME',
   'ENVIRONMENT',
   'CLIENT ID',
   'CLIENT SECRET',
