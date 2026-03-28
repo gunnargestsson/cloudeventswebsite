@@ -1140,7 +1140,6 @@ async function api(action, payload = {}) {
 
 async function loadUiTranslations() {
   const companyId = state.companyId || 'CRONUS IS';
-  const headers = bcSettingsTranslationHeaders();
   
   console.log('[loadUiTranslations] companyId:', companyId);
   console.log('[loadUiTranslations] lcid:', state.lcid);
@@ -1151,6 +1150,11 @@ async function loadUiTranslations() {
   }
   
   try {
+    const headers = typeof bcSettingsTranslationHeaders === 'function' 
+      ? bcSettingsTranslationHeaders() 
+      : { 'x-bc-company': companyId };
+    console.log('[loadUiTranslations] Using headers:', headers);
+    
     await bcLoadTranslations(companyId, state.lcid, UI_STRINGS, headers);
     
     if (typeof _uiTranslations === 'object' && _uiTranslations) {

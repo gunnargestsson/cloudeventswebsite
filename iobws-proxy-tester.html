@@ -998,9 +998,12 @@ async function loadUiTranslations() {
   const settings = bcSettingsLoad();
   const companyId = settings.companyId || 'CRONUS IS';
   const lcid = parseInt(settings.lcid || '1033', 10);
-  const headers = bcSettingsTranslationHeaders();
   
   try {
+    const headers = typeof bcSettingsTranslationHeaders === 'function' 
+      ? bcSettingsTranslationHeaders() 
+      : { 'x-bc-company': companyId };
+    console.log('[loadUiTranslations] Using headers:', headers);
     await bcLoadTranslations(companyId, lcid, UI_STRINGS, headers);
   } catch (err) {
     console.warn('Failed to load UI translations:', err);

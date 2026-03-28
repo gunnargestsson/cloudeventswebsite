@@ -371,9 +371,12 @@ async function loadTranslations() {
   const settings = bcSettingsLoad();
   const companyId = settings.companyId || 'CRONUS IS';
   const lcid = Number(settings.lcid) || 1033;
-  const headers = bcSettingsTranslationHeaders();
   
   try {
+    const headers = typeof bcSettingsTranslationHeaders === 'function' 
+      ? bcSettingsTranslationHeaders() 
+      : { 'x-bc-company': companyId };
+    console.log('[loadTranslations] Using headers:', headers);
     await bcLoadTranslations(companyId, lcid, UI_STRINGS, headers);
   } catch (err) {
     console.warn('Failed to load translations:', err);

@@ -334,9 +334,14 @@ async function loadUiTranslations() {
   const settings = bcSettingsLoad();
   const lcid = parseInt(settings.lcid || '1033', 10);
   const companyId = settings.companyId || 'CRONUS IS';
-  const headers = bcSettingsTranslationHeaders();
   
   try {
+    // Always use server-mode headers for translations (only x-bc-company, credentials from server)
+    const headers = typeof bcSettingsTranslationHeaders === 'function' 
+      ? bcSettingsTranslationHeaders() 
+      : { 'x-bc-company': companyId };
+    
+    console.log('[loadUiTranslations] Using headers:', headers);
     await bcLoadTranslations(companyId, lcid, UI_STRINGS, headers);
   } catch (err) {
     console.warn('Failed to load UI translations:', err);

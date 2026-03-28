@@ -322,7 +322,10 @@ function onLcidSelect() {
   permissionsCache = {};
   const s = bcSettingsLoad();
   const companyId = s.companyId || 'CRONUS IS';
-  const headers = bcSettingsTranslationHeaders();
+  const headers = typeof bcSettingsTranslationHeaders === 'function' 
+    ? bcSettingsTranslationHeaders() 
+    : { 'x-bc-company': companyId };
+  console.log('[onLcidSelect] Using translation headers:', headers);
   bcLoadTranslations(companyId, selectedLcid, UI_STRINGS, headers).then(() => applyUiTranslations());
   if (allTables.length) loadTables();
 }
@@ -420,7 +423,10 @@ async function loadTables(){
     if(btn) btn.textContent='↺ Refresh';
     const s = bcSettingsLoad();
     const companyId = s.companyId || 'CRONUS IS';
-    const headers = bcSettingsTranslationHeaders();
+    const headers = typeof bcSettingsTranslationHeaders === 'function' 
+      ? bcSettingsTranslationHeaders() 
+      : { 'x-bc-company': companyId };
+    console.log('[loadTables] Using translation headers:', headers);
     bcLoadTranslations(companyId, selectedLcid, UI_STRINGS, headers).then(() => applyUiTranslations());
   } catch(e){
     setStatus('err','Error');
