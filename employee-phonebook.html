@@ -299,6 +299,11 @@ const EMPLOYEE_LIST_FIELDS  = [2, 3, 4, 5920, 6, 7, 18, 65, 10, 19, 1100];
 const DIMENSION_VALUE_FIELDS = [1, 2, 3, 10];
 const PAGE_SIZE = 50;
 const VIEW_KEY  = 'bc_portal_employee_view';
+const SEARCH_FIELDS = [
+  'First Name', 'Middle Name', 'Last Name', 'Job Title',
+  'Phone No.', 'Mobile Phone No.', 'E-Mail', 'Company E-Mail',
+  'Global Dimension 1 Code',
+];
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let selectedCompany   = null;   // { id, name }
@@ -313,6 +318,7 @@ let uiTranslations    = {};
 let searchDebounce    = null;
 let sortCol           = null;   // list view column key
 let sortAsc           = true;
+let _searchSeq        = 0;      // monotonic counter to discard stale search results
 
 const UI_STRINGS = [
   'Home', 'API Key', 'Connected', 'Not connected', 'Authenticating...',
@@ -430,7 +436,8 @@ async function loadEmployees(skip = 0) {
     });
     totalEmployees = res.noOfRecords || 0;
     allEmployees   = (res.result || []).map(mapEmployee);
-    applySearchFilter(document.getElementById('search-input').value || '');
+    filteredEmployees = allEmployees.slice();
+    renderEmployees();
     renderPagination();
   } catch (e) {
     showError(e.message);
@@ -470,24 +477,86 @@ function mapEmployee(rec) {
 // ── Search ────────────────────────────────────────────────────────────────────
 function onSearch(value) {
   clearTimeout(searchDebounce);
-  searchDebounce = setTimeout(() => applySearchFilter(value), 150);
+  searchDebounce = setTimeout(() => serverSearch(value), 400);
 }
 
-function applySearchFilter(q) {
-  const lq = (q || '').toLowerCase().trim();
-  if (!lq) {
-    filteredEmployees = allEmployees.slice();
-  } else {
-    filteredEmployees = allEmployees.filter(e =>
-      e.fullName.toLowerCase().includes(lq)        ||
-      e.jobTitle.toLowerCase().includes(lq)        ||
-      e.mobile.toLowerCase().includes(lq)          ||
-      e.phone.toLowerCase().includes(lq)           ||
-      e.email.toLowerCase().includes(lq)           ||
-      e.department.toLowerCase().includes(lq)
-    );
+async function serverSearch(query) {
+  const q = (query || '').trim();
+  if (!q) {
+    await loadEmployees(0);
+    return;
   }
-  renderEmployees();
+
+  const seq = ++_searchSeq;
+  showLoader();
+
+  try {
+    // Escape BC filter operator characters in user input
+    const escaped = q.replace(/[*|&<>='"/\\()]/g, '?');
+
+    // Query each searchable field in parallel using Data.RecordIds.Get
+    const idRequests = SEARCH_FIELDS.map(fieldName =>
+      cePost(selectedCompany.id, {
+        specversion: '1.0',
+        type:        'Data.RecordIds.Get',
+        source:      'BC Portal',
+        subject:     'Employee',
+        data: JSON.stringify({
+          tableName: 'Employee',
+          tableView: `WHERE(Status=CONST(Active),${fieldName}=FILTER(@*${escaped}*))`,
+          take: 2000,
+        }),
+      }).catch(() => ({ result: [] }))
+    );
+
+    const results = await Promise.all(idRequests);
+    if (seq !== _searchSeq) return; // stale — user typed more
+
+    // Collect unique SystemIds across all field queries
+    const idSet = new Set();
+    for (const res of results) {
+      for (const rec of (res.result || [])) {
+        if (rec.id) idSet.add(rec.id);
+      }
+    }
+
+    if (idSet.size === 0) {
+      allEmployees = [];
+      filteredEmployees = [];
+      totalEmployees = 0;
+      renderEmployees();
+      document.getElementById('pagination-wrap').innerHTML = '';
+      return;
+    }
+
+    // Fetch full records using System Id filter
+    const ids = [...idSet];
+    const idFilter = ids.join('|');
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type:        'Data.Records.Get',
+      source:      'BC Portal',
+      subject:     'Employee',
+      data: JSON.stringify({
+        tableName:    'Employee',
+        fieldNumbers: EMPLOYEE_LIST_FIELDS,
+        tableView:    `SORTING(First Name,Last Name,Middle Name) ORDER(Ascending) WHERE(System Id=FILTER(${idFilter}))`,
+        skip: 0,
+        take: ids.length,
+      }),
+    });
+
+    if (seq !== _searchSeq) return; // stale
+
+    totalEmployees = res.noOfRecords || 0;
+    allEmployees = (res.result || []).map(mapEmployee);
+    filteredEmployees = allEmployees.slice();
+    renderEmployees();
+    // Hide pagination during search
+    document.getElementById('pagination-wrap').innerHTML = '';
+  } catch (e) {
+    if (seq === _searchSeq) showError(e.message);
+  }
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
