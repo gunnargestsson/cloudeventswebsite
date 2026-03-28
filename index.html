@@ -239,27 +239,27 @@
 
     <!-- Navigation cards — shown once connected -->
     <div id="nav-section" style="display:none">
-      <div class="section-title">Navigate to</div>
+      <div class="section-title" id="nav-section-title">Navigate to</div>
       <div class="nav-cards">
         <a href="bc-portal.html" class="nav-card">
           <div class="nav-card-icon">🏢</div>
-          <div class="nav-card-title">BC Portal</div>
-          <div class="nav-card-desc">Companies, customers, orders</div>
+          <div class="nav-card-title" id="nav-bc-portal-title">BC Portal</div>
+          <div class="nav-card-desc" id="nav-bc-portal-desc">Companies, customers, orders</div>
         </a>
         <a href="bc-cloud-events-explorer.html" class="nav-card">
           <div class="nav-card-icon">☁️</div>
-          <div class="nav-card-title">Cloud Events Explorer</div>
-          <div class="nav-card-desc">Browse and send BC cloud events</div>
+          <div class="nav-card-title" id="nav-cloud-events-title">Cloud Events Explorer</div>
+          <div class="nav-card-desc" id="nav-cloud-events-desc">Browse and send BC cloud events</div>
         </a>
         <a href="bc-metadata-explorer.html" class="nav-card">
           <div class="nav-card-icon">🔍</div>
-          <div class="nav-card-title">Metadata Explorer</div>
-          <div class="nav-card-desc">Fields and captions per entity</div>
+          <div class="nav-card-title" id="nav-metadata-title">Metadata Explorer</div>
+          <div class="nav-card-desc" id="nav-metadata-desc">Fields and captions per entity</div>
         </a>
         <a href="sales-assistant.html" class="nav-card">
           <div class="nav-card-icon">🤖</div>
-          <div class="nav-card-title">AI Sales Assistant</div>
-          <div class="nav-card-desc">AI-powered sales order entry</div>
+          <div class="nav-card-title" id="nav-sales-assistant-title">AI Sales Assistant</div>
+          <div class="nav-card-desc" id="nav-sales-assistant-desc">AI-powered sales order entry</div>
         </a>
         <a href="bc-open-mirror.html" class="nav-card">
           <div class="nav-card-icon">🪞</div>
@@ -288,12 +288,57 @@
         </a>
       </div>
     </div>
+          <div class="nav-card-title" id="nav-stmt-title">Statement Sender</div>
+          <div class="nav-card-desc" id="nav-stmt-desc">Email customer account statements as PDF</div>
+        </a>
+        <a href="employee-phonebook.html" class="nav-card">
+          <div class="nav-card-icon">📞</div>
+          <div class="nav-card-title" id="nav-phonebook-title">Employee Phonebook</div>
+          <div class="nav-card-desc" id="nav-phonebook-desc">Employee directory from Business Central</div>
+        </a>
+      </div>
+    </div>
   </main>
 </div>
 
 <script>
 const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',1036:'French',1034:'Spanish',1043:'Dutch',1053:'Swedish',1044:'Norwegian'};
-const UI_STRINGS = ['Home', 'API Key', 'Connected', 'Not connected', 'Open Mirror', 'Mirror Business Central tables', 'Claude Chat', 'Chat with Claude using Business Central MCP tools', 'IOBWS Proxy Tester', 'Test Icelandic bank proxy endpoints', 'Statement Sender', 'Email customer account statements as PDF', 'Employee Phonebook', 'Employee directory from Business Central'];
+const UI_STRINGS = [
+  'Home',
+  'API Key',
+  'Connected',
+  'Not connected',
+  'Navigate to',
+  'BC Portal',
+  'Companies, customers, orders',
+  'Cloud Events Explorer',
+  'Browse and send BC cloud events',
+  'Metadata Explorer',
+  'Fields and captions per entity',
+  'AI Sales Assistant',
+  'AI-powered sales order entry',
+  'Open Mirror',
+  'Mirror Business Central tables',
+  'Claude Chat',
+  'Chat with Claude using Business Central MCP tools',
+  'IOBWS Proxy Tester',
+  'Test Icelandic bank proxy endpoints',
+  'Statement Sender',
+  'Email customer account statements as PDF',
+  'Employee Phonebook',
+  'Employee directory from Business Central',
+  'Connection',
+  'Server configuration',
+  'Custom configuration',
+  'TENANT HOST',
+  'ENVIRONMENT',
+  'CLIENT ID',
+  'CLIENT SECRET',
+  'COMPANY',
+  'LANGUAGE',
+  'Connect',
+  'Connected as',
+];
 
 async function loadUiTranslations() {
   const settings = bcSettingsLoad();
@@ -305,22 +350,60 @@ async function loadUiTranslations() {
 
 function applyUiTranslations() {
   document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
+  
+  // Navigate to section title
+  const navTitle = document.getElementById('nav-section-title');
+  if (navTitle) navTitle.textContent = t('Navigate to');
+  
+  // BC Portal
+  const bcPortalTitle = document.getElementById('nav-bc-portal-title');
+  const bcPortalDesc = document.getElementById('nav-bc-portal-desc');
+  if (bcPortalTitle) bcPortalTitle.textContent = t('BC Portal');
+  if (bcPortalDesc) bcPortalDesc.textContent = t('Companies, customers, orders');
+  
+  // Cloud Events Explorer
+  const cloudEventsTitle = document.getElementById('nav-cloud-events-title');
+  const cloudEventsDesc = document.getElementById('nav-cloud-events-desc');
+  if (cloudEventsTitle) cloudEventsTitle.textContent = t('Cloud Events Explorer');
+  if (cloudEventsDesc) cloudEventsDesc.textContent = t('Browse and send BC cloud events');
+  
+  // Metadata Explorer
+  const metadataTitle = document.getElementById('nav-metadata-title');
+  const metadataDesc = document.getElementById('nav-metadata-desc');
+  if (metadataTitle) metadataTitle.textContent = t('Metadata Explorer');
+  if (metadataDesc) metadataDesc.textContent = t('Fields and captions per entity');
+  
+  // AI Sales Assistant
+  const salesTitle = document.getElementById('nav-sales-assistant-title');
+  const salesDesc = document.getElementById('nav-sales-assistant-desc');
+  if (salesTitle) salesTitle.textContent = t('AI Sales Assistant');
+  if (salesDesc) salesDesc.textContent = t('AI-powered sales order entry');
+  
+  // Open Mirror
   const title = document.getElementById('nav-open-mirror-title');
   const desc = document.getElementById('nav-open-mirror-desc');
-  const claudeTitle = document.getElementById('nav-claude-chat-title');
-  const claudeDesc = document.getElementById('nav-claude-chat-desc');
   if (title) title.textContent = t('Open Mirror');
   if (desc) desc.textContent = t('Mirror Business Central tables');
+  
+  // Claude Chat
+  const claudeTitle = document.getElementById('nav-claude-chat-title');
+  const claudeDesc = document.getElementById('nav-claude-chat-desc');
   if (claudeTitle) claudeTitle.textContent = t('Claude Chat');
   if (claudeDesc) claudeDesc.textContent = t('Chat with Claude using Business Central MCP tools');
+  
+  // IOBWS Proxy Tester
   const iobwsTitle = document.getElementById('nav-iobws-title');
   const iobwsDesc  = document.getElementById('nav-iobws-desc');
   if (iobwsTitle) iobwsTitle.textContent = t('IOBWS Proxy Tester');
   if (iobwsDesc)  iobwsDesc.textContent  = t('Test Icelandic bank proxy endpoints');
+  
+  // Statement Sender
   const stmtTitle = document.getElementById('nav-stmt-title');
   const stmtDesc  = document.getElementById('nav-stmt-desc');
   if (stmtTitle) stmtTitle.textContent = t('Statement Sender');
   if (stmtDesc)  stmtDesc.textContent  = t('Email customer account statements as PDF');
+  
+  // Employee Phonebook
   const phonebookTitle = document.getElementById('nav-phonebook-title');
   const phonebookDesc  = document.getElementById('nav-phonebook-desc');
   if (phonebookTitle) phonebookTitle.textContent = t('Employee Phonebook');
