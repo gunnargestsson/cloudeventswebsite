@@ -242,6 +242,51 @@ const UI_STRINGS = [
   '⚙ Connection','Tenant','Environment','Client ID','Client Secret',
   'Company','Language','Load','Clear','Load Tables',
   'Filter tables…',
+  'Metadata Explorer',
+  'Not connected',
+  'Select a table',
+  'Choose a table from the sidebar to explore its fields',
+  'Download All',
+  'This Table',
+  'Download Metadata',
+  'YAML',
+  'Markdown',
+  'JSON',
+  'Download',
+  'Cancel',
+  'Loading…',
+  'Loading fields…',
+  'No tables match',
+  'Per Co.',
+  'Global',
+  'tables loaded',
+  'tables',
+  'Select one to view its fields.',
+  'Retry',
+  'Fields',
+  'PK fields',
+  'FlowFields',
+  'Normal',
+  'Primary key',
+  'Read',
+  'Write',
+  'Per Company',
+  'Primary Key Fields',
+  'Name (AL)',
+  'JSON Key',
+  'Caption',
+  'Type',
+  'Len',
+  'Class',
+  'PK',
+  'Enum values',
+  'Enum captions',
+  '← Home',
+  'API Key',
+  'Go to the home page first to configure your connection.',
+  'Human-readable structured format. Easy to read and diff. Each table with all fields, types, enums.',
+  'Documentation-style output. Tables as headings, fields in tables. Great for pasting into wikis or AI prompts.',
+  'Machine-readable full structure. Best for programmatic processing.',
 ];
 
 function initSettings() {
@@ -265,6 +310,23 @@ function initSettings() {
     document.getElementById('settingsPanel').removeAttribute('open');
     document.getElementById('settingsStatus').textContent = `Connected: ${s.companyName || s.companyId}`;
   }
+}
+
+function applyMetadataTranslations() {
+  document.querySelector('.htitle').textContent = t('Metadata Explorer');
+  document.getElementById('st').textContent = t('Not connected');
+  document.getElementById('mtn').textContent = t('Select a table');
+  document.getElementById('mtd').textContent = t('Choose a table from the sidebar to explore its fields');
+  document.getElementById('dlAllBtn').innerHTML = '⬇ ' + t('Download All');
+  document.getElementById('dlTblBtn').innerHTML = '⬇ ' + t('This Table');
+  document.querySelector('.modal-title').textContent = t('Download Metadata');
+  const cancelBtn = document.querySelector('.modal-btn:not(.ok)');
+  if (cancelBtn) cancelBtn.textContent = t('Cancel');
+  document.getElementById('dlConfirmBtn').textContent = t('Download');
+  document.querySelectorAll('.hpill')[0].textContent = t('← Home');
+  document.querySelectorAll('.hpill')[2].textContent = t('API Key');
+  document.getElementById('tableSearch').placeholder = t('Filter tables…');
+  applyUiTranslations();
 }
 
 function onSettingInput() {
@@ -322,7 +384,7 @@ function onLcidSelect() {
   permissionsCache = {};
   // Let bcLoadTranslations dynamically fetch the default company GUID from server
   const companyId = null;
-  bcLoadTranslations(companyId, selectedLcid, UI_STRINGS).then(() => applyUiTranslations());
+  bcLoadTranslations(companyId, selectedLcid, UI_STRINGS).then(() => applyMetadataTranslations());
   if (allTables.length) loadTables();
 }
 
@@ -391,11 +453,11 @@ async function cePost(envelope){
 // ── LOAD TABLES ───────────────────────────────────────────────────────────────
 async function loadTables(){
   if(!bcSettingsReady()){
-    alert('Go to the home page first to configure your connection.'); return;
+    alert(t('Go to the home page first to configure your connection.')); return;
   }
   const btn = document.getElementById('loadBtn');
-  if(btn){ btn.disabled=true; btn.textContent='Loading…'; }
-  setStatus('ld','Loading…');
+  if(btn){ btn.disabled=true; btn.textContent=t('Loading…'); }
+  setStatus('ld',t('Loading…'));
   document.getElementById('sbTables').innerHTML=`<div class="sb-load"><span class="spinner"></span>Calling Help.Tables.Get…</div>`;
 
   try{
@@ -406,24 +468,24 @@ async function loadTables(){
     currentTable = null;
     currentFields = null;
     currentPermissions = null;
-    setStatus('ok',`${allTables.length} tables`);
+    setStatus('ok',`${allTables.length} ${t('tables')}`);
     document.getElementById('searchWrap').style.display='';
     document.getElementById('sbCount').style.display='';
     document.getElementById('dlAllBtn').disabled = false;
     document.getElementById('tableSearch').value='';
     filterTables('');
-    document.getElementById('mtn').textContent='Select a table';
-    document.getElementById('mtd').textContent=`${allTables.length} tables loaded — choose one from the sidebar`;
-    document.getElementById('mbody').innerHTML=`<div class="est"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg><div>${allTables.length} tables loaded.<br>Select one to view its fields.</div></div>`;
+    document.getElementById('mtn').textContent=t('Select a table');
+    document.getElementById('mtd').textContent=`${allTables.length} ${t('tables loaded')} — ${t('Choose a table from the sidebar to explore its fields')}`;
+    document.getElementById('mbody').innerHTML=`<div class="est"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg><div>${allTables.length} ${t('tables loaded')}.<br>${t('Select one to view its fields.')}</div></div>`;
     document.getElementById('statsBar').style.display='none';
     if(btn) btn.textContent='↺ Refresh';
     // Let bcLoadTranslations dynamically fetch the default company GUID from server
     const companyId = null;
-    bcLoadTranslations(companyId, selectedLcid, UI_STRINGS).then(() => applyUiTranslations());
+    bcLoadTranslations(companyId, selectedLcid, UI_STRINGS).then(() => applyMetadataTranslations());
   } catch(e){
-    setStatus('err','Error');
+    setStatus('err',t('Error'));
     document.getElementById('sbTables').innerHTML=`<div class="sb-empty"><span style="color:var(--red)">${esc(e.message)}</span></div>`;
-    if(btn) btn.textContent='Retry';
+    if(btn) btn.textContent=t('Retry');
   } finally{ if(btn) btn.disabled=false; }
 }
 
@@ -432,19 +494,19 @@ function filterTables(q){
   const lq = q.toLowerCase();
   filteredTables = q ? allTables.filter(t=>t.name.toLowerCase().includes(lq)||(t.id+'').includes(lq)) : allTables;
   const cnt = document.getElementById('sbCount');
-  cnt.textContent = q ? `${filteredTables.length} / ${allTables.length} tables` : `${allTables.length} tables`;
+  cnt.textContent = q ? `${filteredTables.length} / ${allTables.length} ${t('tables')}` : `${allTables.length} ${t('tables')}`;
   renderTableList();
 }
 
 function renderTableList(){
   const cont = document.getElementById('sbTables');
   if(!filteredTables.length){
-    cont.innerHTML=`<div class="sb-empty">No tables match</div>`; return;
+    cont.innerHTML=`<div class="sb-empty">${esc(t('No tables match'))}</div>`; return;
   }
   cont.innerHTML = filteredTables.map(t=>{
     const dpcHtml = t.dataPerCompany
-      ? `<span class="dpc-badge dpc-co">Per Co.</span>`
-      : `<span class="dpc-badge dpc-gl">Global</span>`;
+      ? `<span class="dpc-badge dpc-co">${esc(window.t('Per Co.'))}</span>`
+      : `<span class="dpc-badge dpc-gl">${esc(window.t('Global'))}</span>`;
     return `
     <button class="tbl-item${currentTable&&currentTable.id===t.id?' active':''}" onclick="selectTable(${t.id})" data-tid="${t.id}">
       <span class="tbl-name">${esc(t.name)}</span>
@@ -476,10 +538,10 @@ async function selectTable(tableId){
     return;
   }
 
-  document.getElementById('mbody').innerHTML=`<div class="est"><span class="spinner" style="width:20px;height:20px;border-width:2px"></span><div>Loading fields for <strong style="color:var(--accent)">${esc(currentTable.name)}</strong>…</div></div>`;
+  document.getElementById('mbody').innerHTML=`<div class="est"><span class="spinner" style="width:20px;height:20px;border-width:2px"></span><div>${t('Loading fields…')} <strong style="color:var(--accent)">${esc(currentTable.name)}</strong>…</div></div>`;
 
   try{
-    setStatus('ld','Loading fields…');
+    setStatus('ld',t('Loading fields…'));
     const [fieldsRes, permRes] = await Promise.all([
       cePost({
         specversion:'1.0', type:'Help.Fields.Get', source:'Metadata-Explorer v1.0', lcid:getLcid(),
@@ -498,10 +560,10 @@ async function selectTable(tableId){
       ? { readPermission: !!(p.read ?? p.readPermission), writePermission: !!(p.write ?? p.writePermission) }
       : null;
     permissionsCache[currentTable.name] = currentPermissions;
-    setStatus('ok',`${allTables.length} tables`);
+    setStatus('ok',`${allTables.length} ${t('tables')}`);
     renderFields();
   } catch(e){
-    setStatus('err','Error');
+    setStatus('err',t('Error'));
     document.getElementById('mbody').innerHTML=`<div class="est"><div style="color:var(--red)">${esc(e.message)}</div></div>`;
   }
 }
@@ -518,25 +580,25 @@ function renderFields(){
   const perm = currentPermissions;
   const permHtml = perm != null ? `
     <div class="stat-div"></div>
-    <div class="stat"><span class="k">Read</span><span class="v ${perm.readPermission?'ok':'no'}">${perm.readPermission?'✓':'✗'}</span></div>
-    <div class="stat"><span class="k">Write</span><span class="v ${perm.writePermission?'ok':'no'}">${perm.writePermission?'✓':'✗'}</span></div>` : '';
+    <div class="stat"><span class="k">${t('Read')}</span><span class="v ${perm.readPermission?'ok':'no'}">${perm.readPermission?'✓':'✗'}</span></div>
+    <div class="stat"><span class="k">${t('Write')}</span><span class="v ${perm.writePermission?'ok':'no'}">${perm.writePermission?'✓':'✗'}</span></div>` : '';
   const dpcHtml = currentTable != null ? `
     <div class="stat-div"></div>
-    <div class="stat"><span class="k">Data</span><span class="v ${currentTable.dataPerCompany?'ok':''}">${currentTable.dataPerCompany?'Per Company':'Global'}</span></div>` : '';
+    <div class="stat"><span class="k">Data</span><span class="v ${currentTable.dataPerCompany?'ok':''}">${currentTable.dataPerCompany?t('Per Company'):t('Global')}</span></div>` : '';
   statsBar.innerHTML=`
-    <div class="stat"><span class="k">Fields</span><span class="v hi">${fields.length}</span></div>
-    <div class="stat"><span class="k">PK fields</span><span class="v ok">${pkFields.length}</span></div>
-    <div class="stat"><span class="k">FlowFields</span><span class="v" style="color:var(--purple)">${flowFields.length}</span></div>
-    <div class="stat"><span class="k">Normal</span><span class="v">${fields.length-flowFields.length}</span></div>
-    ${pkFields.length?`<div class="stat"><span class="k">Primary key</span><span class="v ok">${pkFields.map(f=>esc(f.name)).join(', ')}</span></div>`:''}
+    <div class="stat"><span class="k">${t('Fields')}</span><span class="v hi">${fields.length}</span></div>
+    <div class="stat"><span class="k">${t('PK fields')}</span><span class="v ok">${pkFields.length}</span></div>
+    <div class="stat"><span class="k">${t('FlowFields')}</span><span class="v" style="color:var(--purple)">${flowFields.length}</span></div>
+    <div class="stat"><span class="k">${t('Normal')}</span><span class="v">${fields.length-flowFields.length}</span></div>
+    ${pkFields.length?`<div class="stat"><span class="k">${t('Primary key')}</span><span class="v ok">${pkFields.map(f=>esc(f.name)).join(', ')}</span></div>`:''}
     ${permHtml}${dpcHtml}
   `;
   if(perm != null){
     const captionPart = currentTable.caption&&currentTable.caption!==currentTable.name?` · ${esc(currentTable.caption)}`:'';
-    const readBadge  = `<span style="color:${perm.readPermission ?'var(--green)':'var(--red)'};font-weight:600">${perm.readPermission ?'✓':'✗'} Read</span>`;
-    const writeBadge = `<span style="color:${perm.writePermission?'var(--green)':'var(--red)'};font-weight:600">${perm.writePermission?'✓':'✗'} Write</span>`;
+    const readBadge  = `<span style="color:${perm.readPermission ?'var(--green)':'var(--red)'};font-weight:600">${perm.readPermission ?'✓':'✗'} ${t('Read')}</span>`;
+    const writeBadge = `<span style="color:${perm.writePermission?'var(--green)':'var(--red)'};font-weight:600">${perm.writePermission?'✓':'✗'} ${t('Write')}</span>`;
     const dpcBadge   = currentTable.dataPerCompany != null
-      ? ` &nbsp;·&nbsp; <span style="color:${currentTable.dataPerCompany?'var(--green)':'var(--text3)'}">${currentTable.dataPerCompany?'Per Company':'Global'}</span>`
+      ? ` &nbsp;·&nbsp; <span style="color:${currentTable.dataPerCompany?'var(--green)':'var(--text3)'}">${currentTable.dataPerCompany?t('Per Company'):t('Global')}</span>`
       : '';
     document.getElementById('mtd').innerHTML = `Table #${currentTable.id}${captionPart} &nbsp;·&nbsp; ${readBadge} &nbsp; ${writeBadge}${dpcBadge}`;
   }
@@ -547,13 +609,13 @@ function renderFields(){
 
   let html = '';
   if(pkSection.length){
-    html += `<div class="section-lbl">Primary Key Fields</div>${fieldsTable(pkSection)}`;
+    html += `<div class="section-lbl">${t('Primary Key Fields')}</div>${fieldsTable(pkSection)}`;
   }
   if(normalSection.length){
-    html += `<div class="section-lbl">Fields</div>${fieldsTable(normalSection)}`;
+    html += `<div class="section-lbl">${t('Fields')}</div>${fieldsTable(normalSection)}`;
   }
   if(flowSection.length){
-    html += `<div class="section-lbl">FlowFields</div>${fieldsTable(flowSection)}`;
+    html += `<div class="section-lbl">${t('FlowFields')}</div>${fieldsTable(flowSection)}`;
   }
   document.getElementById('mbody').innerHTML = html;
 }
@@ -581,8 +643,8 @@ function fieldsTable(fields){
   }).join('');
   return `<table class="ftable">
     <thead><tr>
-      <th class="td-num">#</th><th>Name (AL)</th><th>JSON Key</th><th>Caption</th><th>Type</th>
-      <th class="td-len">Len</th><th>Class</th><th class="td-pk">PK</th><th>Enum values</th><th>Enum captions</th>
+      <th class="td-num">#</th><th>${t('Name (AL)')}</th><th>${t('JSON Key')}</th><th>${t('Caption')}</th><th>${t('Type')}</th>
+      <th class="td-len">${t('Len')}</th><th>${t('Class')}</th><th class="td-pk">${t('PK')}</th><th>${t('Enum values')}</th><th>${t('Enum captions')}</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -617,20 +679,20 @@ async function startDownload(){
     }
 
     // Fetch fields for any table not yet cached
-    const missing = tables.filter(t=>!fieldsCache[t.name]);
+    const missing = tables.filter(tbl=>!fieldsCache[tbl.name]);
     if(missing.length){
-      progTxt.textContent=`Fetching fields for ${missing.length} tables…`;
+      progTxt.textContent=`${window.t('Loading fields…')} ${missing.length} ${window.t('tables')}…`;
       for(let i=0;i<missing.length;i++){
-        const t=missing[i];
-        progTxt.textContent=`Fetching fields (${i+1}/${missing.length}): ${t.name}…`;
+        const tbl=missing[i];
+      progTxt.textContent=`${window.t('Loading fields…')} (${i+1}/${missing.length}): ${tbl.name}…`;
         try{
           const res = await cePost({
             specversion:'1.0', type:'Help.Fields.Get', source:'Metadata-Explorer v1.0', lcid:getLcid(),
-            data: JSON.stringify({tableName:t.name}),
+            data: JSON.stringify({tableName: tbl.name}),
           });
-          fieldsCache[t.name]=res.result||[];
+          fieldsCache[tbl.name]=res.result||[];
         } catch(e){
-          fieldsCache[t.name]=[];
+          fieldsCache[tbl.name]=[];
         }
       }
     }
@@ -744,9 +806,12 @@ function buildJson(tables){
 }
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
-(function(){
+(async function(){
   if(!bcSettingsReady()){ location.href='index.html'; return; }
   selectedLcid = parseInt(bcSettingsLoad().lcid, 10) || 1033;
+  try { await bcLoadTranslations(null, selectedLcid, UI_STRINGS); } catch (e) { console.error('Translation load failed:', e); }
+  applyMetadataTranslations();
+  initSettings();
   loadTables();
 })();
 </script>

@@ -561,8 +561,11 @@ function populateLangDropdown() {
   }
 }
 
-function onLangChange() {
+async function onLangChange() {
   bcSettingsSave({ lcid: document.getElementById('s-lang').value });
+  await loadUiTranslations();
+  applyUiTranslations();
+  populateLangDropdown();
 }
 
 // ── CUSTOM CRED INPUT ─────────────────────────────────────────────────────────

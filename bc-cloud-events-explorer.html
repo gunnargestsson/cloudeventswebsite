@@ -238,6 +238,81 @@ textarea{resize:vertical;min-height:68px;line-height:1.5}
 </div>
 
 <script>
+// ── TRANSLATION ──────────────────────────────────────────────────────────────
+const UI_STRINGS = [
+  'Cloud Events Explorer',
+  'Not connected',
+  'Types',
+  'History',
+  'Select a message type',
+  'Connect to load message types dynamically from your BC environment',
+  'Compose',
+  'Preview JSON',
+  'Docs',
+  'Connect and select a message type to compose and send requests',
+  'Send',
+  'Reset',
+  'Response',
+  'Copy',
+  'No response yet',
+  'Send a message to see results',
+  'Get Status',
+  'Retry Task',
+  'Connecting…',
+  'Loading…',
+  'Failed',
+  'Retry',
+  'types ready',
+  'Connected',
+  'Error',
+  'Sending…',
+  'Waiting…',
+  'Copied!',
+  'Loading history…',
+  'No history',
+  'No tasks or queues found.',
+  'Send a request first, then refresh.',
+  'recent',
+  'filtered',
+  'Fetching result…',
+  'Envelope',
+  'Source',
+  'Endpoint',
+  'tasks (synchronous)',
+  'queues (asynchronous)',
+  'Subject',
+  'Data Parameters',
+  'Raw data JSON override',
+  '← Home',
+  'API Key',
+  '← Prev',
+  'Next →',
+  'Go to the home page first to configure your connection.',
+];
+
+async function loadPageTranslations() {
+  const settings = bcSettingsLoad();
+  const lcid = parseInt(settings.lcid || '1033', 10);
+  try { await bcLoadTranslations(null, lcid, UI_STRINGS); } catch (e) { console.error('Translation load failed:', e); }
+}
+
+function applyPageTranslations() {
+  document.querySelector('.htitle').textContent = t('Cloud Events Explorer');
+  document.getElementById('st').textContent = t('Not connected');
+  document.getElementById('sbTabTypes').textContent = t('Types');
+  document.getElementById('sbTabHistory').textContent = t('History');
+  document.getElementById('mtn').textContent = t('Select a message type');
+  document.getElementById('mtd').textContent = t('Connect to load message types dynamically from your BC environment');
+  document.getElementById('tab-compose').textContent = t('Compose');
+  document.getElementById('tab-preview').textContent = t('Preview JSON');
+  const docsTab = document.getElementById('tab-docs');
+  docsTab.firstChild.textContent = t('Docs') + ' ';
+  document.querySelector('.rh').firstChild.textContent = t('Response');
+  document.getElementById('copyBtn').textContent = t('Copy');
+  document.querySelectorAll('.spill')[0].textContent = t('← Home');
+  document.querySelectorAll('.spill')[2].textContent = t('API Key');
+}
+
 // ── STATE ────────────────────────────────────────────────────────────────────
 let allTypes = [];
 let currentType = null;
@@ -367,24 +442,24 @@ function setStatus(s,label){
 // ── CONNECT ───────────────────────────────────────────────────────────────────
 async function connectAndLoad(){
   if(!bcSettingsReady()){
-    alert('Go to the home page first to configure your connection.'); return;
+    alert(t('Go to the home page first to configure your connection.')); return;
   }
   const btn = document.getElementById('connBtn');
-  if(btn){ btn.disabled=true; btn.textContent='Connecting…'; }
+  if(btn){ btn.disabled=true; btn.textContent=t('Connecting…'); }
   historyLoaded=false;
-  setStatus('ld','Loading…');
+  setStatus('ld',t('Loading…'));
   document.getElementById('sbTypes').innerHTML=`<div class="sb-load"><span class="spinner"></span>Acquiring token, then calling Help.MessageTypes.Get…</div>`;
 
   try{
     const res = await cePost({specversion:'1.0',type:'Help.MessageTypes.Get',source:'BC-Explorer'});
     allTypes = res.result||[];
-    setStatus('ok',`${allTypes.length} types ready`);
+    setStatus('ok',`${allTypes.length} ${t('types ready')}`);
     buildSidebar();
     if(btn) btn.textContent='↺ Refresh';
   } catch(e){
-    setStatus('err','Failed');
+    setStatus('err',t('Failed'));
     document.getElementById('sbTypes').innerHTML=`<div class="warn-box" style="margin:12px;font-size:10px">${esc(e.message)}</div>`;
-    if(btn) btn.textContent='Retry';
+    if(btn) btn.textContent=t('Retry');
   } finally{ if(btn) btn.disabled=false; }
 }
 
@@ -558,18 +633,18 @@ function renderCompose(){
   if(!currentType) return;
   const {subjectLabel,dataFields}=inferFields(currentType);
   let html='';
-  html+=`<div class="slbl">Envelope</div>`;
+  html+=`<div class="slbl">${esc(t('Envelope'))}</div>`;
   html+=`<div class="frow">
-    <div class="fg"><label>Source</label><input id="f_source" value="BC-Explorer v1.0" placeholder="MyApp v1.0"></div>
+    <div class="fg"><label>${esc(t('Source'))}</label><input id="f_source" value="BC-Explorer v1.0" placeholder="MyApp v1.0"></div>
     <div class="fg"><label>LCID <span style="color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0;font-size:9px">(1033=EN, 1039=IS)</span></label><input id="f_lcid" type="number" placeholder="1033"></div>
   </div>`;
-  html+=`<div class="fg"><label>Endpoint</label><select id="f_endpoint"><option value="tasks">tasks (synchronous)</option><option value="queues">queues (asynchronous)</option></select></div>`;
+  html+=`<div class="fg"><label>${esc(t('Endpoint'))}</label><select id="f_endpoint"><option value="tasks">${esc(t('tasks (synchronous)'))}</option><option value="queues">${esc(t('queues (asynchronous)'))}</option></select></div>`;
 
-  html+=`<div class="slbl">Subject</div>`;
+  html+=`<div class="slbl">${esc(t('Subject'))}</div>`;
   html+=`<div class="fg"><label>${esc(subjectLabel)}</label><input id="f_subject" placeholder="${esc(subjectLabel)}"></div>`;
 
   if(dataFields.length){
-    html+=`<div class="slbl">Data Parameters</div>`;
+    html+=`<div class="slbl">${esc(t('Data Parameters'))}</div>`;
     let i=0;
     while(i<dataFields.length){
       const f=dataFields[i];
@@ -584,7 +659,7 @@ function renderCompose(){
   }
 
   // Raw JSON override (collapsed)
-  html+=`<div class="slbl raw-toggle" onclick="toggleRaw()"><span id="ri">▶</span>&nbsp;Raw data JSON override</div>`;
+  html+=`<div class="slbl raw-toggle" onclick="toggleRaw()"><span id="ri">▶</span>&nbsp;${esc(t('Raw data JSON override'))}</div>`;
   html+=`<div id="rawSec" style="display:none" class="fg">
     <label>data <span style="color:var(--text3);font-weight:400;text-transform:none;font-size:9px">— overrides fields above</span></label>
     <textarea id="f_raw" placeholder='{"tableName":"Customer","take":50}' style="min-height:80px;font-size:11px"></textarea>
@@ -675,16 +750,16 @@ async function sendReq(){
   const env=buildEnvelope();
   const btn=document.getElementById('sendBtn');
   btn.disabled=true;
-  btn.innerHTML=`<span class="spinner" style="border-top-color:var(--bg)"></span>&nbsp;Sending…`;
-  setStatus('ld','Sending…');
+  btn.innerHTML=`<span class="spinner" style="border-top-color:var(--bg)"></span>&nbsp;${esc(t('Sending…'))}`;
+  setStatus('ld',t('Sending…'));
   document.getElementById('rmeta').style.display='none';
-  document.getElementById('rbody').innerHTML=`<div class="re"><span class="spinner" style="width:20px;height:20px;border-width:2px"></span><div>Waiting…</div></div>`;
+  document.getElementById('rbody').innerHTML=`<div class="re"><span class="spinner" style="width:20px;height:20px;border-width:2px"></span><div>${esc(t('Waiting…'))}</div></div>`;
   document.getElementById('pbar').style.display='none';
   const t0=Date.now();
   try{
     const result = await cePost(env, endpoint);
     lastResp=result; currentPage=0;
-    setStatus('ok','Connected');
+    setStatus('ok',t('Connected'));
     if(endpoint==='queues'){
       lastQueueId=result.id||null;
       showQbar(result.status||'Created');
@@ -694,7 +769,7 @@ async function sendReq(){
     }
     showResp(200,Date.now()-t0,result);
   } catch(e){
-    setStatus('err','Error');
+    setStatus('err',t('Error'));
     showResp(0,Date.now()-t0,{status:'Error',error:e.message},true);
   } finally{
     btn.disabled=false;
@@ -754,7 +829,7 @@ async function queueAction(action){
   const t0=Date.now();
   try{
     const result = await ceQueueAction(lastQueueId, action);
-    setStatus('ok','Connected');
+    setStatus('ok',t('Connected'));
     const qs=result._queueStatus||'';
     if(action==='queue-retry'){
       showQbar(qs||'Created');
@@ -776,7 +851,7 @@ async function queueAction(action){
       document.getElementById('rbody').innerHTML=shl(JSON.stringify(result,null,2));
     }
   } catch(e){
-    setStatus('err','Error');
+    setStatus('err',t('Error'));
     showResp(0,Date.now()-t0,{status:'Error',error:e.message},true);
   } finally{
     document.querySelectorAll('.qact-btn').forEach(b=>b.disabled=false);
@@ -795,7 +870,7 @@ function switchSbTab(tab){
 
 async function loadHistory(){
   const cont = document.getElementById('sbHistory');
-  cont.innerHTML = `<div class="sb-load"><span class="spinner"></span>Loading history…</div>`;
+  cont.innerHTML = `<div class="sb-load"><span class="spinner"></span>${esc(t('Loading history…'))}</div>`;
   try{
     const res = await ceHistory();
     historyItems = res.items || [];
@@ -811,7 +886,7 @@ async function loadHistory(){
 function renderHistoryList(){
   const cont = document.getElementById('sbHistory');
   if(!historyItems.length){
-    cont.innerHTML = `<div class="hist-hdr">No history<button class="hist-hdr-btn" onclick="loadHistory()">↺ Refresh</button></div><div class="sb-empty">No tasks or queues found.<br>Send a request first, then refresh.</div>`;
+    cont.innerHTML = `<div class="hist-hdr">${esc(t('No history'))}<button class="hist-hdr-btn" onclick="loadHistory()">↺ Refresh</button></div><div class="sb-empty">${esc(t('No tasks or queues found.'))}<br>${esc(t('Send a request first, then refresh.'))}</div>`;
     return;
   }
 
@@ -825,7 +900,7 @@ function renderHistoryList(){
     ? historyItems.filter(i=>i.source===historySourceFilter)
     : historyItems;
 
-  let html = `<div class="hist-hdr">${filtered.length}${historySourceFilter?' filtered':' recent'}<button class="hist-hdr-btn" onclick="loadHistory()">↺ Refresh</button></div>`;
+  let html = `<div class="hist-hdr">${filtered.length}${historySourceFilter?' '+t('filtered'):' '+t('recent')}<button class="hist-hdr-btn" onclick="loadHistory()">↺ Refresh</button></div>`;
 
   // Source pills (only if >1 distinct source)
   if(sources.length > 1){
@@ -971,7 +1046,7 @@ async function openHistoryItem(idx){
 
   // Prepare response panel
   document.getElementById('rmeta').style.display='none';
-  document.getElementById('rbody').innerHTML=`<div class="re"><span class="spinner" style="width:20px;height:20px;border-width:2px"></span><div>Fetching result…</div></div>`;
+  document.getElementById('rbody').innerHTML=`<div class="re"><span class="spinner" style="width:20px;height:20px;border-width:2px"></span><div>${esc(t('Fetching result…'))}</div></div>`;
   document.getElementById('pbar').style.display='none';
   lastResp=null;
 
@@ -1023,8 +1098,8 @@ function copyResp(){
   const t=document.getElementById('rbody').innerText;
   navigator.clipboard.writeText(t).then(()=>{
     const b=document.getElementById('copyBtn');
-    b.textContent='Copied!'; b.classList.add('copied');
-    setTimeout(()=>{ b.textContent='Copy'; b.classList.remove('copied'); },1500);
+    b.textContent=t('Copied!'); b.classList.add('copied');
+    setTimeout(()=>{ b.textContent=t('Copy'); b.classList.remove('copied'); },1500);
   });
 }
 
@@ -1069,8 +1144,10 @@ document.addEventListener('keydown',e=>{
 });
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
-(function(){
+(async function(){
   if(!bcSettingsReady()){ location.href='index.html'; return; }
+  await loadPageTranslations();
+  applyPageTranslations();
   connectAndLoad();
 })();
 </script>
