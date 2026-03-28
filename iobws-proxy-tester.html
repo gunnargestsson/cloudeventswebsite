@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Origo BC Portal – IOBWS Proxy Tester</title>
-<script src="settings.js?v=3"></script>
+<script src="settings.js?v=4"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
 <style>
   :root {
@@ -996,8 +996,9 @@ function updateTopBar() {
 // ── TRANSLATIONS ──────────────────────────────────────────────────────────────
 async function loadUiTranslations() {
   const settings = bcSettingsLoad();
-  const companyId = settings.companyId || 'CRONUS IS';
   const lcid = parseInt(settings.lcid || '1033', 10);
+  // Always use server's default company for translations
+  const companyId = 'CRONUS IS';
   
   try {
     await bcLoadTranslations(companyId, lcid, UI_STRINGS);

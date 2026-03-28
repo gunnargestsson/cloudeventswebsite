@@ -135,7 +135,7 @@ select.ci{cursor:pointer;appearance:auto}
 /* SETTINGS PANEL */
 .settings-sum{display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--text2);font-weight:600;padding:12px 14px;border-bottom:1px solid var(--border);user-select:none}.settings-sum::-webkit-details-marker{display:none}details[open] .settings-sum{color:var(--accent);border-bottom-color:var(--border2)}.settings-body{padding:12px 14px;display:flex;flex-direction:column;gap:9px}
 </style>
-<script src="settings.js?v=3"></script>
+<script src="settings.js?v=4"></script>
 </head>
 <body>
 <header>
@@ -320,8 +320,8 @@ function onLcidSelect() {
   bcSettingsSave({ lcid: selectedLcid });
   fieldsCache = {};
   permissionsCache = {};
-  const s = bcSettingsLoad();
-  const companyId = s.companyId || 'CRONUS IS';
+  // Always use server's default company for translations
+  const companyId = 'CRONUS IS';
   bcLoadTranslations(companyId, selectedLcid, UI_STRINGS).then(() => applyUiTranslations());
   if (allTables.length) loadTables();
 }
@@ -417,8 +417,8 @@ async function loadTables(){
     document.getElementById('mbody').innerHTML=`<div class="est"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg><div>${allTables.length} tables loaded.<br>Select one to view its fields.</div></div>`;
     document.getElementById('statsBar').style.display='none';
     if(btn) btn.textContent='↺ Refresh';
-    const s = bcSettingsLoad();
-    const companyId = s.companyId || 'CRONUS IS';
+    // Always use server's default company for translations
+    const companyId = 'CRONUS IS';
     bcLoadTranslations(companyId, selectedLcid, UI_STRINGS).then(() => applyUiTranslations());
   } catch(e){
     setStatus('err','Error');
