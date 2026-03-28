@@ -135,7 +135,7 @@ select.ci{cursor:pointer;appearance:auto}
 /* SETTINGS PANEL */
 .settings-sum{display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--text2);font-weight:600;padding:12px 14px;border-bottom:1px solid var(--border);user-select:none}.settings-sum::-webkit-details-marker{display:none}details[open] .settings-sum{color:var(--accent);border-bottom-color:var(--border2)}.settings-body{padding:12px 14px;display:flex;flex-direction:column;gap:9px}
 </style>
-<script src="settings.js?v=2"></script>
+<script src="settings.js?v=3"></script>
 </head>
 <body>
 <header>
@@ -322,11 +322,7 @@ function onLcidSelect() {
   permissionsCache = {};
   const s = bcSettingsLoad();
   const companyId = s.companyId || 'CRONUS IS';
-  const headers = typeof bcSettingsTranslationHeaders === 'function' 
-    ? bcSettingsTranslationHeaders() 
-    : { 'x-bc-company': companyId };
-  console.log('[onLcidSelect] Using translation headers:', headers);
-  bcLoadTranslations(companyId, selectedLcid, UI_STRINGS, headers).then(() => applyUiTranslations());
+  bcLoadTranslations(companyId, selectedLcid, UI_STRINGS).then(() => applyUiTranslations());
   if (allTables.length) loadTables();
 }
 
@@ -423,11 +419,7 @@ async function loadTables(){
     if(btn) btn.textContent='↺ Refresh';
     const s = bcSettingsLoad();
     const companyId = s.companyId || 'CRONUS IS';
-    const headers = typeof bcSettingsTranslationHeaders === 'function' 
-      ? bcSettingsTranslationHeaders() 
-      : { 'x-bc-company': companyId };
-    console.log('[loadTables] Using translation headers:', headers);
-    bcLoadTranslations(companyId, selectedLcid, UI_STRINGS, headers).then(() => applyUiTranslations());
+    bcLoadTranslations(companyId, selectedLcid, UI_STRINGS).then(() => applyUiTranslations());
   } catch(e){
     setStatus('err','Error');
     document.getElementById('sbTables').innerHTML=`<div class="sb-empty"><span style="color:var(--red)">${esc(e.message)}</span></div>`;

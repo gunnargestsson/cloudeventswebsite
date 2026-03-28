@@ -151,11 +151,20 @@ function applyUiTranslations() {
   document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
 }
 
-async function bcLoadTranslations(companyId, lcid, uiStrings, headers) {
+/**
+ * Load UI translations from Business Central.
+ * ALWAYS uses server-mode headers (only x-bc-company) regardless of user's connection mode.
+ * Translations are infrastructure data that should never require custom credentials.
+ */
+async function bcLoadTranslations(companyId, lcid, uiStrings) {
   _uiTranslations = {};
   if (!lcid || lcid === 1033) return;  // English — no fetch needed
+  
+  // CRITICAL: Always use server-mode headers for translations (only company, no credentials)
+  const headers = { 'x-bc-company': companyId || 'CRONUS IS' };
+  
   try {
-    console.log(`[bcLoadTranslations] Fetching translations for lcid ${lcid}, ${uiStrings.length} strings`);
+    console.log(`[bcLoadTranslations] Fetching translations for lcid ${lcid}, ${uiStrings.length} strings using SERVER mode (company: ${companyId || 'CRONUS IS'})`);
     const res = await fetch('/api/explorer', {
       method: 'POST',
       headers: { ...headers, 'x-bc-endpoint': 'tasks', 'Content-Type': 'application/json' },

@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Origo BC Portal – Claude Chat</title>
-<script src="settings.js?v=2"></script>
+<script src="settings.js?v=3"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
 <style>
   :root {
@@ -373,13 +373,9 @@ async function loadTranslations() {
   const lcid = Number(settings.lcid) || 1033;
   
   try {
-    const headers = typeof bcSettingsTranslationHeaders === 'function' 
-      ? bcSettingsTranslationHeaders() 
-      : { 'x-bc-company': companyId };
-    console.log('[loadTranslations] Using headers:', headers);
-    await bcLoadTranslations(companyId, lcid, UI_STRINGS, headers);
+    await bcLoadTranslations(companyId, lcid, UI_STRINGS);
   } catch (err) {
-    console.warn('Failed to load translations:', err);
+    console.error('Failed to load translations:', err);
   }
   applyUiTranslations();
 }
