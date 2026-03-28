@@ -1318,11 +1318,11 @@ async function checkQueueStatus(conn, token, companyId, queueId) {
     // BC returns HTTP 500 with "status code '0'" when the task was cancelled
     // or never started. Treat as "deleted" so the frontend stops polling.
     if (err.message && err.message.includes("status code '0'")) {
-      return { status: "deleted", message: "Queue task was cancelled or never started (BC status 0)" };
+      return { status: "deleted", message: `Queue task was cancelled or never started (BC status 0) [queueId: ${queueId}]` };
     }
     // Any other BC error (404, 400, etc.) means the queue entry is gone or invalid.
     // Return "error" instead of throwing so the frontend can handle it gracefully.
-    return { status: "error", message: `BC queue check failed: ${(err.message || "").slice(0, 200)}` };
+    return { status: "error", message: `BC queue check failed [queueId: ${queueId}]: ${(err.message || "").slice(0, 200)}` };
   }
 
   // BC returns status as HTTP status codes:
@@ -1330,7 +1330,7 @@ async function checkQueueStatus(conn, token, companyId, queueId) {
   // 200 OK = completed (Updated)
   // 204 No Content = deleted or not found
   if (statusResponse.statusCode === 204) {
-    return { status: "deleted", message: "Queue entry deleted or not found" };
+    return { status: "deleted", message: `Queue entry deleted or not found [queueId: ${queueId}]` };
   }
 
   if (statusResponse.statusCode === 200) {
@@ -1343,14 +1343,14 @@ async function checkQueueStatus(conn, token, companyId, queueId) {
       
       // text/json or application/json = BC encountered an error during CSV generation
       if (dataContentType.includes("json")) {
-        return { status: "error", message: "Queue task completed with error (BC CSV generation failed)" };
+        return { status: "error", message: `Queue task completed with error (BC CSV generation failed) [queueId: ${queueId}]` };
       }
       
       // text/csv or empty = success
       return { status: "completed", message: "Queue task completed successfully" };
     } catch (err) {
       // If we can't read the record, treat as error
-      return { status: "error", message: `Failed to read queue result: ${err.message}` };
+      return { status: "error", message: `Failed to read queue result [queueId: ${queueId}]: ${err.message}` };
     }
   }
 
@@ -1724,8 +1724,10 @@ async function checkTransferStatus(conn, token, companyId, transferId, configId)
   if (!key || !state[key]) return { status: "not_found" };
 
   const t = state[key];
-  // Discard entries older than 30 minutes (stale)
-  if (new Date() - new Date(t.createdAt) > 30 * 60 * 1000) {
+  // Discard entries older than 60 minutes (stale)
+  const ageMs = new Date() - new Date(t.createdAt);
+  if (ageMs > 60 * 60 * 1000) {
+    console.log(`Transfer state stale — discarding entry for config ${key} (transferId: ${t.transferId}, age: ${Math.round(ageMs / 60000)}m, status: ${t.status})`);
     await clearTransferState(conn, token, companyId, key);
     return { status: "not_found" };
   }

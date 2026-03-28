@@ -580,6 +580,7 @@
   }
   .inline-banner.error { border-color: rgba(242,95,92,0.35); color: #ffb2b0; }
   .inline-banner.ok { border-color: rgba(39,192,138,0.35); color: #9fe7c8; }
+  .inline-banner.warn { border-color: rgba(255,190,11,0.35); color: var(--amber); }
   .hidden { display: none !important; }
   @media (max-width: 1024px) {
     .hero { grid-template-columns: 1fr; }
@@ -664,6 +665,8 @@
         </div>
       </div>
     </section>
+
+    <div id="chunked-export-banner" class="inline-banner warn hidden" style="margin: 0 0 18px 0;">⚠️ A chunked export is in progress. Keep this browser tab active — closing or sleeping will pause the export.</div>
 
     <section class="panel" id="connection-panel" style="margin-bottom: 18px;">
       <div class="section-title collapsible" id="conn-title">Mirror Destination</div>
@@ -942,6 +945,7 @@ const UI_STRINGS = [
   'more records to export',
   'continuation pending',
   'records',
+  'A chunked export is in progress. Keep this browser tab active — closing or sleeping will pause the export.',
 ];
 
 const CONFIG = {
@@ -1594,7 +1598,31 @@ async function saveTable() {
   refreshMetrics();
 }
 
+function updateChunkedExportBanner() {
+  const banner = document.getElementById('chunked-export-banner');
+  const hasChunked = state.tables.some(t => t.continueFromRecordId);
+  const isRunning = state.runningConfigs.size > 0;
+  const show = hasChunked || isRunning;
+  banner.classList.toggle('hidden', !show);
+  banner.textContent = show ? '⚠️ ' + t('A chunked export is in progress. Keep this browser tab active — closing or sleeping will pause the export.') : '';
+  manageWakeLock(show);
+}
+
+let _wakeLock = null;
+async function manageWakeLock(acquire) {
+  if (acquire && !_wakeLock && navigator.wakeLock) {
+    try {
+      _wakeLock = await navigator.wakeLock.request('screen');
+      _wakeLock.addEventListener('release', () => { _wakeLock = null; });
+    } catch { /* wake lock not supported or denied */ }
+  } else if (!acquire && _wakeLock) {
+    try { await _wakeLock.release(); } catch { /* already released */ }
+    _wakeLock = null;
+  }
+}
+
 function renderTables() {
+  updateChunkedExportBanner();
   const searchText = document.getElementById('search-input').value.toLowerCase();
   const container = document.getElementById('mirrors-container');
   
@@ -2605,6 +2633,7 @@ function stopScheduler(silent = false) {
   state.activeTableIds.clear();
   if (state.durationTicker) { clearInterval(state.durationTicker); state.durationTicker = null; }
   if (!silent) addLog(t('Scheduler stopped'), 'warn');
+  updateChunkedExportBanner();
 }
 
 // ── Browser wake detection ──────────────────────────────────────────────────
@@ -2641,6 +2670,9 @@ document.addEventListener('visibilitychange', () => {
 
   // Also check for pending queues from before the sleep
   resumePendingQueues().catch(e => addLog('Resume check failed: ' + e.message, 'warn'));
+
+  // Re-acquire wake lock (OS sleep releases it automatically)
+  updateChunkedExportBanner();
 });
 
 async function runActiveTables() {
