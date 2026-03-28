@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Origo BC Portal – My Pages</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
-<script src="settings.js?v=12"></script>
+<script src="settings.js?v=13"></script>
 <style>
   :root {
     --bg: #0a0d14;
@@ -362,6 +362,13 @@ const UI_STRINGS = [
   'Connected as',
   'Icelandic',
   'English',
+  'Danish',
+  'German',
+  'French',
+  'Spanish',
+  'Dutch',
+  'Swedish',
+  'Norwegian',
   'Loading, please wait...',
   'Fetching companies...',
   'Loading translations...',
@@ -545,9 +552,8 @@ async function onCompanyChange(saveNow = true) {
 // ── LANGUAGE ──────────────────────────────────────────────────────────────────
 function populateLangDropdown() {
   const sel = document.getElementById('s-lang');
-  if (sel.options.length > 1) return; // already populated
   sel.innerHTML = Object.entries(LCID_NAMES)
-    .map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
+    .map(([id, name]) => `<option value="${id}">${t(name)}</option>`).join('');
   const saved = localStorage.getItem('bc_portal_lcid');
   if (saved) {
     const opt = [...sel.options].find(o => o.value === saved);
