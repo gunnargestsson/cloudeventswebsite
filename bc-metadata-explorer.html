@@ -321,14 +321,18 @@ const UI_STRINGS = [
 
 function initSettings() {
   const s = bcSettingsLoad();
-  if (s.tenant)       document.getElementById('cfgTenant').value       = s.tenant;
-  if (s.env)          document.getElementById('cfgEnv').value          = s.env;
-  if (s.clientId)     document.getElementById('cfgClientId').value     = s.clientId;
-  if (s.clientSecret) document.getElementById('cfgClientSecret').value = s.clientSecret;
+  const cfgTenant = document.getElementById('cfgTenant');
+  const cfgEnv = document.getElementById('cfgEnv');
+  const cfgClientId = document.getElementById('cfgClientId');
+  const cfgClientSecret = document.getElementById('cfgClientSecret');
+  if (s.tenant && cfgTenant)       cfgTenant.value       = s.tenant;
+  if (s.env && cfgEnv)             cfgEnv.value           = s.env;
+  if (s.clientId && cfgClientId)   cfgClientId.value     = s.clientId;
+  if (s.clientSecret && cfgClientSecret) cfgClientSecret.value = s.clientSecret;
   if (s.lcid)         selectedLcid = parseInt(s.lcid, 10) || 1033;
   if (s.companyId && s.companyName) {
     const sel = document.getElementById('cfgCompany');
-    sel.innerHTML = `<option value="${s.companyId}">${s.companyName}</option>`;
+    if (sel) sel.innerHTML = `<option value="${s.companyId}">${s.companyName}</option>`;
   }
   const lcidSel = document.getElementById('cfgLcid');
   if (lcidSel && s.lcid) {
@@ -337,8 +341,10 @@ function initSettings() {
     lcidSel.value = s.lcid;
   }
   if (bcSettingsReady()) {
-    document.getElementById('settingsPanel').removeAttribute('open');
-    document.getElementById('settingsStatus').textContent = `Connected: ${s.companyName || s.companyId}`;
+    const panel = document.getElementById('settingsPanel');
+    if (panel) panel.removeAttribute('open');
+    const status = document.getElementById('settingsStatus');
+    if (status) status.textContent = `Connected: ${s.companyName || s.companyId}`;
   }
 }
 
