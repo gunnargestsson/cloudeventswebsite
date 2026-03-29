@@ -583,55 +583,323 @@ function switchTab(tab,btn){
 }
 
 // ── COMPOSE ───────────────────────────────────────────────────────────────────
-function inferFields(name){
-  const lc=name.toLowerCase();
-  let subjectLabel='Subject (optional)';
-  if(lc.includes('customer')) subjectLabel='Customer No.';
-  else if(lc.includes('item')) subjectLabel='Item No.';
-  else if(lc.includes('order')&&!lc.includes('statistics')) subjectLabel='Order No. or SystemId';
-  else if(lc.includes('order.statistics')) subjectLabel='Order No. or SystemId';
-  else if(lc.includes('invoice')||lc.includes('shipment')||lc.includes('creditmemo')||lc.includes('return')) subjectLabel='Document No. or SystemId';
-  else if(lc.includes('vendor')) subjectLabel='Vendor No.';
-  else if(lc.includes('permission')) subjectLabel='Table Name';
-  else if(lc.includes('table')&&lc.includes('help')) subjectLabel='Table Name (optional)';
 
-  const dataFields=[];
-  if(lc.includes('records.get')||lc.includes('recordids.get')){
-    dataFields.push({id:'d_tableName',label:'Table Name',ph:'Customer',hint:'BC table name',req:true});
-    if(lc.includes('records.get'))
-      dataFields.push({id:'d_fieldNumbers',label:'Field Numbers',ph:'1,2,5,7',hint:'Comma-sep. Required to calculate FlowFields.'});
-    dataFields.push({id:'d_tableView',label:'Table View Filter',ph:'WHERE(Blocked=CONST( ))',hint:'AL syntax — use field name (not jsonName)'});
-    dataFields.push({id:'d_skip',label:'Skip',ph:'0',type:'number'});
-    dataFields.push({id:'d_take',label:'Take',ph:'50',type:'number'});
-    dataFields.push({id:'d_startDateTime',label:'Modified After',ph:'2026-01-01T00:00:00Z'});
-    dataFields.push({id:'d_endDateTime',label:'Modified Before',ph:''});
-  } else if(lc.includes('records.set')){
-    dataFields.push({id:'d_tableName',label:'Table Name',ph:'Customer',hint:'Or set via subject'});
-    dataFields.push({id:'d_recordId',label:'SystemId (GUID)',ph:'7FE8C74C-0000-0000-0000-000000000000',hint:'Update by SystemId'});
-    dataFields.push({id:'d_primaryKey',label:'Primary Key JSON',ph:'{"No_":"10000"}',type:'textarea',hint:'Find-or-insert by PK'});
-    dataFields.push({id:'d_fields',label:'Fields to Set (JSON)',ph:'{"Address":"New Road 1","City":"Reykjavik"}',type:'textarea',req:true,hint:'All values as strings'});
-  } else if(lc.includes('saleshistory')){
-    dataFields.push({id:'d_fromDate',label:'From Date',ph:'2025-01-01',req:true,hint:'YYYY-MM-DD'});
-    dataFields.push({id:'d_toDate',label:'To Date',ph:'2025-12-31',hint:'Defaults to today'});
-  } else if(lc.includes('availability')){
-    dataFields.push({id:'d_requestedDeliveryDate',label:'Delivery Date',ph:'2026-04-01'});
-    dataFields.push({id:'d_variantCode',label:'Variant Code',ph:''});
-    dataFields.push({id:'d_locationFilter',label:'Location Filter',ph:'BLUE|RED',hint:'BC filter syntax'});
-  } else if(lc.includes('item.price')){
-    dataFields.push({id:'d_customerNo',label:'Customer No.',ph:'10000'});
-    dataFields.push({id:'d_quantity',label:'Quantity',ph:'10',type:'number'});
-    dataFields.push({id:'d_requestedDeliveryDate',label:'Delivery Date',ph:'2026-04-01'});
-    dataFields.push({id:'d_variantCode',label:'Variant Code',ph:''});
-  } else if(lc.includes('help.fields')){
-    dataFields.push({id:'d_tableName',label:'Table Name',ph:'Customer',req:true});
-    dataFields.push({id:'d_fieldNumbers',label:'Field Numbers',ph:'1,2,21,39'});
-  }
-  return {subjectLabel,dataFields};
+// Complete message-type → subject + data-field mapping.
+// Every entry: { subject:{label,ph,hint,req}, dataFields:[] }
+const MESSAGE_TYPE_FIELDS = {
+  // ── DATA OPERATIONS ──────────────────────────────────────────────────────
+  'Data.Records.Get': {
+    subject:{label:'Table Name',ph:'Customer',hint:'Table name or number — also accepted via data.tableName',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Customer',hint:'BC table name (e.g. Customer, Item)',req:true},
+      {id:'d_fieldNumbers',label:'Field Numbers',ph:'1,2,5,7',hint:'Comma-sep field numbers. Required to calculate FlowFields.'},
+      {id:'d_tableView',label:'Table View Filter',ph:'WHERE(Blocked=CONST( ))',hint:'AL syntax — use field name (not jsonName)'},
+      {id:'d_skip',label:'Skip',ph:'0',type:'number'},
+      {id:'d_take',label:'Take',ph:'50',type:'number'},
+      {id:'d_startDateTime',label:'Modified After (SystemModifiedAt)',ph:'2026-01-01T00:00:00Z',hint:'ISO 8601 — filter by SystemModifiedAt ≥'},
+      {id:'d_endDateTime',label:'Modified Before (SystemModifiedAt)',ph:'',hint:'ISO 8601 — filter by SystemModifiedAt ≤'},
+    ]
+  },
+  'Data.RecordIds.Get': {
+    subject:{label:'Table Name',ph:'Customer',hint:'Table name or number',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Customer',hint:'BC table name',req:true},
+      {id:'d_tableView',label:'Table View Filter',ph:'WHERE(Blocked=CONST( ))',hint:'AL syntax — use field name (not jsonName)'},
+      {id:'d_skip',label:'Skip',ph:'0',type:'number'},
+      {id:'d_take',label:'Take',ph:'50',type:'number'},
+      {id:'d_startDateTime',label:'Modified After',ph:'2026-01-01T00:00:00Z',hint:'ISO 8601 — defaults to all records if omitted'},
+      {id:'d_endDateTime',label:'Modified Before',ph:'',hint:'ISO 8601 — defaults to now if omitted'},
+    ]
+  },
+  'CSV.Records.Get': {
+    subject:{label:'Table Name',ph:'Customer',hint:'Table name or number',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Customer',hint:'BC table name',req:true},
+      {id:'d_fieldNumbers',label:'Field Numbers',ph:'1,2,5,7',hint:'Comma-sep. BLOB/Media fields always skipped.'},
+      {id:'d_tableView',label:'Table View Filter',ph:'WHERE(Blocked=CONST( ))',hint:'AL syntax'},
+      {id:'d_startDateTime',label:'Modified After',ph:'2026-01-01T00:00:00Z'},
+      {id:'d_endDateTime',label:'Modified Before',ph:''},
+      {id:'d_continueFromRecordId',label:'Continue From Record Id',ph:'',hint:'SystemId GUID to resume from (large exports)'},
+    ]
+  },
+  'Data.Totals.Get': {
+    subject:{label:'Table Name',ph:'Item Ledger Entry',hint:'Table name or number',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Item Ledger Entry',hint:'BC table name',req:true},
+      {id:'d_fieldNumbers',label:'SumIndex Field Numbers',ph:'12,14',hint:'Decimal SumIndexFields — required',req:true},
+      {id:'d_tableView',label:'Table View Filter',ph:'WHERE(Entry Type=CONST(Purchase))',hint:'AL syntax'},
+    ]
+  },
+  'Data.Records.Set': {
+    subject:{label:'Table Name',ph:'Customer',hint:'Table name — also accepted via data.tableName',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Customer',hint:'Or set via subject'},
+      {id:'d_recordId',label:'SystemId (GUID)',ph:'7FE8C74C-0000-0000-0000-000000000000',hint:'Update by SystemId'},
+      {id:'d_primaryKey',label:'Primary Key JSON',ph:'{"No_":"10000"}',type:'textarea',hint:'Find-or-insert by PK'},
+      {id:'d_fields',label:'Fields to Set (JSON)',ph:'{"Address":"New Road 1","City":"Reykjavik"}',type:'textarea',req:true,hint:'All field values as strings'},
+    ]
+  },
+  'Deleted.Records.Get': {
+    subject:{label:'Table Name',ph:'Customer',hint:'Table with delete log enabled',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Customer',hint:'Source table (required)',req:true},
+      {id:'d_fieldNumbers',label:'Field Numbers',ph:'1,2,5,7',hint:'Comma-sep. All stored fields if omitted.'},
+      {id:'d_startDateTime',label:'Deleted After',ph:'2026-01-01T00:00:00Z',hint:'Filter by Deleted At ≥'},
+      {id:'d_endDateTime',label:'Deleted Before',ph:'',hint:'Filter by Deleted At ≤ (defaults to now)'},
+      {id:'d_skip',label:'Skip',ph:'0',type:'number'},
+      {id:'d_take',label:'Take',ph:'100',type:'number'},
+    ]
+  },
+  'Deleted.RecordIds.Get': {
+    subject:{label:'Table Name',ph:'Customer',hint:'Source table',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Customer',hint:'Source table (required)',req:true},
+      {id:'d_startDateTime',label:'Deleted After',ph:'2026-03-01T00:00:00Z',hint:'Filter by Deleted At ≥'},
+      {id:'d_endDateTime',label:'Deleted Before',ph:'',hint:'Filter by Deleted At ≤ (defaults to now)'},
+      {id:'d_skip',label:'Skip',ph:'0',type:'number'},
+      {id:'d_take',label:'Take',ph:'100',type:'number'},
+    ]
+  },
+  'CSV.DeletedRecords.Get': {
+    subject:{label:'Table Name (optional)',ph:'Customer',hint:'Omit to get all tables',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Customer',hint:'Source table filter (optional — omit for all tables)'},
+      {id:'d_startDateTime',label:'Deleted After',ph:'2026-01-01T00:00:00Z',hint:'Filter by Deleted At ≥'},
+      {id:'d_endDateTime',label:'Deleted Before',ph:'',hint:'Filter by Deleted At ≤ (defaults to now)'},
+    ]
+  },
+
+  // ── METADATA OPERATIONS ──────────────────────────────────────────────────
+  'Help.Tables.Get': {
+    subject:{label:'Table Name (optional)',ph:'Customer',hint:'Single table lookup. Omit to list all tables.',req:false},
+    dataFields:[
+      {id:'d_tableNumber',label:'Table Number',ph:'18',hint:'Numeric table ID (alternative to subject/tableName)',type:'number'},
+      {id:'d_tableName',label:'Table Name',ph:'Customer',hint:'Alternative to subject — table name as string'},
+    ]
+  },
+  'Help.Fields.Get': {
+    subject:{label:'Table Name',ph:'Customer',hint:'Table to inspect',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Customer',hint:'BC table name',req:true},
+      {id:'d_fieldNumbers',label:'Field Numbers',ph:'1,2,21,39',hint:'Comma-sep. Omit for all fields.'},
+    ]
+  },
+  'Help.MessageTypes.Get': {
+    subject:{label:'Subject (optional)',ph:'',hint:'No subject needed for this type',req:false},
+    dataFields:[]
+  },
+  'Help.Implementation.Get': {
+    subject:{label:'Message Type Name',ph:'Data.Records.Get',hint:'The message type to get docs for',req:true},
+    dataFields:[]
+  },
+  'Help.Permissions.Get': {
+    subject:{label:'Table Name',ph:'Customer',hint:'Check read/write permissions for this table',req:true},
+    dataFields:[]
+  },
+  'Help.NextLineNo.Get': {
+    subject:{label:'Table Name',ph:'Sales Line',hint:'Table where last PK field is Integer',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Sales Line',hint:'Table name (e.g. Sales Line, Gen. Journal Line)',req:true},
+      {id:'d_primaryKey',label:'Parent Primary Key JSON',ph:'{"DocumentType":"Order","DocumentNo":"S-ORD-001"}',type:'textarea',hint:'PK fields excluding the last Integer field',req:true},
+      {id:'d_recordId',label:'SystemId (alternative)',ph:'',hint:'Find parent by SystemId instead of PK'},
+      {id:'d_increment',label:'Increment',ph:'10000',type:'number',hint:'Line number increment (default 10000)'},
+    ]
+  },
+  'Help.TableRelations.Get': {
+    subject:{label:'Table Name',ph:'Customer',hint:'Table containing the field',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Customer',hint:'Target table',req:true},
+      {id:'d_fieldName',label:'Field Name',ph:'Country/Region Code',hint:'BC field name (use name, not jsonName)'},
+      {id:'d_fieldNo',label:'Field Number',ph:'35',type:'number',hint:'Alternative: numeric field ID'},
+    ]
+  },
+  'Field.Translation.Get': {
+    subject:{label:'Table Name',ph:'Item',hint:'Target table for translation lookup',req:true},
+    dataFields:[
+      {id:'d_systemId',label:'SystemId',ph:'12345678-1234-1234-1234-123456789012',hint:'Record SystemId (GUID)',req:true},
+      {id:'d_fieldId',label:'Field Number',ph:'3',type:'number',hint:'Target field number',req:true},
+      {id:'d_lcid',label:'Language LCID',ph:'1030',type:'number',hint:'Windows Language ID (e.g. 1030=Danish)',req:true},
+    ]
+  },
+  'Field.Translation.Set': {
+    subject:{label:'Table Name',ph:'Item',hint:'Target table',req:true},
+    dataFields:[
+      {id:'d_systemId',label:'SystemId',ph:'12345678-1234-1234-1234-123456789012',hint:'Record SystemId (GUID)',req:true},
+      {id:'d_fieldId',label:'Field Number',ph:'3',type:'number',hint:'Target field number',req:true},
+      {id:'d_lcid',label:'Language LCID',ph:'1036',type:'number',hint:'Windows Language ID',req:true},
+      {id:'d_value',label:'Translation Text',ph:'Description en français',hint:'Max 2048 chars. Blank = delete.'},
+    ]
+  },
+  'Field.Translations.Get': {
+    subject:{label:'Table Name',ph:'Item',hint:'Target table',req:true},
+    dataFields:[
+      {id:'d_systemId',label:'SystemId',ph:'12345678-1234-1234-1234-123456789012',hint:'Record SystemId (GUID)',req:true},
+      {id:'d_fieldId',label:'Field Number (optional)',ph:'3',type:'number',hint:'Specific field (omit for all fields)'},
+      {id:'d_lcid',label:'Language LCID (optional)',ph:'',type:'number',hint:'Filter by language (omit for all languages)'},
+    ]
+  },
+
+  // ── CUSTOMER OPERATIONS ──────────────────────────────────────────────────
+  'Customer.CreditLimit.Get': {
+    subject:{label:'Customer No.',ph:'10000',hint:'Customer number',req:true},
+    dataFields:[]
+  },
+  'Customer.SalesHistory.Get': {
+    subject:{label:'Customer No.',ph:'10000',hint:'Customer number (or provide customerNo in data)',req:true},
+    dataFields:[
+      {id:'d_fromDate',label:'From Date',ph:'2025-01-01',req:true,hint:'YYYY-MM-DD'},
+      {id:'d_toDate',label:'To Date',ph:'2025-12-31',hint:'Defaults to today if omitted'},
+    ]
+  },
+  'Customer.Statement.Pdf': {
+    subject:{label:'Customer No. or SystemId',ph:'10000',hint:'Customer number or SystemId GUID',req:true},
+    dataFields:[
+      {id:'d_startDate',label:'Start Date',ph:'2026-01-01',hint:'YYYY-MM-DD — defaults to today − 30 days'},
+      {id:'d_endDate',label:'End Date',ph:'2026-03-20',hint:'YYYY-MM-DD — defaults to today'},
+    ]
+  },
+
+  // ── ITEM OPERATIONS ──────────────────────────────────────────────────────
+  'Item.Availability.Get': {
+    subject:{label:'Item No.',ph:'1000',hint:'Item number',req:true},
+    dataFields:[
+      {id:'d_requestedDeliveryDate',label:'Delivery Date',ph:'2026-04-01',hint:'YYYY-MM-DD'},
+      {id:'d_variantCode',label:'Variant Code',ph:'RED'},
+      {id:'d_locationFilter',label:'Location Filter',ph:'BLUE|RED',hint:'BC filter syntax'},
+    ]
+  },
+  'Item.Price.Get': {
+    subject:{label:'Item No.',ph:'1000',hint:'Item number',req:true},
+    dataFields:[
+      {id:'d_customerNo',label:'Customer No.',ph:'10000',hint:'Customer-specific pricing'},
+      {id:'d_quantity',label:'Quantity',ph:'10',type:'number',hint:'For quantity-based pricing tiers'},
+      {id:'d_requestedDeliveryDate',label:'Delivery Date',ph:'2026-04-01'},
+      {id:'d_variantCode',label:'Variant Code',ph:'RED'},
+    ]
+  },
+
+  // ── SALES OPERATIONS ─────────────────────────────────────────────────────
+  'Sales.Order.Post': {
+    subject:{label:'Order No. or SystemId',ph:'SO-001',hint:'Sales order number or SystemId GUID',req:true},
+    dataFields:[
+      {id:'d_orderNo',label:'Order No. (alternative)',ph:'SO-001',hint:'Alternative to subject'},
+    ]
+  },
+  'Sales.Order.Release': {
+    subject:{label:'Order No. or SystemId',ph:'SO-001',hint:'Sales order number or SystemId GUID',req:true},
+    dataFields:[
+      {id:'d_orderNo',label:'Order No. (alternative)',ph:'SO-001',hint:'Alternative to subject'},
+    ]
+  },
+  'Sales.Order.Reopen': {
+    subject:{label:'Order No. or SystemId',ph:'SO-001',hint:'Sales order number or SystemId GUID',req:true},
+    dataFields:[
+      {id:'d_orderNo',label:'Order No. (alternative)',ph:'SO-001',hint:'Alternative to subject'},
+    ]
+  },
+  'Sales.Order.Statistics': {
+    subject:{label:'Order No. or SystemId',ph:'SO-001',hint:'Sales order number or SystemId GUID',req:true},
+    dataFields:[
+      {id:'d_orderNo',label:'Order No. (alternative)',ph:'SO-001',hint:'Alternative to subject'},
+    ]
+  },
+  'Sales.SalesInvoice.Pdf': {
+    subject:{label:'Posted Invoice No. or SystemId',ph:'INV-001',hint:'Posted sales invoice number or SystemId GUID',req:true},
+    dataFields:[]
+  },
+  'Sales.SalesShipment.Pdf': {
+    subject:{label:'Shipment No. or SystemId',ph:'SHP-001',hint:'Posted shipment number or SystemId GUID',req:true},
+    dataFields:[]
+  },
+  'Sales.SalesCreditMemo.Pdf': {
+    subject:{label:'Credit Memo No. or SystemId',ph:'CM-001',hint:'Posted credit memo number or SystemId GUID',req:true},
+    dataFields:[]
+  },
+  'Sales.ReturnReceipt.Pdf': {
+    subject:{label:'Return Receipt No. or SystemId',ph:'RR-001',hint:'Posted return receipt number or SystemId GUID',req:true},
+    dataFields:[]
+  },
+
+  // ── PURCHASE OPERATIONS ──────────────────────────────────────────────────
+  'Purchase.Order.Release': {
+    subject:{label:'Order No. or SystemId',ph:'PO-001',hint:'Purchase order number or SystemId GUID',req:true},
+    dataFields:[
+      {id:'d_orderNo',label:'Order No. (alternative)',ph:'PO-001',hint:'Alternative to subject'},
+    ]
+  },
+  'Purchase.Order.Reopen': {
+    subject:{label:'Order No. or SystemId',ph:'PO-001',hint:'Purchase order number or SystemId GUID',req:true},
+    dataFields:[
+      {id:'d_orderNo',label:'Order No. (alternative)',ph:'PO-001',hint:'Alternative to subject'},
+    ]
+  },
+  'Purchase.Order.Statistics': {
+    subject:{label:'Order No. or SystemId',ph:'PO-001',hint:'Purchase order number or SystemId GUID',req:true},
+    dataFields:[
+      {id:'d_orderNo',label:'Order No. (alternative)',ph:'PO-001',hint:'Alternative to subject'},
+    ]
+  },
+  'Purchase.Order.Post': {
+    subject:{label:'Order No. or SystemId',ph:'PO-001',hint:'Purchase order number or SystemId GUID',req:true},
+    dataFields:[
+      {id:'d_orderNo',label:'Order No. (alternative)',ph:'PO-001',hint:'Alternative to subject'},
+    ]
+  },
+
+  // ── FINANCE OPERATIONS ───────────────────────────────────────────────────
+  'Finance.GeneralJournal.Check': {
+    subject:{label:'Template|Batch or SystemId',ph:'GENERAL|DEFAULT',hint:'Pipe-separated TEMPLATE|BATCH or SystemId GUID',req:true},
+    dataFields:[
+      {id:'d_templateName',label:'Template Name (alternative)',ph:'GENERAL',hint:'Alternative to subject'},
+      {id:'d_batchName',label:'Batch Name (alternative)',ph:'DEFAULT',hint:'Alternative to subject'},
+    ]
+  },
+  'Finance.GeneralJournal.Post': {
+    subject:{label:'Template|Batch or SystemId',ph:'GENERAL|BATCH001',hint:'Pipe-separated TEMPLATE|BATCH or SystemId GUID',req:true},
+    dataFields:[
+      {id:'d_templateName',label:'Template Name (alternative)',ph:'GENERAL',hint:'Alternative to subject'},
+      {id:'d_batchName',label:'Batch Name (alternative)',ph:'BATCH001',hint:'Alternative to subject'},
+    ]
+  },
+};
+
+function inferFields(name){
+  // Exact match first
+  const exact = MESSAGE_TYPE_FIELDS[name];
+  if(exact) return {
+    subjectLabel: exact.subject.label,
+    subjectPlaceholder: exact.subject.ph || exact.subject.label,
+    subjectHint: exact.subject.hint || '',
+    subjectRequired: exact.subject.req || false,
+    dataFields: exact.dataFields || [],
+  };
+
+  // Fuzzy fallback for unknown/custom message types
+  const lc = name.toLowerCase();
+  let subjectLabel = 'Subject';
+  let subjectPlaceholder = '';
+  let subjectHint = 'Optional subject value for this message type';
+  let subjectRequired = false;
+
+  if(lc.includes('customer')) { subjectLabel='Customer No.'; subjectPlaceholder='10000'; subjectRequired=true; }
+  else if(lc.includes('item')) { subjectLabel='Item No.'; subjectPlaceholder='1000'; subjectRequired=true; }
+  else if(lc.includes('order')) { subjectLabel='Order No. or SystemId'; subjectPlaceholder='ORD-001'; subjectRequired=true; }
+  else if(lc.includes('invoice')||lc.includes('shipment')||lc.includes('creditmemo')||lc.includes('return')) { subjectLabel='Document No. or SystemId'; subjectPlaceholder='DOC-001'; subjectRequired=true; }
+  else if(lc.includes('vendor')) { subjectLabel='Vendor No.'; subjectPlaceholder='10000'; subjectRequired=true; }
+  else if(lc.includes('table')||lc.includes('record')||lc.includes('field')) { subjectLabel='Table Name'; subjectPlaceholder='Customer'; }
+  else if(lc.includes('journal')) { subjectLabel='Template|Batch or SystemId'; subjectPlaceholder='GENERAL|DEFAULT'; subjectRequired=true; }
+
+  return {subjectLabel, subjectPlaceholder, subjectHint, subjectRequired, dataFields:[]};
 }
 
 function renderCompose(){
   if(!currentType) return;
-  const {subjectLabel,dataFields}=inferFields(currentType);
+  const inf=inferFields(currentType);
+  const subjectLabel=inf.subjectLabel;
+  const subjectPh=inf.subjectPlaceholder||subjectLabel;
+  const subjectHint=inf.subjectHint||'';
+  const subjectReq=inf.subjectRequired;
+  const dataFields=inf.dataFields;
   let html='';
   html+=`<div class="slbl">${esc(t('Envelope'))}</div>`;
   html+=`<div class="frow">
@@ -641,7 +909,7 @@ function renderCompose(){
   html+=`<div class="fg"><label>${esc(t('Endpoint'))}</label><select id="f_endpoint"><option value="tasks">${esc(t('tasks (synchronous)'))}</option><option value="queues">${esc(t('queues (asynchronous)'))}</option></select></div>`;
 
   html+=`<div class="slbl">${esc(t('Subject'))}</div>`;
-  html+=`<div class="fg"><label>${esc(subjectLabel)}</label><input id="f_subject" placeholder="${esc(subjectLabel)}"></div>`;
+  html+=`<div class="fg"><label>${esc(subjectLabel)}${subjectReq?'<span class="req">*</span>':''}</label><input id="f_subject" placeholder="${esc(subjectPh)}">${subjectHint?`<span class="hint">${esc(subjectHint)}</span>`:''}</div>`;
 
   if(dataFields.length){
     html+=`<div class="slbl">${esc(t('Data Parameters'))}</div>`;
@@ -700,19 +968,26 @@ function buildEnvelope(){
   if(lcidV) env.lcid=parseInt(lcidV);
   if(subjectV) env.subject=subjectV;
 
+  // continueFromRecordId is a top-level CE attribute, not inside data
+  const contId=document.getElementById('d_continueFromRecordId')?.value?.trim();
+  if(contId) env.continueFromRecordId=contId;
+
   // Raw override
   const rawV=document.getElementById('f_raw')?.value?.trim();
   if(rawV){ try{ JSON.parse(rawV); env.data=rawV; return env; } catch(e){} }
 
   // d_* fields
   const data={};
+  const INT_FIELDS = new Set(['skip','take','quantity','fieldNo','fieldId','increment','tableNumber','lcid']);
+  const SKIP_FIELDS = new Set(['continueFromRecordId']); // handled above at envelope level
   document.querySelectorAll('[id^="d_"]').forEach(el=>{
     const k=el.id.slice(2); const v=el.value?.trim();
-    if(!v) return;
+    if(!v || SKIP_FIELDS.has(k)) return;
     if(k==='fieldNumbers'){ const ns=v.split(',').map(s=>parseInt(s.trim())).filter(n=>!isNaN(n)); if(ns.length) data.fieldNumbers=ns; }
-    else if(k==='skip'||k==='take'||k==='quantity') data[k]=parseFloat(v);
+    else if(INT_FIELDS.has(k)) { const n=parseFloat(v); if(!isNaN(n)) data[k]=n; }
     else if(k==='fields'||k==='primaryKey'){ try{data[k]=JSON.parse(v);}catch(e){} }
     else if(k==='recordId') data.id=v;
+    else if(k==='systemId') data.systemId=v;
     else data[k]=v;
   });
   if(Object.keys(data).length) env.data=JSON.stringify(data);
@@ -953,12 +1228,26 @@ function populateComposeForms(dataJson){
   set('d_endDateTime',   data.endDateTime);
   set('d_fromDate',      data.fromDate);
   set('d_toDate',        data.toDate);
+  set('d_startDate',     data.startDate);
+  set('d_endDate',       data.endDate);
   set('d_variantCode',   data.variantCode);
   set('d_locationFilter',data.locationFilter);
   set('d_customerNo',    data.customerNo);
   set('d_quantity',      data.quantity);
   set('d_requestedDeliveryDate', data.requestedDeliveryDate);
   set('d_recordId',   data.id);   // buildEnvelope maps d_recordId → data.id
+  set('d_systemId',   data.systemId);
+  set('d_fieldId',    data.fieldId);
+  set('d_fieldNo',    data.fieldNo);
+  set('d_fieldName',  data.fieldName);
+  set('d_lcid',       data.lcid);
+  set('d_value',      data.value);
+  set('d_templateName', data.templateName);
+  set('d_batchName',  data.batchName);
+  set('d_orderNo',    data.orderNo);
+  set('d_tableNumber', data.tableNumber);
+  set('d_increment',  data.increment);
+  set('d_continueFromRecordId', data.continueFromRecordId);
   if(data.fieldNumbers) set('d_fieldNumbers',
     Array.isArray(data.fieldNumbers) ? data.fieldNumbers.join(',') : data.fieldNumbers);
   if(data.fields)     set('d_fields',
