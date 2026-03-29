@@ -106,9 +106,27 @@ select.ci{cursor:pointer;appearance:auto}
 .ftable .td-caption{color:var(--text2);width:160px;font-size:10.5px}
 .ftable .td-json{color:var(--accent);width:180px;font-size:10.5px}
 .ftable .td-type{width:90px}.ftable .td-len{width:48px;text-align:right;color:var(--text3)}
-.ftable .td-class{width:72px}.ftable .td-pk{width:28px;text-align:center}
+.ftable .td-class{width:72px}.ftable .td-pk{width:28px;text-align:center}.ftable .td-rel{width:36px;text-align:center}
 .td-class .fc-flow{color:var(--purple);font-size:9.5px}.td-class .fc-norm{color:var(--text3);font-size:9.5px}
 .pk-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--orange)}
+.rel-link{color:var(--accent);cursor:pointer;font-size:10px;text-decoration:none;border-bottom:1px dashed var(--accent2);padding-bottom:1px;transition:color .15s}.rel-link:hover{color:#00eeff}
+
+/* RELATION PANEL */
+.rel-panel{background:var(--bg2);border:1px solid var(--border2);margin:0 20px 16px;padding:16px;display:none;animation:fadeIn .2s ease}
+.rel-panel.open{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.rel-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.rel-title{font-family:'Syne',sans-serif;font-size:14px;font-weight:700;color:#fff}
+.rel-title .rel-field{color:var(--accent)}
+.rel-close{background:none;border:1px solid var(--border2);color:var(--text2);font-family:inherit;font-size:10px;cursor:pointer;padding:4px 10px;transition:all .15s}.rel-close:hover{border-color:var(--accent2);color:var(--accent)}
+.rel-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px}
+.rel-table th{padding:6px 12px;text-align:left;font-size:8.5px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border);background:var(--bg3);white-space:nowrap}
+.rel-table td{padding:5px 12px;border-bottom:1px solid rgba(30,45,61,.5);color:var(--text2);font-size:10.5px}
+.rel-table tr:hover td{background:var(--bg3)}
+.rel-target{color:var(--green);font-weight:600;cursor:pointer}.rel-target:hover{text-decoration:underline}
+.rel-cond{color:var(--orange);font-size:10px}
+.rel-unconditional{color:var(--text3);font-style:italic;font-size:10px}
+.rel-loading{padding:16px;text-align:center;color:var(--text3);font-size:11px;display:flex;align-items:center;justify-content:center;gap:8px}
 .enum-wrap{display:flex;flex-wrap:wrap;gap:3px;max-width:260px}
 .enum-tag{font-size:8.5px;padding:1px 5px;background:var(--bg3);border:1px solid var(--border2);color:var(--text3)}
 .enum-caption-tag{color:var(--text2);border-color:var(--border)}
@@ -234,6 +252,7 @@ let permissionsCache = {}; // tableName → {readPermission, writePermission}
 let currentPermissions = null;
 let downloadScope = 'all';
 let selectedLcid = 1033;
+let relationsCache = {}; // "tableName::fieldId" → relations array
 
 const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',1036:'French',1034:'Spanish',1043:'Dutch',1053:'Swedish',1044:'Norwegian'};
 
@@ -281,6 +300,17 @@ const UI_STRINGS = [
   'PK',
   'Enum values',
   'Enum captions',
+  'Rel',
+  'Relations',
+  'Loading relations…',
+  'Close',
+  'Target Table',
+  'Target Field',
+  'Condition',
+  'Value',
+  'Unconditional',
+  'No relations found for this field.',
+  'relations',
   '← Home',
   'API Key',
   'Go to the home page first to configure your connection.',
@@ -382,6 +412,7 @@ function onLcidSelect() {
   bcSettingsSave({ lcid: selectedLcid });
   fieldsCache = {};
   permissionsCache = {};
+  relationsCache = {};
   // Let bcLoadTranslations dynamically fetch the default company GUID from server
   const companyId = null;
   bcLoadTranslations(companyId, selectedLcid, UI_STRINGS).then(() => applyMetadataTranslations());
@@ -465,6 +496,7 @@ async function loadTables(){
     allTables = (res.result||[]).sort((a,b)=>a.name.localeCompare(b.name));
     fieldsCache = {};
     permissionsCache = {};
+    relationsCache = {};
     currentTable = null;
     currentFields = null;
     currentPermissions = null;
@@ -574,6 +606,10 @@ function renderFields(){
   const fields = currentFields;
   const pkFields = fields.filter(f=>f.isPartOfPrimaryKey);
   const flowFields = fields.filter(f=>f.class==='FlowField');
+  const relFields = fields.filter(f=>f.hasTableRelation);
+
+  // Close any open relation panel when switching tables
+  closeRelPanel();
 
   const statsBar = document.getElementById('statsBar');
   statsBar.style.display='flex';
@@ -590,6 +626,7 @@ function renderFields(){
     <div class="stat"><span class="k">${t('PK fields')}</span><span class="v ok">${pkFields.length}</span></div>
     <div class="stat"><span class="k">${t('FlowFields')}</span><span class="v" style="color:var(--purple)">${flowFields.length}</span></div>
     <div class="stat"><span class="k">${t('Normal')}</span><span class="v">${fields.length-flowFields.length}</span></div>
+    <div class="stat"><span class="k">${t('Relations')}</span><span class="v" style="color:var(--accent)">${relFields.length}</span></div>
     ${pkFields.length?`<div class="stat"><span class="k">${t('Primary key')}</span><span class="v ok">${pkFields.map(f=>esc(f.name)).join(', ')}</span></div>`:''}
     ${permHtml}${dpcHtml}
   `;
@@ -628,6 +665,9 @@ function fieldsTable(fields){
     const enumCaptionHtml = f.enum&&f.enum.length
       ? `<div class="enum-wrap">${f.enum.map(e=>`<span class="enum-tag enum-caption-tag">${esc(e.caption||e.value||'·')}</span>`).join('')}</div>`
       : '';
+    const relHtml = f.hasTableRelation
+      ? `<span class="rel-link" onclick="showRelations(this)" data-table="${esc(currentTable.name)}" data-fid="${f.id}" data-fname="${esc(f.name)}" title="View table relations">🔗</span>`
+      : '';
     return `<tr>
       <td class="td-num">${f.id}</td>
       <td class="td-name">${esc(f.name)}</td>
@@ -637,6 +677,7 @@ function fieldsTable(fields){
       <td class="td-len">${f.len!=null?f.len:''}</td>
       <td class="td-class"><span class="${f.class==='FlowField'?'fc-flow':'fc-norm'}">${esc(f.class||'Normal')}</span></td>
       <td class="td-pk">${f.isPartOfPrimaryKey?'<span class="pk-dot" title="Primary key"></span>':''}</td>
+      <td class="td-rel">${relHtml}</td>
       <td>${enumHtml}</td>
       <td>${enumCaptionHtml}</td>
     </tr>`;
@@ -644,10 +685,98 @@ function fieldsTable(fields){
   return `<table class="ftable">
     <thead><tr>
       <th class="td-num">#</th><th>${t('Name (AL)')}</th><th>${t('JSON Key')}</th><th>${t('Caption')}</th><th>${t('Type')}</th>
-      <th class="td-len">${t('Len')}</th><th>${t('Class')}</th><th class="td-pk">${t('PK')}</th><th>${t('Enum values')}</th><th>${t('Enum captions')}</th>
+      <th class="td-len">${t('Len')}</th><th>${t('Class')}</th><th class="td-pk">${t('PK')}</th><th class="td-rel">${t('Rel')}</th><th>${t('Enum values')}</th><th>${t('Enum captions')}</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
+}
+
+// ── TABLE RELATIONS ───────────────────────────────────────────────────────────
+async function showRelations(el) {
+  const tableName = el.dataset.table;
+  const fieldId = parseInt(el.dataset.fid, 10);
+  const fieldName = el.dataset.fname;
+  const cacheKey = `${tableName}::${fieldId}`;
+  const panelId = 'relPanel';
+
+  // Remove any existing panel
+  const existing = document.getElementById(panelId);
+  if (existing) {
+    // Toggle off if clicking same field
+    if (existing.dataset.cacheKey === cacheKey && existing.classList.contains('open')) {
+      existing.remove();
+      return;
+    }
+    existing.remove();
+  }
+
+  // Insert panel after the stats bar
+  const statsBar = document.getElementById('statsBar');
+  const panel = document.createElement('div');
+  panel.id = panelId;
+  panel.className = 'rel-panel open';
+  panel.dataset.cacheKey = cacheKey;
+  panel.innerHTML = `<div class="rel-loading"><span class="spinner"></span>${t('Loading relations…')}</div>`;
+  statsBar.parentNode.insertBefore(panel, statsBar.nextSibling);
+
+  // Use cache or fetch
+  if (relationsCache[cacheKey]) {
+    renderRelationsPanel(panel, tableName, fieldId, fieldName, relationsCache[cacheKey]);
+    return;
+  }
+
+  try {
+    const res = await cePost({
+      specversion: '1.0',
+      type: 'Help.TableRelations.Get',
+      source: 'Metadata-Explorer v1.0',
+      data: JSON.stringify({ tableName, fieldId }),
+    });
+    const relations = res.relations || [];
+    relationsCache[cacheKey] = relations;
+    renderRelationsPanel(panel, tableName, fieldId, fieldName, relations);
+  } catch (e) {
+    panel.innerHTML = `<div class="rel-header"><span class="rel-title">${t('Relations')}: <span class="rel-field">${esc(fieldName)}</span></span><button class="rel-close" onclick="closeRelPanel()">${t('Close')}</button></div><div style="color:var(--red);font-size:11px">${esc(e.message)}</div>`;
+  }
+}
+
+function renderRelationsPanel(panel, tableName, fieldId, fieldName, relations) {
+  if (!relations.length) {
+    panel.innerHTML = `<div class="rel-header"><span class="rel-title">${t('Relations')}: <span class="rel-field">${esc(fieldName)}</span> (#${fieldId})</span><button class="rel-close" onclick="closeRelPanel()">${t('Close')}</button></div><div style="color:var(--text3);font-size:11px;padding:8px 0">${t('No relations found for this field.')}</div>`;
+    return;
+  }
+  const rows = relations.map(r => {
+    const condHtml = r.conditionType
+      ? `<span class="rel-cond">${esc(r.conditionType)}</span> ${esc(r.conditionFieldName || '')}`
+      : `<span class="rel-unconditional">${t('Unconditional')}</span>`;
+    const valHtml = r.conditionValue != null && r.conditionType
+      ? `<code style="color:var(--text);font-size:10px">${esc(r.conditionValue)}</code>`
+      : '';
+    const targetClick = allTables.find(t => t.id === r.relatedTableId)
+      ? `onclick="selectTable(${r.relatedTableId})" style="cursor:pointer"`
+      : '';
+    return `<tr>
+      <td><span class="rel-target" ${targetClick}>${esc(r.relatedTableName)}</span> <span style="color:var(--text3);font-size:9px">#${r.relatedTableId}</span></td>
+      <td>${esc(r.relatedFieldName)} <span style="color:var(--text3);font-size:9px">${r.relatedFieldNo ? '#' + r.relatedFieldNo : ''}</span></td>
+      <td>${condHtml}</td>
+      <td>${valHtml}</td>
+    </tr>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div class="rel-header">
+      <span class="rel-title">${t('Relations')}: <span class="rel-field">${esc(fieldName)}</span> (#${fieldId}) &mdash; ${relations.length} ${t('relations')}</span>
+      <button class="rel-close" onclick="closeRelPanel()">${t('Close')}</button>
+    </div>
+    <table class="rel-table">
+      <thead><tr><th>${t('Target Table')}</th><th>${t('Target Field')}</th><th>${t('Condition')}</th><th>${t('Value')}</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function closeRelPanel() {
+  const p = document.getElementById('relPanel');
+  if (p) p.remove();
 }
 
 // ── DOWNLOAD MODAL ────────────────────────────────────────────────────────────
@@ -743,6 +872,7 @@ function buildYaml(tables){
       if(f.len!=null) lines.push(`        len: ${f.len}`);
       lines.push(`        class: ${f.class||'Normal'}`);
       lines.push(`        primaryKey: ${!!f.isPartOfPrimaryKey}`);
+      if(f.hasTableRelation) lines.push(`        hasTableRelation: true`);
       if(f.enum&&f.enum.length){
         lines.push(`        enum:`);
         for(const e of f.enum){
@@ -776,12 +906,12 @@ function buildMarkdown(tables){
     lines.push(`**Fields:** ${fields.length}`);
     lines.push('');
     if(fields.length){
-      lines.push('| # | Name (AL) | JSON Key | Type | Len | Class | PK | Enum values |');
-      lines.push('|---|-----------|----------|------|-----|-------|----|-------------|');
+      lines.push('| # | Name (AL) | JSON Key | Type | Len | Class | PK | Rel | Enum values |');
+      lines.push('|---|-----------|----------|------|-----|-------|----|-----|-------------|');
       for(const f of fields){
         const enumStr = f.enum&&f.enum.length ? f.enum.map(e=>e.value||'·').join(', ') : '';
         const jsonKey = (f.jsonName||f.name)!==f.name ? `\`${f.jsonName||f.name}\`` : '';
-        lines.push(`| ${f.id} | ${f.name} | ${jsonKey} | ${f.type||''} | ${f.len!=null?f.len:''} | ${f.class||'Normal'} | ${f.isPartOfPrimaryKey?'✓':''} | ${enumStr} |`);
+        lines.push(`| ${f.id} | ${f.name} | ${jsonKey} | ${f.type||''} | ${f.len!=null?f.len:''} | ${f.class||'Normal'} | ${f.isPartOfPrimaryKey?'✓':''} | ${f.hasTableRelation?'🔗':''} | ${enumStr} |`);
       }
     }
     lines.push('');

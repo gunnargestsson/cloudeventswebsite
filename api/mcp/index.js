@@ -11,7 +11,8 @@
  * Tools exposed:
  *   list_tables        — Help.Tables.Get  — all tables (filter / paging supported)
  *   get_table_info     — Help.Tables.Get  — details for one table (by name or number)
- *   get_table_fields   — Help.Fields.Get + Help.Permissions.Get — fields for one table (json or markdown)
+ *   get_table_fields   — Help.Fields.Get + Help.Permissions.Get — fields for one table (json or markdown), includes hasTableRelation indicator
+ *   get_table_relations — Help.TableRelations.Get — foreign-key / conditional relations for a specific field in a table
  *   list_companies     — /api/v2.0/companies — all companies in the BC environment
  *   list_message_types — Help.MessageTypes.Get — all Cloud Event message types
  *   get_message_type_help — Help.Implementation.Get — full implementation guide (markdown) for one message type
@@ -481,13 +482,41 @@ async function toolGetTableFields({ table, lcid = 1033, format = "json", company
 
   if (format === "markdown") {
     const md = toMarkdownTable(
-      ["#", "Name", "JSON Key", "Caption", "Type", "Len", "Class", "PK"],
-      fields.map(f => [f.number, f.name, f.jsonName, f.caption, f.type, f.length || "", f.class || "", f.isPartOfPrimaryKey ? "✓" : ""]),
+      ["#", "Name", "JSON Key", "Caption", "Type", "Len", "Class", "PK", "Rel"],
+      fields.map(f => [f.id, f.name, f.jsonName, f.caption, f.type, f.len || "", f.class || "", f.isPartOfPrimaryKey ? "✓" : "", f.hasTableRelation ? "✓" : ""]),
     );
     return { company: company.name, table: String(table), permissions, fieldCount: fields.length, markdown: md };
   }
 
   return { company: company.name, table: String(table), permissions, fieldCount: fields.length, fields };
+}
+
+async function toolGetTableRelations({ table, fieldId, fieldName, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required (table name or number)");
+  validateTableName(table);
+  if (fieldId == null && !fieldName) throw new Error("Either 'fieldId' or 'fieldName' is required");
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = { tableName: String(table) };
+  if (fieldId != null) data.fieldId = Number(fieldId);
+  else                 data.fieldName = String(fieldName);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Help.TableRelations.Get",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(data),
+  });
+
+  return {
+    company:       company.name,
+    tableId:       result.tableId,
+    tableName:     result.tableName,
+    relationCount: result.relationCount || (result.relations || []).length,
+    relations:     result.relations || [],
+  };
 }
 
 async function toolListCompanies({ tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
@@ -3132,13 +3161,26 @@ const TOOLS = [
   },
   {
     name:        "get_table_fields",
-    description: "Gets all fields for a Business Central table — field names, JSON keys, captions, data types, lengths, class, primary key membership, enum values, and read/write permissions.",
+    description: "Gets all fields for a Business Central table — field names, JSON keys, captions, data types, lengths, class, primary key membership, enum values, table relation indicators (hasTableRelation), and read/write permissions. Use get_table_relations to explore a specific field's foreign-key relations.",
     inputSchema: {
       type:       "object",
       properties: {
         table:  { type: "string",  description: "Table name (e.g. 'Customer') or table number as string (e.g. '18')." },
         lcid:   { type: "integer", description: "Language LCID for captions (default 1033 = English)." },
         format: { type: "string",  enum: ["json", "markdown"], description: "Output format: 'json' (default) or 'markdown' for LLM-friendly table output." },
+      },
+      required: ["table"],
+    },
+  },
+  {
+    name:        "get_table_relations",
+    description: "Returns all foreign-key relationships for a specific field in a Business Central table, including conditional relation branches that resolve to different target tables depending on a field value. Uses Help.TableRelations.Get.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:     { type: "string",  description: "Table name (e.g. 'Sales Line') or table number as string (e.g. '37')." },
+        fieldId:   { type: "integer", description: "Field number (e.g. 6 for 'No.' on Sales Line). Provide fieldId or fieldName." },
+        fieldName: { type: "string",  description: "Field name (e.g. 'No.'). Used only if fieldId is not provided." },
       },
       required: ["table"],
     },
@@ -4041,6 +4083,7 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "list_tables":        content = await toolListTables(args);        break;
           case "get_table_info":     content = await toolGetTableInfo(args);      break;
           case "get_table_fields":   content = await toolGetTableFields(args);    break;
+          case "get_table_relations": content = await toolGetTableRelations(args);  break;
           case "list_companies":        content = await toolListCompanies(args);              break;
           case "list_message_types":    content = await toolListMessageTypes(args);       break;
           case "get_message_type_help": content = await toolGetMessageTypeHelp(args);     break;
