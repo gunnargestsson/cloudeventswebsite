@@ -295,7 +295,7 @@
 
 <script>
 // ── Constants ─────────────────────────────────────────────────────────────────
-const EMPLOYEE_LIST_FIELDS  = [2, 3, 4, 5920, 6, 7, 18, 65, 10, 19, 1100];
+const EMPLOYEE_LIST_FIELDS  = [2, 3, 4, 5920, 6, 7, 18, 65, 10, 1100];
 const DIMENSION_VALUE_FIELDS = [1, 2, 3, 10];
 const PAGE_SIZE = 50;
 const VIEW_KEY  = 'bc_portal_employee_view';
@@ -434,9 +434,44 @@ async function loadEmployees(skip = 0) {
     filteredEmployees = allEmployees.slice();
     renderEmployees();
     renderPagination();
+    loadEmployeeImages('SORTING(First Name,Last Name,Middle Name) ORDER(Ascending) WHERE(Status=CONST(Active))', skip, PAGE_SIZE);
   } catch (e) {
     showError(e.message);
   }
+}
+
+// ── Progressive image loading ─────────────────────────────────────────────
+// Media fields (Image) are excluded by the Cloud Events API when fieldNumbers
+// is specified (BC uses SetLoadFields which doesn't support Media).  Fetch
+// images in a second pass without fieldNumbers so CalcFields runs.
+async function loadEmployeeImages(tableView, skip, take) {
+  if (allEmployees.length === 0) return;
+  try {
+    const res = await cePost(selectedCompany.id, {
+      specversion: '1.0',
+      type:        'Data.Records.Get',
+      source:      'BC Portal',
+      subject:     'Employee',
+      data: JSON.stringify({ tableName: 'Employee', tableView, skip, take }),
+    });
+    const imageMap = {};
+    for (const rec of (res.result || [])) {
+      const img = (rec.fields || {}).Image;
+      const id  = rec.id || (rec.primaryKey || {}).No_;
+      if (id && img && img.Value) imageMap[id] = 'data:image/jpeg;base64,' + img.Value;
+    }
+    let updated = false;
+    for (const emp of allEmployees) {
+      if (imageMap[emp.id] && !emp.photoUrl) {
+        emp.photoUrl = imageMap[emp.id];
+        updated = true;
+      }
+    }
+    if (updated) {
+      filteredEmployees = allEmployees.slice();
+      renderEmployees();
+    }
+  } catch (e) { /* non-fatal — placeholders remain */ }
 }
 
 function mapEmployee(rec) {
@@ -549,6 +584,7 @@ async function serverSearch(query) {
     renderEmployees();
     // Hide pagination during search
     document.getElementById('pagination-wrap').innerHTML = '';
+    loadEmployeeImages(`SORTING(First Name,Last Name,Middle Name) ORDER(Ascending) WHERE(System Id=FILTER(${idFilter}))`, 0, ids.length);
   } catch (e) {
     if (seq === _searchSeq) showError(e.message);
   }
