@@ -2733,7 +2733,13 @@ async function toolPrepareForPullRequest({ projectPath, standardsRepo, claudeDir
 
 const BC_DEV_STANDARDS_REPO = "https://github.com/OrigoSoftwareSolutions/bc-dev-standards.git";
 const GITHUB_API_HOST        = "api.github.com";
-const WIN_SHELL              = process.platform === "win32" ? "powershell.exe" : "/bin/bash";
+// Use /bin/sh (POSIX-standard, always present) instead of /bin/bash (not available in Azure Functions runtime)
+const WIN_SHELL              = process.platform === "win32" ? "powershell.exe" : "/bin/sh";
+
+// Returns true when a path looks like a Windows absolute path (e.g. C:\Users\...)
+function isWindowsPath(p) {
+  return /^[A-Za-z]:[\\\/]/.test(String(p || ""));
+}
 
 function execGit(command, cwd) {
   // Always use PowerShell on Windows for consistency
@@ -2993,6 +2999,17 @@ async function toolUpdateBcStandards({ standardsRepo, claudeDir } = {}) {
   if (!standardsRepo) throw new Error("Parameter 'standardsRepo' is required (local path to bc-dev-standards repo)");
   if (!claudeDir)     throw new Error("Parameter 'claudeDir' is required (local path to .claude directory)");
 
+  // Guard: Windows paths passed to a non-Windows server means the server is running remotely
+  // and cannot access the developer's local file system.
+  if (process.platform !== "win32" && (isWindowsPath(standardsRepo) || isWindowsPath(claudeDir))) {
+    throw new Error(
+      "update_bc_standards requires the MCP server to run locally on Windows. " +
+      "The paths provided are Windows paths but this server is running on Linux. " +
+      "Run the MCP server locally (node api/mcp/index.js) or update the standards manually: " +
+      "cd %USERPROFILE%\\bc-dev-standards && git pull"
+    );
+  }
+
   const beforeSha = execGit("git rev-parse HEAD", standardsRepo);
   execGit("git pull --ff-only", standardsRepo);
   const afterSha  = execGit("git rev-parse HEAD", standardsRepo);
@@ -3025,6 +3042,16 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
 
   if (!repoPath)   throw new Error("Cannot determine standardsRepo path. Provide 'standardsRepo' parameter or set USERPROFILE env var.");
   if (!claudePath) throw new Error("Cannot determine claudeDir path. Provide 'claudeDir' parameter or set USERPROFILE env var.");
+
+  // Guard: Windows paths passed to a non-Windows server means the server is running remotely
+  // and cannot access the developer's local file system.
+  if (process.platform !== "win32" && (isWindowsPath(repoPath) || isWindowsPath(claudePath))) {
+    throw new Error(
+      "setup_origo_bc_environment requires the MCP server to run locally on Windows. " +
+      "The paths provided are Windows paths but this server is running on Linux. " +
+      "Run the MCP server locally (node api/mcp/index.js) to use this tool."
+    );
+  }
 
   const steps = [];
 
