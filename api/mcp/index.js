@@ -17,7 +17,7 @@
  *   list_message_types — Help.MessageTypes.Get — all Cloud Event message types
  *   get_message_type_help — Help.Implementation.Get — full implementation guide (markdown) for one message type
  *   get_records        — Data.Records.Get — records from any table with filter/paging/date range
- *   set_records        — Data.Records.Set — create / modify / delete / upsert records in any table
+ *   set_records        — Data.Records.Set — create / modify / delete / upsert records in any table (pre-flight: write permission + ChangeLog Write Guard check per field; force never used)
  *   search_customers   — Data.Records.Get — customer lookup by name or number
  *   search_items       — Data.Records.Get — item lookup by description or number
  *   search_records     — Data.Records.Get — generic search across any readable table by a code field and/or a name/description field
@@ -652,6 +652,103 @@ async function toolGetRecords({ table, filter, fields, startDateTime, endDateTim
   return ret;
 }
 
+// ── ChangeLog Write Guard pre-flight check ────────────────────────────────────
+// Enforces the BC ChangeLog Write Guard before any Data.Records.Set call.
+// Steps:
+//   1. Check the first field to discover whether the write guard is active.
+//   2. If guard is OFF  → return immediately (all writes allowed).
+//   3. If guard is ON   → fetch full field metadata so jsonName can be resolved
+//                         to a stable fieldNo, then check every unique field in
+//                         parallel using fieldNo (avoids name-normalization edge
+//                         cases with special characters).
+//   4. If any field is not covered → throw a descriptive error.
+// The force parameter is never used — the MCP server intentionally has no
+// mechanism to bypass the write guard.
+
+async function checkWriteGuard(table, fieldJsonNames, conn, companyId) {
+  if (!fieldJsonNames.length) return; // nothing to check (delete mode)
+
+  // --- Step 1: probe the first field to read the write guard flag -----------
+  let firstResult;
+  try {
+    firstResult = await bcTask(conn, companyId, {
+      specversion: "1.0",
+      type:        "ChangeLog.Field.Enabled",
+      source:      "BC Metadata MCP v1.0",
+      data:        JSON.stringify({ tableName: String(table), fieldName: fieldJsonNames[0] }),
+    });
+  } catch (_) {
+    // Table not found or field unresolvable — skip guard check; BC will
+    // enforce its own guards when the actual write is attempted.
+    return;
+  }
+
+  if (!firstResult.changelogWriteGuardEnabled) return; // guard is OFF — all clear
+
+  // --- Step 2: guard is ON — resolve jsonName → fieldNo via Help.Fields.Get --
+  let fieldMeta;
+  try {
+    fieldMeta = await bcTask(conn, companyId, {
+      specversion: "1.0",
+      type:        "Help.Fields.Get",
+      source:      "BC Metadata MCP v1.0",
+      data:        JSON.stringify({ tableName: String(table) }),
+      lcid:        1033,
+    });
+  } catch (_) {
+    throw new Error(
+      `Write blocked by ChangeLog Write Guard on table '${table}': ` +
+      `unable to verify field coverage because field metadata could not be retrieved. ` +
+      `Contact your BC administrator or use 'changelog_field_enabled' to investigate.`
+    );
+  }
+
+  const allFields = fieldMeta.result || fieldMeta.value || fieldMeta.fields || (Array.isArray(fieldMeta) ? fieldMeta : []);
+
+  // Build jsonName → fieldNo map (also add exact name match as fallback)
+  const jsonNameToNo = {};
+  for (const f of allFields) {
+    if (f.jsonName) jsonNameToNo[f.jsonName] = f.id;
+    if (f.name && !jsonNameToNo[f.name]) jsonNameToNo[f.name] = f.id;
+  }
+
+  // --- Step 3: check every unique field in parallel using fieldNo -----------
+  const checks = await Promise.all(
+    fieldJsonNames.map(async (fn) => {
+      const fieldNo = jsonNameToNo[fn];
+      if (!fieldNo) {
+        // jsonName could not be mapped to a known field → treat as uncovered
+        return { fieldJsonName: fn, fieldNo: null, fieldCovered: false, fieldName: fn };
+      }
+      try {
+        const res = await bcTask(conn, companyId, {
+          specversion: "1.0",
+          type:        "ChangeLog.Field.Enabled",
+          source:      "BC Metadata MCP v1.0",
+          data:        JSON.stringify({ tableName: String(table), fieldNo }),
+        });
+        return { fieldJsonName: fn, fieldNo, fieldCovered: res.fieldCovered, fieldName: res.fieldName || fn };
+      } catch (_) {
+        return { fieldJsonName: fn, fieldNo, fieldCovered: false, fieldName: fn };
+      }
+    })
+  );
+
+  const uncovered = checks.filter(c => !c.fieldCovered);
+  if (uncovered.length > 0) {
+    const details = uncovered
+      .map(c => c.fieldName !== c.fieldJsonName ? `${c.fieldJsonName} (${c.fieldName})` : c.fieldJsonName)
+      .join(", ");
+    throw new Error(
+      `Write blocked by ChangeLog Write Guard: field(s) [${details}] on table '${table}' ` +
+      `are not covered by Change Log modification tracking. ` +
+      `When the write guard is active, every field written via Data.Records.Set must be covered. ` +
+      `Use 'changelog_field_enabled' to check coverage, or ask your BC administrator to add the ` +
+      `field(s) to Change Log Setup.`
+    );
+  }
+}
+
 async function toolSetRecords({ table, data, mode = "upsert", companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
   if (!table) throw new Error("Parameter 'table' is required");
   if (!Array.isArray(data) || !data.length) throw new Error("Parameter 'data' must be a non-empty array");
@@ -670,6 +767,33 @@ async function toolSetRecords({ table, data, mode = "upsert", companyId, tenantI
 
   const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
   const company = await getCompany(companyId, conn);
+
+  // --- Write permission check -----------------------------------------------
+  const permsResult = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "Help.Permissions.Get",
+    source:      "BC Metadata MCP v1.0",
+    subject:     String(table),
+  }).catch(() => null);
+
+  if (permsResult) {
+    const rawPerms = permsResult.permissions || permsResult;
+    const canWrite = !!(rawPerms.write ?? rawPerms.writePermission);
+    if (!canWrite) {
+      throw new Error(
+        `Write permission denied: the current user does not have write access to table '${table}'. ` +
+        `Use 'get_table_fields' to verify permissions before writing.`
+      );
+    }
+  }
+
+  // --- ChangeLog Write Guard check ------------------------------------------
+  // Collect every unique field jsonName being written across all records.
+  // Delete mode has no field values to check.
+  if (mode !== "delete") {
+    const fieldJsonNames = [...new Set(data.flatMap(rec => Object.keys(rec.fields || {})))];
+    await checkWriteGuard(table, fieldJsonNames, conn, company.id);
+  }
 
   const payload = mode === "upsert" ? { data } : { mode, data };
 
@@ -3432,7 +3556,7 @@ const TOOLS = [
   },
   {
     name:        "set_records",
-    description: "Creates, modifies, deletes, or upserts records in any Business Central table via Data.Records.Set. Each record must supply a primaryKey object (the BC primary key fields) and a fields object (the non-key fields to write). Mode 'upsert' (default) inserts if the record does not exist, otherwise modifies it.",
+    description: "Creates, modifies, deletes, or upserts records in any Business Central table via Data.Records.Set. Each record must supply a primaryKey object (the BC primary key fields) and a fields object (the non-key fields to write). Mode 'upsert' (default) inserts if the record does not exist, otherwise modifies it. Before writing, the tool automatically checks (1) that the current user has write permission on the table and (2) that every field being written is covered by Change Log modification tracking when the ChangeLog Write Guard is active. Writes are blocked if either check fails — the force parameter is never used.",
     inputSchema: {
       type:     "object",
       properties: {
