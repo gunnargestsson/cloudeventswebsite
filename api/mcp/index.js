@@ -51,6 +51,9 @@
  *   get_integration_timestamp   — Cloud Events Integration — latest non-reversed DateTime for source+tableId
  *   set_integration_timestamp   — Cloud Events Integration — insert a DateTime entry for source+tableId
  *   reverse_integration_timestamp — Cloud Events Integration — mark the latest non-reversed entry as reversed
+ *   get_changelog_field_history — ChangeLog.Field.History — current value + modification history for a field on a record (entry 0 = live value)
+ *   restore_changelog_field     — ChangeLog.Field.Restore — restore a field to a prior Change Log value (by entry no. or point-in-time)
+ *   changelog_field_enabled     — ChangeLog.Field.Enabled — check if a field is Change Log tracked and return ChangeLog Write Guard mode
  *
  * Resources: bc://companies, bc://message-types, bc://tables, bc://tables/{name}
  * Prompts:   describe_table, find_tables_for_entity, data_model_overview,
@@ -1996,6 +1999,124 @@ async function toolGetDocumentLines({ documentType, documentNo, table, fields, t
 
   // Delegate to toolGetRecords for field resolution, format support, etc.
   return await toolGetRecords({ table: targetTable, filter, fields, take, lcid, format, companyId, tenantId, clientId, clientSecret, environment, encryptedConn });
+}
+
+// ── get_changelog_field_history ──────────────────────────────────────────────
+
+async function toolGetChangelogFieldHistory({ table, recordSystemId, fieldNo, fieldName, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required (table name or number)");
+  if (!recordSystemId) throw new Error("Parameter 'recordSystemId' is required (record SystemId GUID)");
+  if (fieldNo == null && !fieldName) throw new Error("Either 'fieldNo' or 'fieldName' is required");
+  validateTableName(table);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = { tableName: String(table), recordSystemId: String(recordSystemId) };
+  if (fieldNo != null) data.fieldNo = Number(fieldNo);
+  else                 data.fieldName = String(fieldName);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "ChangeLog.Field.History",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(data),
+  });
+
+  return {
+    company:        company.name,
+    tableNo:        result.tableNo,
+    tableName:      result.tableName,
+    recordSystemId: result.recordSystemId,
+    fieldNo:        result.fieldNo,
+    fieldName:      result.fieldName,
+    fieldType:      result.fieldType,
+    totalCount:     result.totalCount,
+    history:        result.history || [],
+  };
+}
+
+// ── restore_changelog_field ──────────────────────────────────────────────────
+
+async function toolRestoreChangelogField({ entryNo, table, recordSystemId, fieldNo, fieldName, restoreToDateTime, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  // Mode 1: by entry number — Mode 2: by table + recordSystemId + field + restoreToDateTime
+  const isMode1 = entryNo != null;
+  const isMode2 = table && recordSystemId && (fieldNo != null || fieldName) && restoreToDateTime;
+  if (!isMode1 && !isMode2) {
+    throw new Error(
+      "Provide either 'entryNo' (Mode 1) or 'table' + 'recordSystemId' + 'fieldNo'/'fieldName' + 'restoreToDateTime' (Mode 2)"
+    );
+  }
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  let data;
+  if (isMode1) {
+    data = { entryNo: Number(entryNo) };
+  } else {
+    validateTableName(table);
+    data = {
+      tableName:         String(table),
+      recordSystemId:    String(recordSystemId),
+      restoreToDateTime: String(restoreToDateTime),
+    };
+    if (fieldNo != null) data.fieldNo = Number(fieldNo);
+    else                 data.fieldName = String(fieldName);
+  }
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "ChangeLog.Field.Restore",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(data),
+  });
+
+  return {
+    company:        company.name,
+    tableNo:        result.tableNo,
+    tableName:      result.tableName,
+    recordSystemId: result.recordSystemId,
+    fieldNo:        result.fieldNo,
+    fieldName:      result.fieldName,
+    previousValue:  result.previousValue,
+    restoredValue:  result.restoredValue,
+    fromEntryNo:    result.fromEntryNo,
+    entryDateTime:  result.entryDateTime,
+  };
+}
+
+// ── changelog_field_enabled ──────────────────────────────────────────────────
+
+async function toolChangelogFieldEnabled({ table, fieldNo, fieldName, companyId, tenantId, clientId, clientSecret, environment, encryptedConn } = {}) {
+  if (!table) throw new Error("Parameter 'table' is required (table name or number)");
+  if (fieldNo == null && !fieldName) throw new Error("Either 'fieldNo' or 'fieldName' is required");
+  validateTableName(table);
+
+  const conn    = resolveConn({ tenantId, clientId, clientSecret, environment, encryptedConn });
+  const company = await getCompany(companyId, conn);
+
+  const data = { tableName: String(table) };
+  if (fieldNo != null) data.fieldNo = Number(fieldNo);
+  else                 data.fieldName = String(fieldName);
+
+  const result = await bcTask(conn, company.id, {
+    specversion: "1.0",
+    type:        "ChangeLog.Field.Enabled",
+    source:      "BC Metadata MCP v1.0",
+    data:        JSON.stringify(data),
+  });
+
+  return {
+    company:                    company.name,
+    changeLogEnabled:           result.changeLogEnabled,
+    changelogWriteGuardEnabled: result.changelogWriteGuardEnabled,
+    tableNo:                    result.tableNo,
+    tableName:                  result.tableName,
+    fieldNo:                    result.fieldNo,
+    fieldName:                  result.fieldName,
+    fieldCovered:               result.fieldCovered,
+  };
 }
 
 const CS_TABLE = "Cloud Events Storage";
@@ -4046,6 +4167,48 @@ const TOOLS = [
       required: ["documentNo"],
     },
   },
+  {
+    name:        "get_changelog_field_history",
+    description: "Returns the current live value and full Change Log modification history for a specific field on a record. Entry 0 is a synthetic 'Current' entry with the live value; subsequent entries are real Change Log entries (newest first). Use 'entryNo' values with restore_changelog_field to revert.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:          { type: "string",  description: "BC table name (e.g. 'Customer') or number as string." },
+        recordSystemId: { type: "string",  description: "SystemId GUID of the record (without braces)." },
+        fieldNo:        { type: "integer", description: "Field number (from get_table_fields)." },
+        fieldName:      { type: "string",  description: "Field name (alternative to fieldNo, e.g. 'Name')." },
+      },
+      required: ["table", "recordSystemId"],
+    },
+  },
+  {
+    name:        "restore_changelog_field",
+    description: "Restores a field value from the Change Log. Mode 1: provide 'entryNo' (from get_changelog_field_history). Mode 2: provide 'table' + 'recordSystemId' + 'fieldNo'/'fieldName' + 'restoreToDateTime' (restores to the most recent Modification at or before that time). Only Modification entries can be restored.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        entryNo:           { type: "integer", description: "(Mode 1) Change Log Entry No. from get_changelog_field_history." },
+        table:             { type: "string",  description: "(Mode 2) BC table name or number as string." },
+        recordSystemId:    { type: "string",  description: "(Mode 2) SystemId GUID of the record." },
+        fieldNo:           { type: "integer", description: "(Mode 2) Field number." },
+        fieldName:         { type: "string",  description: "(Mode 2) Field name (alternative to fieldNo)." },
+        restoreToDateTime: { type: "string",  description: "(Mode 2) ISO 8601 timestamp — restores to the most recent Modification at or before this time." },
+      },
+    },
+  },
+  {
+    name:        "changelog_field_enabled",
+    description: "Checks whether the BC Change Log feature is globally active and whether a specific field is covered by Change Log Setup for modification tracking. Also returns the ChangeLog Write Guard mode (Open / Blocked / Via force) from Cloud Events Setup.",
+    inputSchema: {
+      type:       "object",
+      properties: {
+        table:     { type: "string",  description: "BC table name (e.g. 'Customer') or number as string." },
+        fieldNo:   { type: "integer", description: "Field number (from get_table_fields)." },
+        fieldName: { type: "string",  description: "Field name (alternative to fieldNo, e.g. 'Name')." },
+      },
+      required: ["table"],
+    },
+  },
 ];
 
 // ── JSON-RPC 2.0 dispatcher ────────────────────────────────────────────────────
@@ -4174,6 +4337,9 @@ async function handleMessage(msg, { headerEncryptedConn = "", headerCompanyId = 
           case "get_next_line_no":               content = await toolGetNextLineNo(args);               break;
           case "batch_records":                  content = await toolBatchRecords(args);                break;
           case "get_document_lines":             content = await toolGetDocumentLines(args);            break;
+          case "get_changelog_field_history":    content = await toolGetChangelogFieldHistory(args);    break;
+          case "restore_changelog_field":        content = await toolRestoreChangelogField(args);       break;
+          case "changelog_field_enabled":        content = await toolChangelogFieldEnabled(args);       break;
           default:
             return {
               jsonrpc: "2.0", id,
