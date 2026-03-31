@@ -4,5 +4,16 @@
     "azureFunctions.projectLanguage": "JavaScript",
     "azureFunctions.projectRuntime": "~4",
     "debug.internalConsoleOptions": "neverOpen",
-    "azureFunctions.preDeployTask": "npm prune (functions)"
+    "azureFunctions.preDeployTask": "npm prune (functions)",
+    "chat.mcp.serverSampling": {
+        "cloudeventswebsite/.vscode/mcp.json: bc-origo": {
+            "allowedModels": [
+                "copilot/auto",
+                "copilotcli/claude-sonnet-4.6",
+                "copilot/claude-opus-4.6",
+                "copilot/claude-sonnet-4.5",
+                "copilot/claude-sonnet-4.6"
+            ]
+        }
+    }
 }
