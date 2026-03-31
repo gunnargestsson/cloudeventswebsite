@@ -40,9 +40,9 @@ UNIT OF MEASURE RULES:
 - Call get_item_units_of_measure when the user requests a specific UoM not yet known, or to show all options.
 - Pass the chosen unitOfMeasureCode to get_item_price.
 
-When the user message is exactly "__CONFIRM_ORDER__", create the sales order in BC using the pending order data you hold in context and report the resulting order number.
+When propose_sales_order succeeds a draft order is created in BC immediately and real VAT totals are fetched. The user will see a confirmation panel. "__CONFIRM_ORDER__" finalises the existing draft — do not create a duplicate order.
 
-TONE: Professional, concise. In Iceland, use króna (ISK) as the currency unless the customer record shows otherwise.
+TONE: Professional, concise. Use the currency shown in the statistics (defaults to ISK for Icelandic customers).
 Always show prices excluding VAT in the line table, and summarise both excl. and incl. VAT in totals.
 If a file was uploaded and no order intent was found, say so clearly and ask what the user would like to do.`;
 
@@ -157,40 +157,40 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
     case "lookup_customer": {
       const q = sanitizeFilter(input.query);
       const CUST_FIELDS = [1, 2, 5, 7, 21, 22];
+      const SEARCH_COLS = ["No.", "Name", "Address", "Post Code", "City", "Phone No.", "E-Mail"];
 
-      // Step 1: case-insensitive name search
-      let res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Customer", {
-        tableView: `WHERE(Name=FILTER(@*${q}*))`,
-        fieldNumbers: CUST_FIELDS,
-        take: 5,
-      });
-      if ((res.result || []).length) return JSON.stringify(res.result);
-
-      // Step 2: case-insensitive customer No. search  — BC field name is "No." (with period)
-      res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Customer", {
-        tableView: `WHERE(No.=FILTER(@*${q}*))`,
-        fieldNumbers: CUST_FIELDS,
-        take: 5,
-      });
-      if ((res.result || []).length) return JSON.stringify(res.result);
-
-      // Step 3: fall back — get all non-blocked customers (No., Name, Address) and
-      //         filter client-side so partial / phonetic matches still work.
-      const allRes = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Customer", {
-        tableView: "WHERE(Blocked=CONST( ))",
-        fieldNumbers: CUST_FIELDS,
-        take: 200,
-      });
-      const lq = q.toLowerCase();
-      const matches = (allRes.result || []).filter(r =>
-        Object.values(r.fields || {}).some(v => String(v).toLowerCase().includes(lq))
+      // Multi-column search: query each field in parallel via Data.RecordIds.Get
+      const idResults = await Promise.all(
+        SEARCH_COLS.map(col =>
+          bcTask(tenantId, env, companyId, auth, "Data.RecordIds.Get", "Customer", {
+            tableView: `WHERE(Blocked=CONST( ),${col}=FILTER(@*${q}*))`,
+            take: 50,
+          }).catch(() => ({ result: [] }))
+        )
       );
-      return JSON.stringify(matches.slice(0, 5));
+
+      // Collect unique SystemIds across all field queries
+      const idSet = new Set();
+      for (const r of idResults)
+        for (const rec of (r.result || []))
+          if (rec.id) idSet.add(rec.id);
+
+      if (idSet.size === 0) return JSON.stringify([]);
+
+      // Fetch full records for matched IDs
+      const ids = [...idSet].slice(0, 20);
+      const res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Customer", {
+        tableView: `WHERE(System Id=FILTER(${ids.join("|")}))`,
+        fieldNumbers: CUST_FIELDS,
+        take: ids.length,
+      });
+      return JSON.stringify(res.result || []);
     }
 
     case "lookup_item": {
       const q = sanitizeFilter(input.query);
       const ITEM_FIELDS = [1, 3, 8, 18, 47]; // No., Description, Base Unit of Measure, Unit Price, Sales Unit of Measure
+      const SEARCH_COLS = ["No.", "Description", "Search Description"];
 
       const mapItems = (rows) => (rows || []).map(r => ({
         itemNo:              r.primaryKey?.["No."] || r.fields?.["No."] || "",
@@ -200,33 +200,32 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
         salesUnitOfMeasure:  r.fields?.["Sales Unit of Measure"] || "",
       }));
 
-      // Step 1: case-insensitive description search
-      let res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
-        tableView: `WHERE(Description=FILTER(@*${q}*))`,
-        fieldNumbers: ITEM_FIELDS,
-        take: 5,
-      });
-      if ((res.result || []).length) return JSON.stringify(mapItems(res.result));
-
-      // Step 2: case-insensitive item No. search
-      res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
-        tableView: `WHERE(No.=FILTER(@*${q}*))`,
-        fieldNumbers: ITEM_FIELDS,
-        take: 5,
-      });
-      if ((res.result || []).length) return JSON.stringify(mapItems(res.result));
-
-      // Step 3: fall back — get all non-blocked items and filter client-side.
-      const allRes = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
-        tableView: "WHERE(Blocked=CONST(false))",
-        fieldNumbers: ITEM_FIELDS,
-        take: 200,
-      });
-      const lq = q.toLowerCase();
-      const matches = (allRes.result || []).filter(r =>
-        Object.values(r.fields || {}).some(v => String(v).toLowerCase().includes(lq))
+      // Multi-column search: query each field in parallel via Data.RecordIds.Get
+      const idResults = await Promise.all(
+        SEARCH_COLS.map(col =>
+          bcTask(tenantId, env, companyId, auth, "Data.RecordIds.Get", "Item", {
+            tableView: `WHERE(Blocked=CONST(false),${col}=FILTER(@*${q}*))`,
+            take: 50,
+          }).catch(() => ({ result: [] }))
+        )
       );
-      return JSON.stringify(mapItems(matches.slice(0, 5)));
+
+      // Collect unique SystemIds across all field queries
+      const idSet = new Set();
+      for (const r of idResults)
+        for (const rec of (r.result || []))
+          if (rec.id) idSet.add(rec.id);
+
+      if (idSet.size === 0) return JSON.stringify([]);
+
+      // Fetch full records for matched IDs
+      const ids = [...idSet].slice(0, 20);
+      const res = await bcTask(tenantId, env, companyId, auth, "Data.Records.Get", "Item", {
+        tableView: `WHERE(System Id=FILTER(${ids.join("|")}))`,
+        fieldNumbers: ITEM_FIELDS,
+        take: ids.length,
+      });
+      return JSON.stringify(mapItems(res.result));
     }
 
     case "check_item_availability": {
@@ -259,10 +258,22 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
       return JSON.stringify(res);
     }
 
-    // propose_sales_order is handled in the main loop — returns a sentinel
+    // propose_sales_order is handled in the main loop — not reached here
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
+}
+
+// ── Create draft order + get real statistics from BC ───────────────────────────
+
+async function createDraftAndGetStats(order, tenantId, env, companyId, auth) {
+  // Step 1: create the Sales Header (draft/open)
+  const orderNo = await createSalesOrder(order, tenantId, env, companyId, auth);
+
+  // Step 2: call Sales.Order.Statistics to get real totals from BC
+  const stats = await bcTask(tenantId, env, companyId, auth, "Sales.Order.Statistics", orderNo);
+
+  return { orderNo, statistics: stats };
 }
 
 // ── Main agent loop ────────────────────────────────────────────────────────────
@@ -270,6 +281,9 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
 async function runAgentLoop(apiKey, messages, tenantId, env, companyId, auth, lcid) {
   let pendingOrder = null;
   const conversation = [...messages];
+
+  // Trim conversation to prevent token overflow
+  while (conversation.length > 40) conversation.shift();
 
   for (let turn = 0; turn < 10; turn++) {
     const response = await callAnthropic(apiKey, {
@@ -296,11 +310,25 @@ async function runAgentLoop(apiKey, messages, tenantId, env, companyId, auth, lc
     for (const block of toolUseBlocks) {
       if (block.name === "propose_sales_order") {
         pendingOrder = block.input;
-        toolResults.push({
-          type:        "tool_result",
-          tool_use_id: block.id,
-          content:     "Order draft prepared. Showing confirmation screen to user.",
-        });
+        // Create the draft order in BC immediately and get real statistics
+        try {
+          const { orderNo, statistics } = await createDraftAndGetStats(block.input, tenantId, env, companyId, auth);
+          pendingOrder.orderNo = orderNo;
+          pendingOrder.statistics = statistics;
+          toolResults.push({
+            type:        "tool_result",
+            tool_use_id: block.id,
+            content:     `Order draft ${orderNo} created in BC. Statistics: ${JSON.stringify(statistics.order || {})}`,
+          });
+        } catch (e) {
+          toolResults.push({
+            type:        "tool_result",
+            tool_use_id: block.id,
+            content:     `Error creating draft order: ${e.message}`,
+            is_error:    true,
+          });
+          pendingOrder = null;
+        }
       } else {
         try {
           const result = await executeTool(block.name, block.input, tenantId, env, companyId, auth);
@@ -342,23 +370,18 @@ async function createSalesOrder(pendingOrder, tenantId, env, companyId, auth) {
   const orderNo = headerRes.result?.[0]?.primaryKey?.No_;
   if (!orderNo) throw new Error("BC did not return an order number after creating the Sales Header.");
 
-  // Step 2: create Sales Lines
-  let lineNo = 10000;
-  for (const line of pendingOrder.lines) {
-    await bcTask(tenantId, env, companyId, auth, "Data.Records.Set", "Sales Line", {
-      data: [{
-        primaryKey: { DocumentType: "Order", DocumentNo_: orderNo, LineNo_: lineNo },
-        fields: {
-          Type:              "Item",
-          No_:               line.itemNo,
-          Quantity:          line.quantity,
-          UnitofMeasureCode: line.unitOfMeasureCode || "",
-          UnitPrice:         line.unitPrice,
-        },
-      }],
-    });
-    lineNo += 10000;
-  }
+  // Step 2: create all Sales Lines in one batch
+  const linesData = pendingOrder.lines.map((line, i) => ({
+    primaryKey: { DocumentType: "Order", DocumentNo_: orderNo, LineNo_: (i + 1) * 10000 },
+    fields: {
+      Type:              "Item",
+      No_:               line.itemNo,
+      Quantity:          line.quantity,
+      UnitofMeasureCode: line.unitOfMeasureCode || "",
+      UnitPrice:         line.unitPrice,
+    },
+  }));
+  await bcTask(tenantId, env, companyId, auth, "Data.Records.Set", "Sales Line", { data: linesData });
 
   return orderNo;
 }
@@ -403,11 +426,38 @@ module.exports = async function (context, req) {
         context.res = { status: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: "No pendingOrder provided with __CONFIRM_ORDER__" }) };
         return;
       }
-      const orderNo = await createSalesOrder(pendingOrder, tenantId, environment, companyId, auth);
+      // Order was already created as draft during propose_sales_order — just return it
+      const orderNo = pendingOrder.orderNo;
+      if (!orderNo) {
+        context.res = { status: 400, headers: CORS_HEADERS, body: JSON.stringify({ error: "Draft order has no orderNo — it may not have been created" }) };
+        return;
+      }
       context.res = {
         status: 200,
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
         body: JSON.stringify({ reply: `Sales order **${orderNo}** has been created successfully in Business Central.`, orderNo }),
+      };
+      return;
+    }
+
+    // __CANCEL_ORDER__ — delete the draft order from BC
+    const isCancel = lastMsg?.role === "user" &&
+      (lastMsg?.content === "__CANCEL_ORDER__" ||
+       (Array.isArray(lastMsg?.content) && lastMsg.content.some(b => b.text === "__CANCEL_ORDER__")));
+
+    if (isCancel) {
+      if (pendingOrder?.orderNo) {
+        try {
+          await bcTask(tenantId, environment, companyId, auth, "Data.Records.Set", "Sales Header", {
+            mode: "delete",
+            data: [{ primaryKey: { DocumentType: "Order", No_: pendingOrder.orderNo } }],
+          });
+        } catch (_) { /* best effort — order may already be gone */ }
+      }
+      context.res = {
+        status: 200,
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        body: JSON.stringify({ reply: "Order cancelled.", cancelled: true }),
       };
       return;
     }

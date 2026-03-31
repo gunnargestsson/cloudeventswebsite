@@ -223,9 +223,10 @@ const UI_STRINGS = [
   '⚠ One or more lines have insufficient stock — highlighted below',
   'Item No.', 'Description', 'Qty', 'Unit', 'Unit Price', 'Line Amount',
   '⚠ Low stock',
-  'Subtotal excl. VAT', 'VAT (24%)', 'Total incl. VAT',
-  '← Edit / Cancel', '✓ Confirm & Create Order',
-  'Creating order',
+  'Subtotal excl. VAT', 'VAT', 'Total incl. VAT',
+  '← Edit / Cancel', '✓ Confirm Order',
+  'Confirming',
+  'Line Discount', 'Invoice Discount',
   // Success banner
   'Order Created',
   'Your sales order has been created in Business Central',
@@ -454,6 +455,8 @@ async function _callChatApi() {
   document.getElementById('sendBtn').disabled = true;
   showThinking(true);
   try {
+    // Trim conversation history to prevent token overflow
+    if (messages.length > 30) messages = messages.slice(-30);
     const cfg  = getConfig();
     const body = { messages, apiKey: cfg.apiKey, bcConfig: cfg.bcConfig, lcid: getActiveLcid() };
     if (pendingOrder) body.pendingOrder = pendingOrder;
@@ -487,24 +490,6 @@ async function _callChatApi() {
   }
 }
 
-// Override sendMessage to use the shared API caller
-async function sendMessage(overrideText) {
-  if (isBusy) return;
-  if (!configOk()) {
-    alert(t('Please set your Claude API key on the API Key page first.'));
-    window.location.href = 'api-key-settings.html';
-    return;
-  }
-
-  const input = document.getElementById('chatInput');
-  const text  = overrideText !== undefined ? overrideText : input.value.trim();
-  if (!text) return;
-  if (overrideText === undefined) { input.value = ''; input.style.height = '40px'; }
-  appendMessage('user', text);
-  messages.push({ role: 'user', content: text });
-  await _callChatApi();
-}
-
 // ── CONFIRMATION PANEL ────────────────────────────────────────────────────────
 function fmt(n) {
   if (n == null) return '—';
@@ -521,10 +506,22 @@ function showConfirmPanel(order) {
   chatPanel.classList.add('hidden');
   panel.classList.remove('hidden');
 
-  const subtotal = order.lines.reduce((s, l) => s + (l.lineAmount ?? (l.unitPrice * l.quantity)), 0);
-  const vatPct   = 0.24;  // Iceland standard VAT — adjust if needed
-  const vatAmt   = subtotal * vatPct;
-  const total    = subtotal + vatAmt;
+  // Use real statistics from BC if available, otherwise fall back to line-level calculation
+  const stats = order.statistics?.order;
+  const subtotal = stats?.totalExclVAT ?? order.lines.reduce((s, l) => s + (l.lineAmount ?? (l.unitPrice * l.quantity)), 0);
+  const vatAmt   = stats?.vatAmount ?? 0;
+  const total    = stats?.totalInclVAT ?? (subtotal + vatAmt);
+  const lineDisc = stats?.lineDiscountAmount ?? 0;
+  const invDisc  = stats?.invoiceDiscountAmount ?? 0;
+  const currency = order.statistics?.currencyCode || '';
+
+  // Build VAT breakdown rows from real BC data
+  const vatTotals = order.statistics?.vat_totals || [];
+  const vatBreakdownHtml = vatTotals.length
+    ? vatTotals.map(v =>
+        `<div class="total-line"><span class="k">VAT ${fmtDec(v.vatPct)}% (${esc(v.vatIdentifier)})</span><span class="v">${fmtDec(v.vatAmount)}</span></div>`
+      ).join('')
+    : (vatAmt ? `<div class="total-line"><span class="k">${t('VAT')}</span><span class="v">${fmtDec(vatAmt)}</span></div>` : '');
 
   const hasStockWarn = order.lines.some(l => l.stockOk === false);
 
@@ -563,13 +560,16 @@ function showConfirmPanel(order) {
       </table>
       <div class="totals-row">
         <div class="total-line"><span class="k">${t('Subtotal excl. VAT')}</span><span class="v">${fmtDec(subtotal)}</span></div>
-        <div class="total-line"><span class="k">${t('VAT (24%)')}</span><span class="v">${fmtDec(vatAmt)}</span></div>
-        <div class="total-line grand"><span class="k">${t('Total incl. VAT')}</span><span class="v">${fmtDec(total)}</span></div>
+        ${lineDisc > 0 ? `<div class="total-line"><span class="k">${t('Line Discount')}</span><span class="v">-${fmtDec(lineDisc)}</span></div>` : ''}
+        ${invDisc > 0 ? `<div class="total-line"><span class="k">${t('Invoice Discount')}</span><span class="v">-${fmtDec(invDisc)}</span></div>` : ''}
+        ${vatBreakdownHtml}
+        <div class="total-line grand"><span class="k">${t('Total incl. VAT')}${currency ? ' (' + esc(currency) + ')' : ''}</span><span class="v">${fmtDec(total)}</span></div>
       </div>
     </div>
+    ${order.orderNo ? `<div style="font-size:10px;color:var(--text3);margin-top:6px">BC Draft Order: <strong style="color:var(--accent)">${esc(order.orderNo)}</strong></div>` : ''}
     <div class="confirm-actions">
       <button class="confirm-btn cancel" onclick="cancelOrder()">${t('← Edit / Cancel')}</button>
-      <button class="confirm-btn ok" id="confirmBtn" onclick="confirmOrder()">${t('✓ Confirm & Create Order')}</button>
+      <button class="confirm-btn ok" id="confirmBtn" onclick="confirmOrder()">${t('✓ Confirm Order')}</button>
     </div>`;
 }
 
@@ -577,7 +577,7 @@ async function confirmOrder() {
   if (!pendingOrder) return;
   const btn = document.getElementById('confirmBtn');
   btn.disabled = true;
-  btn.textContent = t('Creating order') + '…';
+  btn.textContent = t('Confirming') + '…';
 
   const confirmMsg = { role: 'user', content: '__CONFIRM_ORDER__' };
   messages.push(confirmMsg);
@@ -593,7 +593,7 @@ async function confirmOrder() {
 
     if (!res.ok || data.error) {
       btn.disabled = false;
-      btn.textContent = t('✓ Confirm & Create Order');
+      btn.textContent = t('✓ Confirm Order');
       alert(t('Error creating order: {0}').replace('{0}', data.error || 'Unknown error'));
       return;
     }
@@ -604,12 +604,26 @@ async function confirmOrder() {
     }
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = t('✓ Confirm & Create Order');
+    btn.textContent = t('✓ Confirm Order');
     alert(t('Network error: {0}').replace('{0}', e.message));
   }
 }
 
 function cancelOrder() {
+  // Tell backend to delete the draft order from BC
+  if (pendingOrder?.orderNo) {
+    const cfg = getConfig();
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: '__CANCEL_ORDER__' }],
+        apiKey: cfg.apiKey,
+        bcConfig: cfg.bcConfig,
+        pendingOrder,
+      }),
+    }).catch(() => {}); // best effort
+  }
   pendingOrder = null;
   document.getElementById('confirmPanel').classList.add('hidden');
   document.getElementById('chatPanel').classList.remove('hidden');
