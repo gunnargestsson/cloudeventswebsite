@@ -152,6 +152,23 @@ select.ci{cursor:pointer;appearance:auto}
 .modal-progress{font-size:10px;color:var(--text3);display:flex;align-items:center;gap:6px}
 /* SETTINGS PANEL */
 .settings-sum{display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--text2);font-weight:600;padding:12px 14px;border-bottom:1px solid var(--border);user-select:none}.settings-sum::-webkit-details-marker{display:none}details[open] .settings-sum{color:var(--accent);border-bottom-color:var(--border2)}.settings-body{padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+
+/* CHANGELOG STATUS BAR */
+.cl-bar{display:flex;align-items:center;gap:8px;padding:8px 20px;border-bottom:1px solid var(--border);background:var(--bg2);flex-wrap:wrap;font-size:10px}
+.cl-label{color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;font-size:9px;font-weight:600;flex-shrink:0;margin-right:2px}
+.cl-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;font-size:9.5px;font-weight:600;flex-shrink:0}
+.cl-badge.on{background:rgba(0,255,136,.1);color:var(--green);border:1px solid rgba(0,255,136,.2)}
+.cl-badge.off{background:rgba(255,255,255,.04);color:var(--text3);border:1px solid var(--border)}
+.cl-badge.guard-on{background:rgba(255,140,66,.1);color:var(--orange);border:1px solid rgba(255,140,66,.2)}
+.cl-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;background:currentColor}
+.cl-sep{width:1px;background:var(--border2);align-self:stretch;margin:0 4px;flex-shrink:0}
+.cl-hint{font-size:9.5px;color:var(--text3);font-style:italic}
+/* FIELD TABLE — CL coverage column */
+.ftable .td-cl{width:28px;text-align:center}
+.cl-yes{color:var(--green);font-size:11px}
+.cl-no{color:var(--text3);font-size:10px;opacity:.6}
+.cl-na{color:var(--text3);font-size:9px;opacity:.4}
+.cl-loading{color:var(--text3);font-size:10px;opacity:.35;user-select:none}
 </style>
 <script src="settings.js?v=13"></script>
 </head>
@@ -195,6 +212,7 @@ select.ci{cursor:pointer;appearance:auto}
         <button class="action-btn" id="dlTblBtn" onclick="openDownloadModal('table')" disabled title="Download this table's fields">⬇ This Table</button>
       </div>
     </div>
+    <div id="changelogStatusBar" class="cl-bar" style="display:none"></div>
     <div id="statsBar" class="stats-bar" style="display:none"></div>
     <div class="mbody" id="mbody">
       <div class="est">
@@ -253,6 +271,10 @@ let currentPermissions = null;
 let downloadScope = 'all';
 let selectedLcid = 1033;
 let relationsCache = {}; // "tableName::fieldId" → relations array
+let changeLogEnabled = null;           // null=unknown, true=active, false=inactive
+let changelogWriteGuardEnabled = null; // null=unknown, true=guard on, false=open
+let changelogCoverageCache = {};       // tableName → Map<fieldNo, boolean|null>
+let coverageFetchInProgress = new Set(); // table names currently being fetched
 
 const LCID_NAMES = {1033:'English',1039:'Icelandic',1030:'Danish',1031:'German',1036:'French',1034:'Spanish',1043:'Dutch',1053:'Swedish',1044:'Norwegian'};
 
@@ -317,6 +339,12 @@ const UI_STRINGS = [
   'Human-readable structured format. Easy to read and diff. Each table with all fields, types, enums.',
   'Documentation-style output. Tables as headings, fields in tables. Great for pasting into wikis or AI prompts.',
   'Machine-readable full structure. Best for programmatic processing.',
+  'Change Log',
+  'Write Guard',
+  'Active',
+  'Inactive',
+  'Off',
+  'Only ChangeLog covered fields can be written',
 ];
 
 function initSettings() {
@@ -503,6 +531,8 @@ async function loadTables(){
     fieldsCache = {};
     permissionsCache = {};
     relationsCache = {};
+    changelogCoverageCache = {};
+    coverageFetchInProgress.clear();
     currentTable = null;
     currentFields = null;
     currentPermissions = null;
@@ -517,6 +547,7 @@ async function loadTables(){
     document.getElementById('mbody').innerHTML=`<div class="est"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg><div>${allTables.length} ${t('tables loaded')}.<br>${t('Select one to view its fields.')}</div></div>`;
     document.getElementById('statsBar').style.display='none';
     if(btn) btn.textContent='↺ Refresh';
+    fetchChangelogStatus(); // async — sets company-level CL state and renders the bar
     // Let bcLoadTranslations dynamically fetch the default company GUID from server
     const companyId = null;
     bcLoadTranslations(companyId, selectedLcid, UI_STRINGS).then(() => applyMetadataTranslations());
@@ -572,6 +603,9 @@ async function selectTable(tableId){
   if(fieldsCache[currentTable.name] && permissionsCache[currentTable.name]){
     currentFields = fieldsCache[currentTable.name];
     currentPermissions = permissionsCache[currentTable.name];
+    if(changeLogEnabled === true && !changelogCoverageCache[currentTable.name]) {
+      fetchTableChangelogCoverage(currentTable.name, currentFields); // async
+    }
     renderFields();
     return;
   }
@@ -599,6 +633,9 @@ async function selectTable(tableId){
       : null;
     permissionsCache[currentTable.name] = currentPermissions;
     setStatus('ok',`${allTables.length} ${t('tables')}`);
+    if(changeLogEnabled === true && !changelogCoverageCache[currentTable.name]) {
+      fetchTableChangelogCoverage(currentTable.name, currentFields); // async
+    }
     renderFields();
   } catch(e){
     setStatus('err',t('Error'));
@@ -652,18 +689,22 @@ function renderFields(){
 
   let html = '';
   if(pkSection.length){
-    html += `<div class="section-lbl">${t('Primary Key Fields')}</div>${fieldsTable(pkSection)}`;
+    html += `<div class="section-lbl">${t('Primary Key Fields')}</div>${fieldsTable(pkSection, currentTable.name)}`;
   }
   if(normalSection.length){
-    html += `<div class="section-lbl">${t('Fields')}</div>${fieldsTable(normalSection)}`;
+    html += `<div class="section-lbl">${t('Fields')}</div>${fieldsTable(normalSection, currentTable.name)}`;
   }
   if(flowSection.length){
-    html += `<div class="section-lbl">${t('FlowFields')}</div>${fieldsTable(flowSection)}`;
+    html += `<div class="section-lbl">${t('FlowFields')}</div>${fieldsTable(flowSection, currentTable.name)}`;
   }
   document.getElementById('mbody').innerHTML = html;
 }
 
-function fieldsTable(fields){
+function fieldsTable(fields, tableName){
+  const showCl = changeLogEnabled === true;
+  const coverage = tableName ? changelogCoverageCache[tableName] : undefined; // Map or undefined
+  const isFetching = tableName ? coverageFetchInProgress.has(tableName) : false;
+
   const rows = fields.map(f=>{
     const enumHtml = f.enum&&f.enum.length
       ? `<div class="enum-wrap">${f.enum.map(e=>`<span class="enum-tag">${esc(e.value||'·')}</span>`).join('')}</div>`
@@ -674,6 +715,35 @@ function fieldsTable(fields){
     const relHtml = f.hasTableRelation
       ? `<span class="rel-link" onclick="showRelations(this)" data-table="${esc(currentTable.name)}" data-fid="${f.id}" data-fname="${esc(f.name)}" title="View table relations">🔗</span>`
       : '';
+
+    let clHtml = '';
+    if (showCl) {
+      if (!coverage) {
+        // Coverage not yet loaded — show loading placeholder
+        clHtml = `<span class="cl-loading" title="${isFetching ? 'Loading…' : ''}">·</span>`;
+      } else {
+        const unsupported = f.class === 'FlowField' || ['Blob','Media','MediaSet'].includes(f.type);
+        if (unsupported) {
+          clHtml = `<span class="cl-na" title="Not trackable by Change Log">—</span>`;
+        } else {
+          const covered = coverage.get(f.id);
+          if (covered === null) {
+            clHtml = `<span class="cl-na" title="Check failed">?</span>`;
+          } else if (covered) {
+            const tip = changelogWriteGuardEnabled
+              ? 'ChangeLog covered — writable with active write guard'
+              : 'ChangeLog covered';
+            clHtml = `<span class="cl-yes" title="${esc(tip)}">✓</span>`;
+          } else {
+            const tip = changelogWriteGuardEnabled
+              ? 'Not covered — write blocked when guard is active'
+              : 'Not covered by Change Log';
+            clHtml = `<span class="cl-no" title="${esc(tip)}">—</span>`;
+          }
+        }
+      }
+    }
+
     return `<tr>
       <td class="td-num">${f.id}</td>
       <td class="td-name">${esc(f.name)}</td>
@@ -684,6 +754,7 @@ function fieldsTable(fields){
       <td class="td-class"><span class="${f.class==='FlowField'?'fc-flow':'fc-norm'}">${esc(f.class||'Normal')}</span></td>
       <td class="td-pk">${f.isPartOfPrimaryKey?'<span class="pk-dot" title="Primary key"></span>':''}</td>
       <td class="td-rel">${relHtml}</td>
+      ${showCl ? `<td class="td-cl">${clHtml}</td>` : ''}
       <td>${enumHtml}</td>
       <td>${enumCaptionHtml}</td>
     </tr>`;
@@ -691,7 +762,9 @@ function fieldsTable(fields){
   return `<table class="ftable">
     <thead><tr>
       <th class="td-num">#</th><th>${t('Name (AL)')}</th><th>${t('JSON Key')}</th><th>${t('Caption')}</th><th>${t('Type')}</th>
-      <th class="td-len">${t('Len')}</th><th>${t('Class')}</th><th class="td-pk">${t('PK')}</th><th class="td-rel">${t('Rel')}</th><th>${t('Enum values')}</th><th>${t('Enum captions')}</th>
+      <th class="td-len">${t('Len')}</th><th>${t('Class')}</th><th class="td-pk">${t('PK')}</th><th class="td-rel">${t('Rel')}</th>
+      ${showCl ? `<th class="td-cl" title="${esc(t('Change Log'))} coverage">CL</th>` : ''}
+      <th>${t('Enum values')}</th><th>${t('Enum captions')}</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -785,7 +858,111 @@ function closeRelPanel() {
   if (p) p.remove();
 }
 
-// ── DOWNLOAD MODAL ────────────────────────────────────────────────────────────
+// ── CHANGELOG STATUS ──────────────────────────────────────────────────────────
+async function fetchChangelogStatus() {
+  const bar = document.getElementById('changelogStatusBar');
+  if (bar) bar.style.display = 'none';
+  try {
+    // Use Customer/Name as a universal anchor to get company-level flags cheaply
+    const res = await cePost({
+      specversion: '1.0',
+      type: 'ChangeLog.Field.Enabled',
+      source: 'Metadata-Explorer v1.0',
+      data: JSON.stringify({ tableName: 'Customer', fieldNo: 2 }),
+    });
+    changeLogEnabled = !!res.changeLogEnabled;
+    changelogWriteGuardEnabled = !!res.changelogWriteGuardEnabled;
+  } catch (e) {
+    // Server may not have changelog capability or Customer table may not exist
+    changeLogEnabled = null;
+    changelogWriteGuardEnabled = null;
+  }
+  renderChangelogStatusBar();
+}
+
+function renderChangelogStatusBar() {
+  const bar = document.getElementById('changelogStatusBar');
+  if (!bar) return;
+
+  if (changeLogEnabled === null) {
+    bar.style.display = 'none';
+    return;
+  }
+
+  const clBadge = changeLogEnabled
+    ? `<span class="cl-badge on"><span class="cl-dot"></span>${t('Change Log')}: ${t('Active')}</span>`
+    : `<span class="cl-badge off"><span class="cl-dot"></span>${t('Change Log')}: ${t('Inactive')}</span>`;
+
+  let guardBadge = '';
+  if (changeLogEnabled) {
+    guardBadge = changelogWriteGuardEnabled
+      ? `<span class="cl-sep"></span><span class="cl-badge guard-on"><span class="cl-dot"></span>${t('Write Guard')}: ${t('Active')}</span>`
+      : `<span class="cl-sep"></span><span class="cl-badge off"><span class="cl-dot"></span>${t('Write Guard')}: ${t('Off')}</span>`;
+  }
+
+  const hint = (changeLogEnabled && changelogWriteGuardEnabled)
+    ? `<span class="cl-sep"></span><span class="cl-hint">${t('Only ChangeLog covered fields can be written')}</span>`
+    : '';
+
+  bar.innerHTML = `<span class="cl-label">Company</span>${clBadge}${guardBadge}${hint}`;
+  bar.style.display = 'flex';
+}
+
+async function fetchTableChangelogCoverage(tableName, fields) {
+  if (changelogCoverageCache[tableName]) return;      // already cached
+  if (coverageFetchInProgress.has(tableName)) return; // in-flight
+
+  coverageFetchInProgress.add(tableName);
+  const results = new Map();
+
+  try {
+    // Exclude FlowFields and binary types — ChangeLog cannot track them
+    const eligible = fields.filter(f =>
+      f.class !== 'FlowField' && !['Blob', 'Media', 'MediaSet'].includes(f.type)
+    );
+
+    const CONCURRENCY = 20;
+    const queue = [...eligible];
+    let active = 0;
+
+    await new Promise(resolve => {
+      function next() {
+        while (active < CONCURRENCY && queue.length) {
+          const f = queue.shift();
+          active++;
+          cePost({
+            specversion: '1.0',
+            type: 'ChangeLog.Field.Enabled',
+            source: 'Metadata-Explorer v1.0',
+            data: JSON.stringify({ tableName, fieldNo: f.id }),
+          })
+          .then(res => { results.set(f.id, !!res.fieldCovered); })
+          .catch(() => { results.set(f.id, null); }) // null = fetch failed for this field
+          .finally(() => {
+            active--;
+            if (queue.length === 0 && active === 0) { resolve(); return; }
+            next();
+          });
+        }
+      }
+      if (eligible.length === 0) { resolve(); return; }
+      next();
+    });
+
+    changelogCoverageCache[tableName] = results;
+  } catch (e) {
+    // Leave entry undefined so user can retry by switching tables
+  } finally {
+    coverageFetchInProgress.delete(tableName);
+  }
+
+  // Re-render field table if this is still the active table
+  if (currentTable && currentTable.name === tableName) {
+    renderFields();
+  }
+}
+
+
 function openDownloadModal(scope){
   downloadScope = scope;
   const sub = scope==='all'

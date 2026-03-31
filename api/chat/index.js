@@ -193,11 +193,11 @@ async function executeTool(name, input, tenantId, env, companyId, auth) {
       const SEARCH_COLS = ["No.", "Description", "Search Description"];
 
       const mapItems = (rows) => (rows || []).map(r => ({
-        itemNo:              r.primaryKey?.["No."] || r.fields?.["No."] || "",
+        itemNo:              r.primaryKey?.["No_"] || "",
         description:         r.fields?.["Description"] || "",
-        baseUnitOfMeasure:   r.fields?.["Base Unit of Measure"] || "",
-        unitPrice:           r.fields?.["Unit Price"] ?? 0,
-        salesUnitOfMeasure:  r.fields?.["Sales Unit of Measure"] || "",
+        baseUnitOfMeasure:   r.fields?.["BaseUnitofMeasure"] || "",
+        unitPrice:           r.fields?.["UnitPrice"] ?? 0,
+        salesUnitOfMeasure:  r.fields?.["SalesUnitofMeasure"] || "",
       }));
 
       // Multi-column search: query each field in parallel via Data.RecordIds.Get
