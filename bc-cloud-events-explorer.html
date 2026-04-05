@@ -325,6 +325,7 @@ let historyItems = [];
 let historyLoaded = false;
 let historySourceFilter = null;
 let currentHistoryIdx = null;
+let savedFormValues = {}; // NEW: Store form values when switching tabs
 
 // ── NETWORK ───────────────────────────────────────────────────────────────────
 function g(id){ return (document.getElementById(id)||{}).value||''; }
@@ -495,6 +496,9 @@ function buildSidebar(){
 
 // ── SELECT TYPE ───────────────────────────────────────────────────────────────
 async function selectType(typeDef){
+  // Save form values from previous type before switching
+  if(currentType && currentTab==='compose') saveFormValues();
+  
   currentType=typeDef.name;
   currentTypeDef=typeDef;
   lastResp=null;
@@ -513,12 +517,20 @@ async function selectType(typeDef){
   document.getElementById('pbar').style.display='none';
   lastQueueId=null;
   document.getElementById('qbar').style.display='none';
+  
+  // Clear saved form values when switching to a different message type
+  savedFormValues = {};
+
+  // For custom types on Compose tab, fetch docs first to enable field discovery
+  if(currentTab==='compose' && !MESSAGE_TYPE_FIELDS[currentType] && !docsCache[currentType]){
+    await prefetchDocs(currentType);
+  }
 
   if(currentTab==='compose') renderCompose();
   else if(currentTab==='preview') renderPreview();
   else await fetchAndRenderDocs();
 
-  // Pre-fetch docs silently
+  // Pre-fetch docs silently for other tabs
   if(!docsCache[currentType]) prefetchDocs(currentType);
 }
 
@@ -529,6 +541,12 @@ async function prefetchDocs(type){
     const res=await cePost({specversion:'1.0',type:'Help.Implementation.Get',source:'BC-Explorer',subject:type});
     docsCache[type]=extractDocs(res)||`_No documentation available for **${type}**._`;
     if(currentType===type && currentTab==='docs') renderDocsFromCache();
+    // If we're on Compose and this type was using fallback, re-render with newly parsed fields
+    if(currentType===type && currentTab==='compose' && !MESSAGE_TYPE_FIELDS[type]){
+      saveFormValues(); // Save current values before re-render
+      renderCompose();
+      restoreFormValues(); // Restore values after re-render with new fields
+    }
   } catch(e){
     docsCache[type]=`*Could not load documentation:* ${e.message}`;
     if(currentType===type && currentTab==='docs') renderDocsFromCache();
@@ -573,13 +591,48 @@ function renderDocsFromCache(){
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
 function switchTab(tab,btn){
+  // Save current form values before switching
+  if(currentTab==='compose') saveFormValues();
+  
   document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   currentTab=tab;
   if(!currentType) return;
-  if(tab==='compose') renderCompose();
+  if(tab==='compose') { renderCompose(); restoreFormValues(); }
   else if(tab==='preview') renderPreview();
   else fetchAndRenderDocs();
+}
+
+// Save all form values to savedFormValues object
+function saveFormValues(){
+  savedFormValues = {};
+  // Save envelope fields
+  const src = document.getElementById('f_source');
+  if(src) savedFormValues.f_source = src.value;
+  const lcid = document.getElementById('f_lcid');
+  if(lcid) savedFormValues.f_lcid = lcid.value;
+  const subj = document.getElementById('f_subject');
+  if(subj) savedFormValues.f_subject = subj.value;
+  const ep = document.getElementById('f_endpoint');
+  if(ep) savedFormValues.f_endpoint = ep.value;
+  const raw = document.getElementById('f_raw');
+  if(raw) savedFormValues.f_raw = raw.value;
+  
+  // Save all data field values (d_ prefix)
+  document.querySelectorAll('[id^="d_"]').forEach(el=>{
+    savedFormValues[el.id] = el.value;
+  });
+}
+
+// Restore form values from savedFormValues object
+function restoreFormValues(){
+  if(!savedFormValues || Object.keys(savedFormValues).length === 0) return;
+  
+  // Restore envelope fields
+  for(const [id, val] of Object.entries(savedFormValues)){
+    const el = document.getElementById(id);
+    if(el && val !== undefined && val !== null) el.value = val;
+  }
 }
 
 // ── COMPOSE ───────────────────────────────────────────────────────────────────
@@ -861,6 +914,42 @@ const MESSAGE_TYPE_FIELDS = {
       {id:'d_batchName',label:'Batch Name (alternative)',ph:'BATCH001',hint:'Alternative to subject'},
     ]
   },
+
+  // ── CHANGELOG OPERATIONS ─────────────────────────────────────────────────
+  'ChangeLog.Field.History': {
+    subject:{label:'Record SystemId (GUID)',ph:'a1b2c3d4-e5f6-7890-abcd-ef1234567890',hint:'Optional if sent via data.recordSystemId',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Customer',hint:'BC table name',req:true},
+      {id:'d_tableNumber',label:'Table Number (alternative)',ph:'18',type:'number',hint:'Alternative to tableName'},
+      {id:'d_recordSystemId',label:'Record SystemId',ph:'a1b2c3d4-e5f6-7890-abcd-ef1234567890',hint:'GUID — record to get history for',req:true},
+      {id:'d_fieldNo',label:'Field Number',ph:'2',type:'number',hint:'Field number to get history for',req:true},
+      {id:'d_fieldId',label:'Field ID (alternative)',ph:'2',type:'number',hint:'Alternative to fieldNo'},
+      {id:'d_fieldName',label:'Field Name (alternative)',ph:'Name',hint:'Alternative to fieldNo'},
+    ]
+  },
+  'ChangeLog.Field.Restore': {
+    subject:{label:'Subject (optional)',ph:'',hint:'Not used for this type',req:false},
+    dataFields:[
+      {id:'d_entryNo',label:'Entry No. (Mode 1)',ph:'56789',type:'number',hint:'Change Log Entry No. from ChangeLog.Field.History'},
+      {id:'d_tableName',label:'Table Name (Mode 2)',ph:'Customer',hint:'Target table — required for point-in-time mode'},
+      {id:'d_tableNumber',label:'Table Number (alternative)',ph:'18',type:'number',hint:'Alternative to tableName'},
+      {id:'d_recordSystemId',label:'Record SystemId (Mode 2)',ph:'a1b2c3d4-e5f6-7890-abcd-ef1234567890',hint:'GUID — required for point-in-time mode'},
+      {id:'d_fieldNo',label:'Field Number (Mode 2)',ph:'2',type:'number',hint:'Field number — required for point-in-time mode'},
+      {id:'d_fieldId',label:'Field ID (alternative)',ph:'2',type:'number',hint:'Alternative to fieldNo'},
+      {id:'d_fieldName',label:'Field Name (alternative)',ph:'Name',hint:'Alternative to fieldNo'},
+      {id:'d_restoreToDateTime',label:'Restore To DateTime (Mode 2)',ph:'2026-02-10T09:15:00Z',hint:'ISO 8601 — finds most recent Modification at or before this time'},
+    ]
+  },
+  'ChangeLog.Field.Enabled': {
+    subject:{label:'Subject (optional)',ph:'',hint:'Not used for this type',req:false},
+    dataFields:[
+      {id:'d_tableName',label:'Table Name',ph:'Customer',hint:'BC table name',req:true},
+      {id:'d_tableNumber',label:'Table Number (alternative)',ph:'18',type:'number',hint:'Alternative to tableName'},
+      {id:'d_fieldNo',label:'Field Number',ph:'2',type:'number',hint:'Field number to check',req:true},
+      {id:'d_fieldId',label:'Field ID (alternative)',ph:'2',type:'number',hint:'Alternative to fieldNo'},
+      {id:'d_fieldName',label:'Field Name (alternative)',ph:'Name',hint:'Alternative to fieldNo'},
+    ]
+  },
 };
 
 function inferFields(name){
@@ -873,6 +962,12 @@ function inferFields(name){
     subjectRequired: exact.subject.req || false,
     dataFields: exact.dataFields || [],
   };
+
+  // Try parsing from documentation if available
+  if(docsCache[name]){
+    const parsed = parseDocsForFields(name, docsCache[name]);
+    if(parsed) return parsed;
+  }
 
   // Fuzzy fallback for unknown/custom message types
   const lc = name.toLowerCase();
@@ -892,8 +987,79 @@ function inferFields(name){
   return {subjectLabel, subjectPlaceholder, subjectHint, subjectRequired, dataFields:[]};
 }
 
+// Parse Help documentation to extract field definitions for custom message types
+function parseDocsForFields(name, markdown){
+  if(!markdown || typeof markdown !== 'string') return null;
+
+  let subjectLabel = 'Subject';
+  let subjectPlaceholder = '';
+  let subjectHint = '';
+  let subjectRequired = false;
+  const dataFields = [];
+
+  // Extract Cloud Event Parameters table
+  const paramTableMatch = markdown.match(/##\s*Cloud Event Parameters[\s\S]*?\|\s*Parameter\s*\|\s*Description\s*\|[\s\S]*?(?=\n##|\n```|$)/i);
+  if(paramTableMatch){
+    const tableText = paramTableMatch[0];
+    const rows = tableText.split('\n').filter(l => l.includes('|') && !l.includes('---'));
+    for(const row of rows){
+      const cells = row.split('|').map(c => c.trim()).filter(c => c);
+      if(cells.length >= 2 && cells[0].toLowerCase() === 'subject'){
+        subjectHint = cells[1];
+        subjectRequired = true;
+        // Extract label from description (e.g., "Customer No. or System ID")
+        if(cells[1].toLowerCase().includes('customer')) subjectLabel = 'Customer No.';
+        else if(cells[1].toLowerCase().includes('item')) subjectLabel = 'Item No.';
+        else if(cells[1].toLowerCase().includes('vendor')) subjectLabel = 'Vendor No.';
+        else if(cells[1].toLowerCase().includes('order')) subjectLabel = 'Order No.';
+        else if(cells[1].toLowerCase().includes('document')) subjectLabel = 'Document No.';
+        else if(cells[1].toLowerCase().includes('table')) subjectLabel = 'Table Name';
+        else subjectLabel = 'Subject';
+      }
+    }
+  }
+
+  // Extract Data Parameters table if present
+  const dataTableMatch = markdown.match(/##\s*Data Parameters[\s\S]*?\|\s*Field\s*\|.*?\|[\s\S]*?(?=\n##|\n```|$)/i);
+  if(dataTableMatch){
+    const tableText = dataTableMatch[0];
+    const rows = tableText.split('\n').filter(l => l.includes('|') && !l.includes('---'));
+    for(let i=1; i<rows.length; i++){
+      const cells = rows[i].split('|').map(c => c.trim()).filter(c => c);
+      if(cells.length >= 2 && cells[0] && cells[0] !== 'Field'){
+        const fieldName = cells[0].replace(/`/g, '');
+        const description = cells[1] || '';
+        const type = cells.length >= 3 ? cells[2] : 'text';
+        const required = description.toLowerCase().includes('required');
+        dataFields.push({
+          name: fieldName,
+          label: fieldName.replace(/_/g, ' '),
+          type: type.toLowerCase().includes('number') ? 'number' : 
+                type.toLowerCase().includes('date') ? 'date' : 'text',
+          req: required,
+          hint: description
+        });
+      }
+    }
+  }
+
+  // If we found meaningful information, return it
+  if(subjectRequired || dataFields.length > 0){
+    return {subjectLabel, subjectPlaceholder, subjectHint, subjectRequired, dataFields};
+  }
+
+  return null;
+}
+
 function renderCompose(){
   if(!currentType) return;
+  
+  // Show loading state for custom types while docs are being fetched
+  if(!MESSAGE_TYPE_FIELDS[currentType] && !docsCache[currentType]){
+    document.getElementById('mbody').innerHTML=`<div class="est"><span class="spinner" style="width:18px;height:18px;border-width:2px"></span><div>Loading field definitions from Help.Implementation.Get…</div></div>`;
+    return;
+  }
+  
   const inf=inferFields(currentType);
   const subjectLabel=inf.subjectLabel;
   const subjectPh=inf.subjectPlaceholder||subjectLabel;
