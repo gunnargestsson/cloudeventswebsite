@@ -194,12 +194,14 @@ textarea{resize:vertical;min-height:68px;line-height:1.5}
         Docs <span id="docsSpinner" style="display:none"><span class="spinner" style="width:9px;height:9px;border-width:1.5px"></span></span>
       </button>
     </div>
-    <div class="mbody" id="mbody">
+    <div class="mbody" id="pane-compose">
       <div class="est">
         <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         <div>Connect and select a message type<br>to compose and send requests</div>
       </div>
     </div>
+    <div class="mbody" id="pane-preview" style="display:none"></div>
+    <div class="mbody" id="pane-docs" style="display:none"></div>
     <div class="send-bar">
       <button class="btn-send" id="sendBtn" onclick="sendReq()" disabled>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21L23 12 2 3v7l15 2-15 2v7z"/></svg>
@@ -325,7 +327,7 @@ let historyItems = [];
 let historyLoaded = false;
 let historySourceFilter = null;
 let currentHistoryIdx = null;
-let savedFormValues = {}; // NEW: Store form values when switching tabs
+let savedFormValues = {}; // Preserve form values when compose pane is re-rendered (custom type doc discovery)
 
 // ── NETWORK ───────────────────────────────────────────────────────────────────
 function g(id){ return (document.getElementById(id)||{}).value||''; }
@@ -496,9 +498,6 @@ function buildSidebar(){
 
 // ── SELECT TYPE ───────────────────────────────────────────────────────────────
 async function selectType(typeDef){
-  // Save form values from previous type before switching
-  if(currentType && currentTab==='compose') saveFormValues();
-  
   currentType=typeDef.name;
   currentTypeDef=typeDef;
   lastResp=null;
@@ -517,20 +516,22 @@ async function selectType(typeDef){
   document.getElementById('pbar').style.display='none';
   lastQueueId=null;
   document.getElementById('qbar').style.display='none';
-  
-  // Clear saved form values when switching to a different message type
-  savedFormValues = {};
 
-  // For custom types on Compose tab, fetch docs first to enable field discovery
-  if(currentTab==='compose' && !MESSAGE_TYPE_FIELDS[currentType] && !docsCache[currentType]){
+  // For custom types, fetch docs first to enable field discovery before rendering the form
+  if(!MESSAGE_TYPE_FIELDS[currentType] && !docsCache[currentType]){
     await prefetchDocs(currentType);
   }
 
-  if(currentTab==='compose') renderCompose();
-  else if(currentTab==='preview') renderPreview();
-  else await fetchAndRenderDocs();
+  // Always render compose pane — form elements must be in DOM for buildEnvelope to work
+  renderCompose();
+  // Clear stale preview content for this type
+  document.getElementById('pane-preview').innerHTML='';
 
-  // Pre-fetch docs silently for other tabs
+  // Render the currently active tab's content
+  if(currentTab==='preview') renderPreview();
+  else if(currentTab==='docs') fetchAndRenderDocs();
+
+  // Pre-fetch docs silently so Docs tab is ready instantly
   if(!docsCache[currentType]) prefetchDocs(currentType);
 }
 
@@ -541,11 +542,12 @@ async function prefetchDocs(type){
     const res=await cePost({specversion:'1.0',type:'Help.Implementation.Get',source:'BC-Explorer',subject:type});
     docsCache[type]=extractDocs(res)||`_No documentation available for **${type}**._`;
     if(currentType===type && currentTab==='docs') renderDocsFromCache();
-    // If we're on Compose and this type was using fallback, re-render with newly parsed fields
-    if(currentType===type && currentTab==='compose' && !MESSAGE_TYPE_FIELDS[type]){
-      saveFormValues(); // Save current values before re-render
+    // If this type uses field discovery from docs, re-render compose pane with the new fields
+    if(currentType===type && !MESSAGE_TYPE_FIELDS[type]){
+      saveFormValues(); // Preserve any values the user may have typed
       renderCompose();
-      restoreFormValues(); // Restore values after re-render with new fields
+      restoreFormValues();
+      if(currentTab==='preview') renderPreview(); // Refresh preview if it's the active tab
     }
   } catch(e){
     docsCache[type]=`*Could not load documentation:* ${e.message}`;
@@ -572,7 +574,7 @@ function extractDocs(res){
 async function fetchAndRenderDocs(){
   if(docsCache[currentType]){ renderDocsFromCache(); return; }
   document.getElementById('docsSpinner').style.display='inline';
-  document.getElementById('mbody').innerHTML=`<div class="est"><span class="spinner" style="width:18px;height:18px;border-width:2px"></span><div>Calling Help.Implementation.Get<br>for <strong style="color:var(--accent)">${esc(currentType)}</strong>…</div></div>`;
+  document.getElementById('pane-docs').innerHTML=`<div class="est"><span class="spinner" style="width:18px;height:18px;border-width:2px"></span><div>Calling Help.Implementation.Get<br>for <strong style="color:var(--accent)">${esc(currentType)}</strong>…</div></div>`;
   try{
     const res=await cePost({specversion:'1.0',type:'Help.Implementation.Get',source:'BC-Explorer',subject:currentType});
     docsCache[currentType]=extractDocs(res)||`_No documentation returned for **${currentType}**._`;
@@ -586,21 +588,24 @@ async function fetchAndRenderDocs(){
 
 function renderDocsFromCache(){
   const md=docsCache[currentType]||'';
-  document.getElementById('mbody').innerHTML=`<div class="docs-body">${mdToHtml(md)}</div>`;
+  document.getElementById('pane-docs').innerHTML=`<div class="docs-body">${mdToHtml(md)}</div>`;
 }
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
+function showPane(name){
+  document.getElementById('pane-compose').style.display=name==='compose'?'flex':'none';
+  document.getElementById('pane-preview').style.display=name==='preview'?'flex':'none';
+  document.getElementById('pane-docs').style.display=name==='docs'?'flex':'none';
+}
+
 function switchTab(tab,btn){
-  // Save current form values before switching
-  if(currentTab==='compose') saveFormValues();
-  
   document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   currentTab=tab;
+  showPane(tab);
   if(!currentType) return;
-  if(tab==='compose') { renderCompose(); restoreFormValues(); }
-  else if(tab==='preview') renderPreview();
-  else fetchAndRenderDocs();
+  if(tab==='preview') renderPreview();
+  else if(tab==='docs') fetchAndRenderDocs();
 }
 
 // Save all form values to savedFormValues object
@@ -1056,7 +1061,7 @@ function renderCompose(){
   
   // Show loading state for custom types while docs are being fetched
   if(!MESSAGE_TYPE_FIELDS[currentType] && !docsCache[currentType]){
-    document.getElementById('mbody').innerHTML=`<div class="est"><span class="spinner" style="width:18px;height:18px;border-width:2px"></span><div>Loading field definitions from Help.Implementation.Get…</div></div>`;
+    document.getElementById('pane-compose').innerHTML=`<div class="est"><span class="spinner" style="width:18px;height:18px;border-width:2px"></span><div>Loading field definitions from Help.Implementation.Get…</div></div>`;
     return;
   }
   
@@ -1104,7 +1109,7 @@ function renderCompose(){
     <span style="font-size:9.5px;color:var(--text3)">Switch to <strong style="color:var(--accent)">Docs</strong> tab to see implementation details fetched live via <code>Help.Implementation.Get</code>.</span>
   </div>`;
 
-  document.getElementById('mbody').innerHTML=html;
+  document.getElementById('pane-compose').innerHTML=html;
   const lcidEl=document.getElementById('f_lcid');
   if(lcidEl){ const saved=bcSettingsLoad().lcid; if(saved) lcidEl.value=saved; }
 }
@@ -1163,11 +1168,18 @@ function buildEnvelope(){
 // ── PREVIEW ───────────────────────────────────────────────────────────────────
 function renderPreview(){
   if(!currentType) return;
+  const html=buildPreviewHtml();
+  if(!html) return;
+  document.getElementById('pane-preview').innerHTML=html;
+}
+
+function buildPreviewHtml(){
+  if(!currentType || !document.getElementById('f_source')) return null;
   const env=buildEnvelope();
   const endpoint=document.getElementById('f_endpoint')?.value?.split(' ')[0]||'tasks';
   const _s=bcSettingsLoad(), ten=_s.tenant||'{tenantId}', en=_s.env||'{env}', co=_s.companyId||'{companyId}';
   const url=`https://api.businesscentral.dynamics.com/v2.0/${ten}/${en}/api/origo/cloudEvent/v1.0/companies(${co})/${endpoint}`;
-  document.getElementById('mbody').innerHTML=`
+  return `
     <div class="slbl">POST Request</div>
     <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px">
       <span class="mb-post">POST</span>
@@ -1463,6 +1475,7 @@ async function openHistoryItem(idx){
     document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
     document.getElementById('tab-compose').classList.add('active');
     currentTab = 'compose';
+    showPane('compose');
     renderCompose();
 
     // Populate envelope fields from the history item immediately
@@ -1495,7 +1508,7 @@ async function openHistoryItem(idx){
       }).catch(err=>{ console.warn('fetch-request failed:', err); });
     }
   } else {
-    document.getElementById('mbody').innerHTML = `<div class="info-box"><strong>${esc(item.type||'?')}</strong><br>
+    document.getElementById('pane-compose').innerHTML = `<div class="info-box"><strong>${esc(item.type||'?')}</strong><br>
       <span style="font-size:9.5px;color:var(--text3)">Type not found in current types list. Result shown in response panel.</span></div>`;
   }
 
