@@ -3088,6 +3088,20 @@ async function toolCheckStandardsStatus({ githubToken, standardsRepo, claudeDir 
     }
   } catch (_) {}
 
+  // ── 5c. Workflows junction ──────────────────────────────────────────────────
+  const workflowsPath = claudePath ? `${claudePath}${sep}workflows` : "";
+  let workflowsExists = false, workflowsIsLink = false, workflowsFileCount = 0;
+  try {
+    if (workflowsPath) {
+      const stat = fs.lstatSync(workflowsPath);
+      workflowsExists = true;
+      workflowsIsLink = stat.isSymbolicLink();
+      try {
+        workflowsFileCount = fs.readdirSync(workflowsPath).filter(f => f.endsWith(".yaml") || f.endsWith(".yml")).length;
+      } catch (_) {}
+    }
+  } catch (_) {}
+
   // ── 6. mcp.json ─────────────────────────────────────────────────────────────
   const mcpJsonPath = appData ? `${appData}\\Code\\User\\mcp.json` : "";
   let mcpExists = false, mcpHasBcOrigo = false;
@@ -3120,9 +3134,10 @@ async function toolCheckStandardsStatus({ githubToken, standardsRepo, claudeDir 
   const claudeMdOk    = claudeMdExists && claudeMdInSync;
   const junctionOk    = junctionExists && junctionIsLink;
   const prGatewayOk   = prGatewayExists && prGatewayIsLink;
+  const workflowsOk   = workflowsExists && workflowsIsLink;
   const mcpConfigured = mcpHasBcOrigo && mcpHasEncConn && mcpHasGithubToken && mcpHasStdRepo && mcpHasClaudeDir;
   const allGood       = repoExists && repoIsGit && claudeExists && claudeMdOk
-                     && junctionOk && prGatewayOk && mcpConfigured && !!gitVersion
+                     && junctionOk && prGatewayOk && workflowsOk && mcpConfigured && !!gitVersion
                      && (upToDate === true || (upToDate === null && !githubReachable && repoExists));
 
   const ck = (v) => v ? "\u2705" : "\u274C";  // ✅ ❌
@@ -3168,6 +3183,7 @@ async function toolCheckStandardsStatus({ githubToken, standardsRepo, claudeDir 
     bar(`  ${ck(claudeMdOk)}  CLAUDE.md applied and in sync`),
     bar(`  ${ck(junctionOk)}  Skills junction active         : ${skillCount} skills found`),
     bar(`  ${ck(prGatewayOk)}  PR Gateway junction active     : ${prGatewayHasFile ? "PR-GATEWAY.md found" : "not found"}`),
+    bar(`  ${ck(workflowsOk)}  Workflows junction active      : ${workflowsFileCount} workflow(s) found`),
     bar(`  ${ck(mcpConfigured)}  mcp.json configured`),
     bar(`  ${ck(!!gitVersion)}  Git available                  : ${gitVer}`),
     bar(`  ${ck(!!nodeVersion)}  Node available                 : ${nodeVer}`),
@@ -3202,6 +3218,9 @@ async function toolCheckStandardsStatus({ githubToken, standardsRepo, claudeDir 
       action: 'Ask Claude: "Set up my Origo BC development environment"' });
   if (!prGatewayOk)
     nextSteps.push({ icon: "\u274C", item: "PR Gateway junction is missing or broken",
+      action: 'Ask Claude: "Set up my Origo BC development environment"' });
+  if (!workflowsOk)
+    nextSteps.push({ icon: "\u274C", item: "Workflows junction is missing or broken",
       action: 'Ask Claude: "Set up my Origo BC development environment"' });
   if (!mcpExists)
     nextSteps.push({ icon: "\u274C", item: "mcp.json not found",
@@ -3275,7 +3294,7 @@ async function toolUpdateBcStandards({ standardsRepo, claudeDir } = {}) {
     updated: beforeSha !== afterSha,
     commits,
     claudeMdCopied: claudeMdDest,
-    note: "Skills and pr-gateway folders update automatically via the existing directory junctions.",
+    note: "Skills, pr-gateway, and workflows folders update automatically via the existing directory junctions.",
   };
 }
 
@@ -3397,6 +3416,28 @@ async function toolSetupOrigoEnv({ standardsRepo, claudeDir } = {}) {
       steps.push({ step: "Create pr-gateway junction", status: "✅", detail: `${prGatewayLink} → ${prGatewayTarget}` });
     } catch (e) {
       steps.push({ step: "Create pr-gateway junction", status: "❌", detail: e.message });
+    }
+  }
+
+  // 7. Create junction: claudeDir\workflows → standardsRepo\workflows
+  const workflowsLink   = `${claudePath}${sep}workflows`;
+  const workflowsTarget = `${repoPath}${sep}workflows`;
+  
+  if (!isWindows) {
+    steps.push({ 
+      step: "Create workflows junction", 
+      status: "⚠️", 
+      detail: "Skipped: non-Windows platforms are not fully supported. Manually create symlink with: ln -s \"" + workflowsTarget + "\" \"" + workflowsLink + "\""
+    });
+  } else {
+    try {
+      if (fs.existsSync(workflowsLink)) {
+        execSync(`Remove-Item -Path "${workflowsLink}" -Force -Recurse`, { stdio: "pipe", encoding: "utf8", shell: "powershell.exe" });
+      }
+      execSync(`New-Item -ItemType Junction -Path "${workflowsLink}" -Target "${workflowsTarget}"`, { stdio: "pipe", encoding: "utf8", shell: "powershell.exe" });
+      steps.push({ step: "Create workflows junction", status: "✅", detail: `${workflowsLink} → ${workflowsTarget}` });
+    } catch (e) {
+      steps.push({ step: "Create workflows junction", status: "❌", detail: e.message });
     }
   }
 
